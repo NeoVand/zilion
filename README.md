@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" width="140" alt="Zilion logo" />
+  <img src="assets/logo.png" width="160" alt="Zilion logo" />
 </p>
 
 <h1 align="center">Zilion</h1>
