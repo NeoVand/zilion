@@ -91,6 +91,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 	cpu_h2 = (get16(rb, 11u) >> 8u) & 0xffu; cpu_l2 = get16(rb, 11u) & 0xffu;
 	cpu_halted = 0u;
 	cpu_iff1 = 0u; cpu_iff2 = 0u;
+	cpu_i = 0u; cpu_r = 0u;
 	idx_mode = 0u; idx_disp = 0u; idx_uses_mem = 0u;
 
 	// Run.

@@ -83,6 +83,20 @@ export const VECTORS = [
 		program: [0x01, 0x34, 0x12, 0xc5, 0xe1, 0x76],
 		steps: 16,
 		check: (r) => (r.hl === 0x1234 ? null : `HL=${r.hl.toString(16)} want 1234`)
+	},
+	{
+		// HALT stops execution: the INC A after HALT must not run, so A stays 5.
+		name: 'HALT stops execution',
+		program: [0x3e, 0x05, 0x76, 0x3c],
+		steps: 16,
+		check: (r) => (hi(r.af) === 5 ? null : `A=${hi(r.af)} want 5 (INC after HALT ran?)`)
+	},
+	{
+		// LD A,R after two M1 fetches (ED, 5F): R has incremented to 2 -> A=2.
+		name: 'LD A,R reflects M1 refresh count',
+		program: [0xed, 0x5f, 0x76],
+		steps: 8,
+		check: (r) => (hi(r.af) === 2 ? null : `A=${hi(r.af).toString(16)} want 2`)
 	}
 ];
 

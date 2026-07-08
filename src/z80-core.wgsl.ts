@@ -29,6 +29,11 @@ var<private> cpu_iff1: u32;
 var<private> cpu_iff2: u32;
 var<private> cpu_ix: u32;
 var<private> cpu_iy: u32;
+var<private> cpu_i: u32; // interrupt vector register (I)
+var<private> cpu_r: u32; // memory refresh register (R); bits 0-6 count M1 cycles, bit 7 preserved
+
+// Increment R once per M1 (opcode/prefix) fetch: 7-bit counter, bit 7 preserved.
+fn r_inc() { cpu_r = (cpu_r & 0x80u) | ((cpu_r + 1u) & 0x7fu); }
 // Index-prefix state for the instruction currently executing:
 //   idx_mode: 0 = HL, 1 = IX, 2 = IY
 //   idx_disp: sign-extended displacement for (IX+d)/(IY+d)
@@ -407,6 +412,7 @@ fn z80_cb_rot(op: u32, val: u32) -> u32 {
 
 fn z80_exec_cb() {
     let op = z80_fetch();
+    r_inc(); // M1: CB-page opcode fetch
     let x = (op >> 6u) & 3u;
     let y = (op >> 3u) & 7u;
     let z = op & 7u;
@@ -514,6 +520,7 @@ fn z80_cpd() {
 // === ED Prefix ===
 fn z80_exec_ed() {
     let op = z80_fetch();
+    r_inc(); // M1: ED-page opcode fetch
     switch(op) {
         case 0xa0u: { z80_ldi(); }
         case 0xa8u: { z80_ldd(); }
@@ -532,12 +539,12 @@ fn z80_exec_ed() {
             cpu_iff1 = cpu_iff2; cpu_pc = z80_pop16();
         }
         // LD I,A / LD R,A / LD A,I / LD A,R
-        case 0x47u: {} // LD I,A - no I register in our sim
-        case 0x4fu: {} // LD R,A
-        // LD A,I / LD A,R: I and R are not modelled (treated as 0), so A becomes 0.
-        // Flags: S/Z from the loaded value, PF = IFF2, N/H reset, C preserved.
-        case 0x57u: { cpu_a = 0u; cpu_f = (cpu_f & CF) | sz_flags(0u) | select(0u, PF, cpu_iff2 != 0u); }
-        case 0x5fu: { cpu_a = 0u; cpu_f = (cpu_f & CF) | sz_flags(0u) | select(0u, PF, cpu_iff2 != 0u); }
+        case 0x47u: { cpu_i = cpu_a; } // LD I,A
+        case 0x4fu: { cpu_r = cpu_a; } // LD R,A
+        // LD A,I / LD A,R: load I or R into A. Flags: S/Z (+F3/F5) from the loaded
+        // value, PF = IFF2, N/H reset, C preserved.
+        case 0x57u: { cpu_a = cpu_i; cpu_f = (cpu_f & CF) | sz_flags(cpu_i) | select(0u, PF, cpu_iff2 != 0u); }
+        case 0x5fu: { cpu_a = cpu_r; cpu_f = (cpu_f & CF) | sz_flags(cpu_r) | select(0u, PF, cpu_iff2 != 0u); }
         // LD (nn), rr
         case 0x43u, 0x53u, 0x63u, 0x73u: {
             let nn = z80_fetch_word();
@@ -737,7 +744,12 @@ fn z80_execute(op: u32) {
     switch(x) {
         case 0u: { z80_exec_x0(y, z, p, q); }
         case 1u: {
-            if (y == 6u && z == 6u) { cpu_halted = 1u; }
+            if (y == 6u && z == 6u) {
+                // HALT: mark halted and back PC up onto the HALT opcode so the
+                // CPU re-executes it every step until an interrupt.
+                cpu_halted = 1u;
+                cpu_pc = (cpu_pc - 1u) & 0xffffu;
+            }
             else { set_reg(y, get_reg(z)); }
         }
         case 2u: { z80_alu(y, get_reg(z)); }
@@ -747,17 +759,21 @@ fn z80_execute(op: u32) {
 }
 
 fn z80_step() {
-    if (cpu_halted != 0u) { return; }
+    // While halted, the CPU keeps executing HALT: each step is an M1 fetch of
+    // the same opcode (R increments), PC stays put. It resumes only on interrupt.
+    if (cpu_halted != 0u) { r_inc(); return; }
     // Reset per-instruction index-prefix state.
     idx_mode = 0u;
     idx_uses_mem = 0u;
     idx_disp = 0u;
 
     var op = z80_fetch();
+    r_inc(); // M1: opcode (or prefix) fetch
     // A DD/FD prefix selects IX/IY for the following opcode.
     if (op == 0xddu || op == 0xfdu) {
         idx_mode = select(2u, 1u, op == 0xddu);
         let next = z80_fetch();
+        r_inc(); // M1: opcode after the prefix
         // A prefix immediately followed by another prefix or ED is a wasted M1:
         // this step consumes just the prefix; back up so the next step restarts
         // at the following byte (matches real Z80 timing and avoids an
