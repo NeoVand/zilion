@@ -602,9 +602,44 @@ fn z80_exec_ed() {
             cpu_a = (cpu_a & 0xf0u) | (m >> 4u);
             cpu_f = (cpu_f & CF) | sz_flags(cpu_a) | select(0u, PF, parity(cpu_a));
         }
-        // IN r,(C) - simplified, just set to 0
+        // IN r,(C): no I/O device, so the port reads 0. Store it (except for the
+        // reg-6 form IN (C), which only sets flags) and set S/Z/F3/F5/P flags.
         case 0x40u, 0x48u, 0x50u, 0x58u, 0x60u, 0x68u, 0x70u, 0x78u: {
-            set_reg((op >> 3u) & 7u, 0u);
+            let val = 0u;
+            let reg = (op >> 3u) & 7u;
+            if (reg != 6u) { set_reg(reg, val); }
+            cpu_f = (cpu_f & CF) | sz_flags(val) | select(0u, PF, parity(val));
+        }
+        // Block input: INI (A2) / IND (AA) / INIR (B2) / INDR (BA). No I/O
+        // device, so the port reads 0. Writes it to (HL), decrements B, moves HL,
+        // sets the block-I/O flags, and repeats (R-forms) while B != 0.
+        case 0xa2u, 0xaau, 0xb2u, 0xbau: {
+            let val = 0u;
+            mem_write(get_hl(), val);
+            cpu_b = (cpu_b - 1u) & 0xffu;
+            let dec = (op & 0x08u) != 0u;
+            let s = (val + cpu_c) & 0xffu;
+            let other = select((s + 1u) & 0xffu, (s - 1u) & 0xffu, dec);
+            cpu_f = select(0u, NF, (val & 0x80u) != 0u) |
+                    select(0u, HF | CF, other < val) |
+                    select(0u, PF, parity((other & 7u) ^ cpu_b)) |
+                    sz_flags(cpu_b);
+            if (dec) { set_hl((get_hl() - 1u) & 0xffffu); } else { set_hl((get_hl() + 1u) & 0xffffu); }
+            if ((op & 0x10u) != 0u && cpu_b != 0u) { cpu_pc = (cpu_pc - 2u) & 0xffffu; }
+        }
+        // Block output: OUTI (A3) / OUTD (AB) / OTIR (B3) / OTDR (BB). Reads (HL),
+        // decrements B, moves HL, sends to the (absent) port, sets flags, repeats.
+        case 0xa3u, 0xabu, 0xb3u, 0xbbu: {
+            let val = mem_read(get_hl());
+            cpu_b = (cpu_b - 1u) & 0xffu;
+            let dec = (op & 0x08u) != 0u;
+            if (dec) { set_hl((get_hl() - 1u) & 0xffffu); } else { set_hl((get_hl() + 1u) & 0xffffu); }
+            let other = (val + cpu_l) & 0xffu;
+            cpu_f = select(0u, NF, (val & 0x80u) != 0u) |
+                    select(0u, HF | CF, other < val) |
+                    select(0u, PF, parity((other & 7u) ^ cpu_b)) |
+                    sz_flags(cpu_b);
+            if ((op & 0x10u) != 0u && cpu_b != 0u) { cpu_pc = (cpu_pc - 2u) & 0xffffu; }
         }
         default: {} // unknown ED ops = NOP
     }
