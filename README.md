@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/zilion"><img alt="npm" src="https://img.shields.io/npm/v/zilion?color=FF4D6D"></a>
+  <a href="https://www.npmjs.com/package/@neovand/zilion"><img alt="npm" src="https://img.shields.io/npm/v/@neovand/zilion?color=FF4D6D"></a>
   <img alt="license" src="https://img.shields.io/badge/license-MIT-8A5CFF">
   <img alt="webgpu" src="https://img.shields.io/badge/WebGPU-compute-FFB020">
   <img alt="types" src="https://img.shields.io/badge/types-TypeScript-3178C6">
@@ -46,7 +46,7 @@ Zilion turns "run N Z80s" into one GPU dispatch instead of N CPU loops.
 ## Install
 
 ```bash
-npm install zilion
+npm install @neovand/zilion
 ```
 
 Requires an environment with [WebGPU](https://caniuse.com/webgpu) (Chrome/Edge 113+, Safari 18+, Firefox 141+, or Node 22+ with a WebGPU backend).
@@ -54,7 +54,7 @@ Requires an environment with [WebGPU](https://caniuse.com/webgpu) (Chrome/Edge 1
 ## Quick start
 
 ```ts
-import { Zilion } from 'zilion';
+import { Zilion } from '@neovand/zilion';
 
 const z80 = await Zilion.create({ memBytes: 256 });
 

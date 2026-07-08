@@ -1,6 +1,9 @@
 {
-	"name": "zilion",
+	"name": "@neovand/zilion",
 	"version": "0.1.0",
+	"publishConfig": {
+		"access": "public"
+	},
 	"description": "A zillion Z80s in parallel on your GPU — a WebGPU-accelerated, differentially-tested Z80 CPU emulator for batch execution, artificial life, and genetic programming.",
 	"type": "module",
 	"main": "./dist/index.js",
