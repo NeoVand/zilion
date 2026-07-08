@@ -32,10 +32,7 @@ export function buildComputeShader(memBytes: number): string {
 	if (memBytes < 4 || (memBytes & (memBytes - 1)) !== 0) {
 		throw new Error(`memBytes must be a power of two >= 4 (got ${memBytes})`);
 	}
-	const core = Z80_CORE_WGSL.replaceAll('__MEM_SIZE__', String(memBytes)).replaceAll(
-		'__MEM_MASK__',
-		String(memBytes - 1)
-	);
+	const mask = memBytes - 1;
 
 	return /* wgsl */ `
 struct Params {
@@ -49,7 +46,15 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> regs_out: array<u32>;
 @group(0) @binding(3) var<storage, read> regs_in: array<u32>;
 
-${core}
+// --- Host contract for the Z80 core (see z80-core.wgsl.ts) ---
+// Per-instance memory: one byte per u32 slot in a private array. The 16-bit
+// address space wraps onto memBytes (a power of two) via a mask.
+var<private> mem: array<u32, ${memBytes}u>;
+fn mem_read(addr: u32) -> u32 { return mem[addr & ${mask}u]; }
+fn mem_write(addr: u32, val: u32) { mem[addr & ${mask}u] = val & 0xffu; }
+fn on_fetch_opcode(op: u32) -> bool { return false; } // no suppression by default
+
+${Z80_CORE_WGSL}
 
 fn get16(base: u32, idx: u32) -> u32 { return regs_in[base + idx] & 0xffffu; }
 

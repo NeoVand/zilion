@@ -38,10 +38,13 @@ var<private> idx_mode: u32;
 var<private> idx_disp: u32;
 var<private> idx_uses_mem: u32;
 
-// Per-instance memory (private): one byte per u32. Size is templated at
-// shader-generation time and must be a power of two so addresses can wrap
-// with a mask. The 16-bit address space folds onto this buffer.
-var<private> mem: array<u32, __MEM_SIZE__>;
+// HOST CONTRACT: the host shader must declare the following BEFORE this core:
+//   fn mem_read(addr: u32) -> u32               // read one byte from memory
+//   fn mem_write(addr: u32, val: u32)           // write one byte to memory
+//   fn on_fetch_opcode(op: u32) -> bool         // return true to skip (NOP) an
+//                                               // opcode after prefix resolution
+// This lets the host choose the memory model (mask, modulo, storage buffer, …)
+// and hook opcode execution (e.g. instruction suppression). See buildComputeShader.
 
 // Z80 flag bits
 const CF: u32 = 0x01u;
@@ -53,14 +56,6 @@ const F5: u32 = 0x20u;
 const ZF: u32 = 0x40u;
 const SFl: u32 = 0x80u;
 
-// === Memory Access ===
-fn mem_read(addr: u32) -> u32 {
-    return mem[addr & __MEM_MASK__u];
-}
-
-fn mem_write(addr: u32, val: u32) {
-    mem[addr & __MEM_MASK__u] = val & 0xffu;
-}
 
 fn z80_fetch() -> u32 {
     let val = mem_read(cpu_pc);
@@ -773,6 +768,9 @@ fn z80_step() {
         }
         op = next;
     }
+
+    // Host hook: skip execution (treat as NOP) if requested.
+    if (on_fetch_opcode(op)) { return; }
 
     if (idx_mode != 0u) {
         if (op == 0xcbu) {
