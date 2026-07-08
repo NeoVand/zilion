@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Zilion — conformance</title>
+		<style>
+			body {
+				background: #0c0c10;
+				color: #e8e4e0;
+				font: 14px/1.6 ui-monospace, Menlo, monospace;
+				padding: 32px;
+			}
+			.pass {
+				color: #58d68d;
+			}
+			.fail {
+				color: #ff6b81;
+			}
+			h1 {
+				font-size: 18px;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>Zilion conformance</h1>
+		<pre id="out">Running… (build first: `npm run build`)</pre>
+		<script type="module">
+			import { runConformance } from './conformance.js';
+			const out = document.getElementById('out');
+			try {
+				const rep = await runConformance();
+				const lines = rep.results.map(
+					(r) => `<span class="${r.ok ? 'pass' : 'fail'}">${r.ok ? 'PASS' : 'FAIL'}</span>  ${r.name} — ${r.detail}`
+				);
+				lines.push('');
+				lines.push(
+					`<span class="${rep.parallel.ok ? 'pass' : 'fail'}">${rep.parallel.ok ? 'PASS' : 'FAIL'}</span>  ${rep.parallel.count.toLocaleString()} parallel in ${rep.parallel.ms.toFixed(1)} ms`
+				);
+				lines.push('');
+				lines.push(`${rep.passed}/${rep.total} vectors passed`);
+				out.innerHTML = lines.join('\n');
+			} catch (e) {
+				out.innerHTML = `<span class="fail">${e.message}</span>`;
+			}
+		</script>
+	</body>
+</html>

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Zilion — WebGPU Z80 demo</title>
+		<style>
+			body {
+				margin: 0;
+				min-height: 100vh;
+				display: grid;
+				place-items: center;
+				background: #0c0c10;
+				color: #e8e4e0;
+				font: 15px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+			}
+			.card {
+				width: min(720px, 92vw);
+				padding: 28px 32px;
+				background: #14141b;
+				border: 1px solid #2a2a36;
+				border-radius: 16px;
+			}
+			h1 {
+				margin: 0 0 4px;
+				font-size: 22px;
+				background: linear-gradient(120deg, #ffb020, #ff4d6d, #8a5cff);
+				-webkit-background-clip: text;
+				background-clip: text;
+				color: transparent;
+			}
+			pre {
+				white-space: pre-wrap;
+				margin: 16px 0 0;
+			}
+			.pass {
+				color: #58d68d;
+			}
+			.fail {
+				color: #ff6b81;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="card">
+			<h1>Zilion</h1>
+			<div>A zillion Z80s in parallel, on your GPU.</div>
+			<pre id="out">Running…</pre>
+		</div>
+
+		<!-- Uses the built package. From the repo root: `npm run build`, then serve this file. -->
+		<script type="module">
+			import { Zilion } from '../dist/index.js';
+
+			const out = document.getElementById('out');
+			const log = (html) => (out.innerHTML += '\n' + html);
+
+			try {
+				out.textContent = '';
+				const z80 = await Zilion.create({ memBytes: 256 });
+
+				// LD A,0x42 ; INC A ; HALT
+				let r = await z80.run([[0x3e, 0x42, 0x3c, 0x76]], { steps: 16 });
+				const a = r.registers[0].af >> 8;
+				log(`<span class="${a === 0x43 ? 'pass' : 'fail'}">A = 0x${a.toString(16)} (expected 0x43)</span>`);
+
+				// LD HL,0x10 ; LD (HL),0xAB ; HALT
+				r = await z80.run([[0x21, 0x10, 0x00, 0x36, 0xab, 0x76]], { steps: 16 });
+				const m = r.memoryOf(0)[0x10];
+				log(`<span class="${m === 0xab ? 'pass' : 'fail'}">mem[16] = 0x${m.toString(16)} (expected 0xab)</span>`);
+
+				// 100,000 programs in parallel
+				const N = 100_000;
+				const progs = Array.from({ length: N }, () => [0x3e, 0x00, 0x3c, 0x3c, 0x3c, 0x76]);
+				const t0 = performance.now();
+				r = await z80.run(progs, { steps: 16 });
+				const dt = performance.now() - t0;
+				const ok = r.registers.every((x) => (x.af >> 8) === 3);
+				log(
+					`<span class="${ok ? 'pass' : 'fail'}">${N.toLocaleString()} Z80s in ${dt.toFixed(1)} ms → all A=3</span>`
+				);
+
+				z80.destroy();
+			} catch (e) {
+				log(`<span class="fail">${e.message}</span>`);
+			}
+		</script>
+	</body>
+</html>

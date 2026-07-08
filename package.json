@@ -1,0 +1,57 @@
+{
+	"name": "zilion",
+	"version": "0.1.0",
+	"description": "A zillion Z80s in parallel on your GPU — a WebGPU-accelerated, differentially-tested Z80 CPU emulator for batch execution, artificial life, and genetic programming.",
+	"type": "module",
+	"main": "./dist/index.js",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"prepublishOnly": "npm run build",
+		"typecheck": "tsc -p tsconfig.json --noEmit"
+	},
+	"keywords": [
+		"z80",
+		"zilog",
+		"cpu",
+		"emulator",
+		"webgpu",
+		"gpu",
+		"gpgpu",
+		"wgsl",
+		"parallel",
+		"artificial-life",
+		"alife",
+		"genetic-programming",
+		"assembly",
+		"8-bit",
+		"retro"
+	],
+	"author": "NeoVand",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/NeoVand/zilion.git"
+	},
+	"homepage": "https://github.com/NeoVand/zilion#readme",
+	"bugs": {
+		"url": "https://github.com/NeoVand/zilion/issues"
+	},
+	"devDependencies": {
+		"@webgpu/types": "^0.1.60",
+		"typescript": "^5.6.0"
+	},
+	"sideEffects": false
+}
