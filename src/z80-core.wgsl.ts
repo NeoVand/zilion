@@ -44,12 +44,24 @@ var<private> idx_disp: u32;
 var<private> idx_uses_mem: u32;
 
 // HOST CONTRACT: the host shader must declare the following BEFORE this core:
-//   fn mem_read(addr: u32) -> u32               // read one byte from memory
-//   fn mem_write(addr: u32, val: u32)           // write one byte to memory
-//   fn on_fetch_opcode(op: u32) -> bool         // return true to skip (NOP) an
-//                                               // opcode after prefix resolution
-// This lets the host choose the memory model (mask, modulo, storage buffer, …)
-// and hook opcode execution (e.g. instruction suppression). See buildComputeShader.
+//   fn mem_read(addr: u32) -> u32                      // read one byte from memory
+//   fn mem_write(addr: u32, val: u32)                  // write one byte to memory
+//   fn on_fetch_opcode(prefix: u32, op: u32) -> bool   // return true to skip (NOP)
+//                                                      // the decoded instruction
+// The hook fires once per executed instruction, after full prefix resolution, with
+//   prefix = 0u       base page            (op = the opcode byte)
+//   prefix = 0xddu / 0xfdu  IX / IY form of a base-page opcode (op = the opcode byte)
+//   prefix = 0xcbu    CB page              (op = the byte after CB)
+//   prefix = 0xedu    ED page              (op = the byte after ED)
+//   prefix = 0xddcbu / 0xfdcbu  DDCB / FDCB page (op = the byte after the displacement)
+// Prefix bytes themselves (CB, ED, DD, FD) are never reported as op. When the
+// hook returns true the opcode byte(s) and prefix are consumed and nothing
+// executes: a 1-byte NOP for base-page opcodes (operand bytes are NOT skipped —
+// they run as the next instruction, exactly as if the opcode had been removed
+// from the ISA), a 2-byte NOP for CB/ED-page opcodes (like undefined ED opcodes
+// on a real Z80), and a 4-byte NOP for DDCB/FDCB. R increments as for a real
+// fetch. This lets the host choose the memory model (mask, modulo, storage
+// buffer, …) and ablate instructions precisely. See buildComputeShader.
 
 // Z80 flag bits
 const CF: u32 = 0x01u;
@@ -413,6 +425,7 @@ fn z80_cb_rot(op: u32, val: u32) -> u32 {
 fn z80_exec_cb() {
     let op = z80_fetch();
     r_inc(); // M1: CB-page opcode fetch
+    if (on_fetch_opcode(0xcbu, op)) { return; } // host hook (2-byte NOP)
     let x = (op >> 6u) & 3u;
     let y = (op >> 3u) & 7u;
     let z = op & 7u;
@@ -521,6 +534,7 @@ fn z80_cpd() {
 fn z80_exec_ed() {
     let op = z80_fetch();
     r_inc(); // M1: ED-page opcode fetch
+    if (on_fetch_opcode(0xedu, op)) { return; } // host hook (2-byte NOP)
     switch(op) {
         case 0xa0u: { z80_ldi(); }
         case 0xa8u: { z80_ldd(); }
@@ -820,14 +834,21 @@ fn z80_step() {
         op = next;
     }
 
-    // Host hook: skip execution (treat as NOP) if requested.
-    if (on_fetch_opcode(op)) { return; }
+    // Host hook for base-page opcodes (and their IX/IY forms). The CB and ED
+    // prefix bytes are not reported here; their pages report from their own
+    // dispatch with prefix = 0xCB / 0xED / 0xDDCB / 0xFDCB.
+    if (op != 0xcbu && op != 0xedu) {
+        let pfx = select(select(0xfdu, 0xddu, idx_mode == 1u), 0u, idx_mode == 0u);
+        if (on_fetch_opcode(pfx, op)) { return; }
+    }
 
     if (idx_mode != 0u) {
         if (op == 0xcbu) {
             // DDCB/FDCB: displacement precedes the CB opcode.
             idx_disp = signext(z80_fetch());
             let cbop = z80_fetch();
+            let pfx = select(0xfdcbu, 0xddcbu, idx_mode == 1u);
+            if (on_fetch_opcode(pfx, cbop)) { return; } // host hook (4-byte NOP)
             z80_exec_idxcb(cbop);
             return;
         }

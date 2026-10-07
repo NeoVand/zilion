@@ -1,19 +1,19 @@
-import { Z80_CORE_WGSL } from './z80-core.wgsl.js';
+import { Z80_CORE_WGSL } from "./z80-core.wgsl.js";
 
 // Registers written back per program (16-bit values), in this fixed order.
 export const REG_FIELDS = [
-	'af',
-	'bc',
-	'de',
-	'hl',
-	'ix',
-	'iy',
-	'sp',
-	'pc',
-	'afPrime',
-	'bcPrime',
-	'dePrime',
-	'hlPrime'
+  "af",
+  "bc",
+  "de",
+  "hl",
+  "ix",
+  "iy",
+  "sp",
+  "pc",
+  "afPrime",
+  "bcPrime",
+  "dePrime",
+  "hlPrime",
 ] as const;
 export const REGS_PER_PROGRAM = REG_FIELDS.length; // 12 u32 per program
 
@@ -28,13 +28,29 @@ export const REGS_PER_PROGRAM = REG_FIELDS.length; // 12 u32 per program
  *   2: storage  regs    — flat u32 array, REGS_PER_PROGRAM per program (out)
  *   3: storage  init    — flat u32 array, REGS_PER_PROGRAM per program (in)
  */
-export function buildComputeShader(memBytes: number): string {
-	if (memBytes < 4 || (memBytes & (memBytes - 1)) !== 0) {
-		throw new Error(`memBytes must be a power of two >= 4 (got ${memBytes})`);
-	}
-	const mask = memBytes - 1;
+export interface ShaderOptions {
+  /**
+   * WGSL expression evaluated once per executed instruction, after prefix
+   * resolution, with `prefix: u32` and `op: u32` in scope (see the host
+   * contract in z80-core.wgsl.ts for the prefix encoding). Return `true` to
+   * skip the instruction (treat it as a NOP). Default: `false` (nothing is
+   * suppressed). Example — ablate LDIR and every PUSH:
+   *   `(prefix == 0xedu && op == 0xb0u) || (prefix == 0u && (op & 0xcfu) == 0xc5u)`
+   */
+  fetchHook?: string;
+}
 
-	return /* wgsl */ `
+export function buildComputeShader(
+  memBytes: number,
+  opts: ShaderOptions = {},
+): string {
+  if (memBytes < 4 || (memBytes & (memBytes - 1)) !== 0) {
+    throw new Error(`memBytes must be a power of two >= 4 (got ${memBytes})`);
+  }
+  const mask = memBytes - 1;
+  const hook = opts.fetchHook?.trim() || "false";
+
+  return /* wgsl */ `
 struct Params {
 	count: u32,
 	mem_bytes: u32,
@@ -52,7 +68,7 @@ struct Params {
 var<private> mem: array<u32, ${memBytes}u>;
 fn mem_read(addr: u32) -> u32 { return mem[addr & ${mask}u]; }
 fn mem_write(addr: u32, val: u32) { mem[addr & ${mask}u] = val & 0xffu; }
-fn on_fetch_opcode(op: u32) -> bool { return false; } // no suppression by default
+fn on_fetch_opcode(prefix: u32, op: u32) -> bool { return ${hook}; }
 
 ${Z80_CORE_WGSL}
 
