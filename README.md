@@ -26,7 +26,7 @@ Zilion runs **thousands of independent Z80 CPUs at once** as a single WebGPU com
 
 ## Why?
 
-CPU emulators run one machine at a time. But a whole class of problems needs to run *many* small Z80 programs independently and cheaply:
+CPU emulators run one machine at a time. But a whole class of problems needs to run _many_ small Z80 programs independently and cheaply:
 
 - 🧬 **Artificial life & open-ended evolution** — soups of self-modifying machine code (à la [BFF / Computational Life](https://arxiv.org/abs/2406.19108)).
 - 🧠 **Genetic programming** — evaluate an entire population of evolved Z80 programs each generation.
@@ -40,6 +40,7 @@ Zilion turns "run N Z80s" into one GPU dispatch instead of N CPU loops.
 - ⚡ **Massively parallel** — one Z80 per GPU invocation, thousands at a time.
 - 🎯 **Correct** — the full documented instruction set plus **IX/IY**, **CB/ED/DDCB/FDCB** prefixes, shadow registers, and undocumented flag behavior. Continuously [differential-tested](#correctness) against a real-Z80 reference emulator.
 - 🧩 **Simple API** — `create` once, `run` batches, read back memory + registers.
+- 🔬 **Instruction ablation** — remove any instruction from the ISA (including prefixed ones like `LDIR`) with a one-line hook; built for instruction-set experiments.
 - 🪶 **Zero dependencies**, TypeScript-native, ships as ESM.
 - 🔌 **Bring your own `GPUDevice`** or let Zilion request one.
 
@@ -54,7 +55,7 @@ Requires an environment with [WebGPU](https://caniuse.com/webgpu) (Chrome/Edge 1
 ## Quick start
 
 ```ts
-import { Zilion } from '@neovand/zilion';
+import { Zilion } from "@neovand/zilion";
 
 const z80 = await Zilion.create({ memBytes: 256 });
 
@@ -76,7 +77,7 @@ Every entry in the array is an independent Z80 with its own memory:
 ```ts
 // 10,000 random 32-byte programs, 128 instructions each — one dispatch.
 const programs = Array.from({ length: 10_000 }, () =>
-  Uint8Array.from({ length: 32 }, () => (Math.random() * 256) | 0)
+  Uint8Array.from({ length: 32 }, () => (Math.random() * 256) | 0),
 );
 
 const { registers, memory, memoryOf } = await z80.run(programs, { steps: 128 });
@@ -88,7 +89,7 @@ const { registers, memory, memoryOf } = await z80.run(programs, { steps: 128 });
 ```ts
 await z80.run([program], {
   steps: 64,
-  init: [{ af: 0x4100, bc: 0x0008, sp: 0xfff0 }] // A=0x41, BC=8, SP=0xFFF0
+  init: [{ af: 0x4100, bc: 0x0008, sp: 0xfff0 }], // A=0x41, BC=8, SP=0xFFF0
 });
 ```
 
@@ -109,15 +110,15 @@ The Z80's 16-bit address space **wraps** onto `memBytes` (so a program can't esc
 
 ```ts
 interface RunOptions {
-  steps: number;            // instructions per program (stops early on HALT)
+  steps: number; // instructions per program (stops early on HALT)
   init?: Z80RegisterInit[]; // optional per-program starting registers
 }
 
 interface RunResult {
   count: number;
   memBytes: number;
-  memory: Uint8Array;              // flat: count * memBytes
-  registers: Z80Registers[];       // af, bc, de, hl, ix, iy, sp, pc, + shadows
+  memory: Uint8Array; // flat: count * memBytes
+  registers: Z80Registers[]; // af, bc, de, hl, ix, iy, sp, pc, + shadows
   memoryOf(i: number): Uint8Array; // program i's final memory
 }
 ```
@@ -127,6 +128,51 @@ Each program is copied into its instance's memory (zero-padded or truncated to `
 ### `zilion.destroy()`
 
 Releases GPU resources (and the device if Zilion created it).
+
+### Instruction ablation (`fetchHook`)
+
+Zilion can remove instructions from the ISA. Pass a WGSL boolean expression over
+`prefix` and `op`; every instruction for which it is true is skipped as a NOP:
+
+```ts
+// No block copies (LDIR/LDDR/LDI/LDD) and no PUSH:
+const z80 = await Zilion.create({
+  memBytes: 256,
+  fetchHook:
+    "(prefix == 0xedu && (op & 0xf7u) == 0xa0u) || (prefix == 0u && (op & 0xcfu) == 0xc5u)",
+});
+```
+
+The hook fires once per executed instruction, **after prefix resolution**:
+
+| `prefix`            | page                          | `op`                             |
+| ------------------- | ----------------------------- | -------------------------------- |
+| `0`                 | base                          | the opcode byte                  |
+| `0xDD` / `0xFD`     | IX / IY form of a base opcode | the opcode byte after the prefix |
+| `0xCB`              | CB (rotates, bits)            | the byte after `CB`              |
+| `0xED`              | ED (block ops, 16-bit loads)  | the byte after `ED`              |
+| `0xDDCB` / `0xFDCB` | indexed bit ops               | the byte after the displacement  |
+
+Prefix bytes are never reported as `op`. A skipped base-page opcode is a 1-byte
+NOP: its operand bytes are _not_ skipped and run as the next instruction, exactly
+as if the opcode had been removed from the CPU. Skipped CB/ED-page opcodes are
+2-byte NOPs (like undefined `ED` opcodes on real hardware); skipped DDCB/FDCB
+opcodes are 4-byte NOPs. `R` increments as for a real fetch.
+
+### Embedding the core in your own shader
+
+`Z80_CORE_WGSL` is the bare core. A host shader declares the memory model and the
+hook before splicing it in:
+
+```wgsl
+fn mem_read(addr: u32) -> u32 { ... }
+fn mem_write(addr: u32, val: u32) { ... }
+fn on_fetch_opcode(prefix: u32, op: u32) -> bool { ... }
+// ${Z80_CORE_WGSL}
+```
+
+then calls `z80_step()` in a loop after initialising the `cpu_*` registers. See
+`buildComputeShader` in `src/shader.ts` for a complete host.
 
 ## How it works
 
@@ -145,7 +191,7 @@ Emulator bugs hide in undocumented corners, so Zilion's Z80 core is developed ag
 
 The core implements the full documented instruction set, the **CB**, **ED**, **DD/FD (IX/IY)**, and **DDCB/FDCB** prefix pages (including the undocumented DDCB register-copy side effect and the CPI/CPD undocumented-flag quirk), shadow registers, and `EXX`/`EX AF,AF'`.
 
-> **Scope & honesty:** Zilion is a batch execution core, not a cycle-accurate machine emulator. There are no interrupts and no I/O ports (`IN` reads 0, `OUT` is a no-op), and time is counted in instructions, not T-states — every instruction advances the step counter by one. The `R` refresh register increments per M1 (opcode/prefix) fetch and `HALT` idles correctly (re-executing itself until the step budget runs out, matching a real Z80's PC/R behavior). The one documented simplification: the internal `WZ`/`memptr` register isn't modeled, so the *undocumented* F3/F5 flag bits of `BIT n,(HL)` come from the operand rather than the memory address (this never affects control flow). Everything else — the full documented instruction set across the base, CB, ED, and DD/FD/DDCB/FDCB pages — is differential-tested against a real-Z80 reference to zero divergence in documented behavior. If you need cycle-accurate single-machine emulation, use a dedicated emulator; if you need to run a zillion Z80s fast, use Zilion.
+> **Scope & honesty:** Zilion is a batch execution core, not a cycle-accurate machine emulator. There are no interrupts and no I/O ports (`IN` reads 0, `OUT` is a no-op), and time is counted in instructions, not T-states — every instruction advances the step counter by one. The `R` refresh register increments per M1 (opcode/prefix) fetch and `HALT` idles correctly (re-executing itself until the step budget runs out, matching a real Z80's PC/R behavior). The one documented simplification: the internal `WZ`/`memptr` register isn't modeled, so the _undocumented_ F3/F5 flag bits of `BIT n,(HL)` come from the operand rather than the memory address (this never affects control flow). Everything else — the full documented instruction set across the base, CB, ED, and DD/FD/DDCB/FDCB pages — is differential-tested against a real-Z80 reference to zero divergence in documented behavior. If you need cycle-accurate single-machine emulation, use a dedicated emulator; if you need to run a zillion Z80s fast, use Zilion.
 
 ## Performance
 
