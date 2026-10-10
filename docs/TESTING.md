@@ -294,7 +294,8 @@ Register it in `ADAPTERS` (`tools/ztest/vectors/session.py`) and the `vectors` c
 `test/baselines/<isa>-v<version>.md` and `.json` record a core's divergences. The Z80 baselines were made with:
 
 ```sh
-# 0.2.0 (the frozen core; reproduced byte for byte by every later build, ledger SHA-256 ba15462725903d54…)
+# 0.2.0 (the frozen core; ledger SHA-256 ba15462725903d54…, reproduced byte for byte while the package version stays
+# 0.3.0-dev: the ledger records the package version)
 python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic --compat 0.2 \
     --json test/baselines/z80-v0.2.0.json --run-json build/test/z80-v0.2.0.run.json \
     --md test/baselines/z80-v0.2.0.md --analysis test/baselines/z80-v0.2.0.analysis.md
@@ -335,7 +336,8 @@ A future CI gate should fail on any unexpected divergence (exit 1) and on any ru
      SCF X/Y that is not the Q effect, DJNZ never branching, HALT not halting, a NOP that reads or writes memory; the
      0.2 behaviour of each 0.3 fix (a wasted prefix counted twice, BIT n,(HL) X/Y from the operand, WZ off by one,
      WZ only when JP cc is taken, no WZ for (IX+d), IM ignored, LDIR/CPIR X/Y from the data, INIR/OTIR P/V not
-     adjusted, `IN A,(n)` on port n, a silent `OUT (C),r`); on `zilog-nmos`, SCF ignoring Q, Q always F, Q kept
+     adjusted, `IN A,(n)` on port n, a silent `OUT (C),r`); on `zilog-nmos`, SCF ignoring Q, Q kept by instructions that
+     leave F alone, Q kept
      after a DD/FD prefix; on compat 0.2, errors next to its model-checked BIT-HL-XY and R-WASTED rules. Each must
      produce unexpected divergences in the field it breaks (24 mutants). Mutants whose vector files are absent are
      skipped and say so.

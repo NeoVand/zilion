@@ -83483,15 +83483,15 @@
      },
      "unexpected": 0,
      "unexpected_xor": 0,
-     "xor": 47
+     "xor": 63
     }
    },
-   "gpu": "f8ae012af0e435c1cfffe1c4be281a120222136d821a3cbe6915bcc1f3555a1f",
+   "gpu": "2d42319de1736402bdba3811180c266621d51530803f772a97d80579bd87ed51",
    "group": "probe",
    "mapped": {},
    "pass_all": 0,
    "pass_arch": 3,
-   "sha256": "e43d3fe6c41d6ec9556e1a3ed6d1903d80d5ad4346c8347abcb06d7b3e0c06bb",
+   "sha256": "d159ae3ad83eea8f4dbd5a9f404ce1907eda627d504faea8999588863af80988",
    "tests": 3,
    "unexpected": 0,
    "unexpected_arch": 0
@@ -83625,7 +83625,7 @@
    "unexpected_arch": 0
   }
  },
- "gpu_digest": "ba522e8184b918b25e0abf2301eb8c5a82c8f384b6e835470b9e9375755c9fec",
+ "gpu_digest": "c08cd4c5b10b1836209bffb2ae3588908d4952e3f55fe8e870fa1ec878781505",
  "harness": {
   "host_wgsl_sha256": "3b91d92a282afe557507aa786bba2571bc438139b920603a378c70591a5a99d4",
   "mem_cap": 32,
@@ -83782,7 +83782,7 @@
    "hit_tests": 2210,
    "id": "Q-XY",
    "mask": "0x28",
-   "reason": "SCF/CCF take F3/F5 from A only in the classic variant; on a Zilog NMOS Z80 they are ((Q xor F) or A) & 0x28 (variant zilog-nmos). After a wasted DD/FD prefix Q is 0, so the formula there is (F or A) & 0x28. Explained only where the vector follows the NMOS formula and Zilion the A-only formula.",
+   "reason": "SCF/CCF take F3/F5 from A only in the classic variant; on a Zilog NMOS Z80 they are ((Q xor F) or A) & 0x28 (variant zilog-nmos). After a DD/FD prefix Q is 0 (the prefix is an instruction cycle of its own that leaves F alone), so for DD/FD 37 and 3F the formula is (F or A) & 0x28. Explained only where the vector follows the NMOS formula and Zilion the A-only formula.",
    "source": "design §5.4 and Appendix B (Q-XY)",
    "status": "expected",
    "when": "q_xy_model"
@@ -84007,7 +84007,7 @@
    "test/vectors/z80/analytic/probes"
   ],
   "files": 1679,
-  "files_sha256": "697f571a3d9f798a1b6d30d38aaf7275aff2b3d64deb10f0571f63eb7561a8ce",
+  "files_sha256": "b6282d0bb598437d787eda83ce6cbead79ace05ba25ccc1b7fbab3511f8fd039",
   "filters": {
    "limit_per_file": 0,
    "patterns": [],

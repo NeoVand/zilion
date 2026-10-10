@@ -19,7 +19,8 @@
 //     keeps executing it (R + 1 per step), a lane halted by the host is frozen;
 //   - z80_reset() (the world reset: everything 0) and z80_run(budget).
 // Variant 'zilog-nmos' adds the Q latch (cpu_q): Q = F after an instruction that writes F, else 0, and SCF/CCF take
-// X/Y from ((Q ^ F) | A). Vendor-specific (Zilog NMOS), so not the default.
+// X/Y from ((Q ^ F) | A), Q being the latch as the step began. Vendor-specific (Zilog NMOS), so not the default. It
+// adds statements inside the same functions (no wrapper), so z80_step holds the anchors in every configuration.
 
 import { Z80_CORE_WGSL, z80CoreText02 } from "./core-0.2.wgsl.js";
 
@@ -95,11 +96,11 @@ export function z80CoreText(hooks: Z80Hooks = {}, semantics: Z80Semantics = {}):
 }
 
 function template(h: HookText, nmos: boolean): string {
-  // zilog-nmos: every instruction that writes F marks it (z80_qf); z80_step then latches Q.
-  const qf = nmos ? "\n    z80_qf = 1u;" : "";
-  const qfi = nmos ? " z80_qf = 1u;" : "";
-  const xyScfCcf = nmos ? "(((cpu_q ^ cpu_f) | cpu_a) & (F3 | F5))" : "(cpu_a & (F3 | F5))";
-  const stepFn = nmos ? "z80_step_insn" : "z80_step";
+  // zilog-nmos: every write of F also latches it into Q (cpu_q = cpu_f); z80_step keeps the latch as the step began
+  // in z80_qprev (for SCF/CCF) and clears cpu_q, so an instruction that leaves F alone ends with Q = 0.
+  const qf = nmos ? "\n    cpu_q = cpu_f; // Q" : "";
+  const qfi = nmos ? " cpu_q = cpu_f;" : "";
+  const xyScfCcf = nmos ? "(((z80_qprev ^ cpu_f) | cpu_a) & (F3 | F5))" : "(cpu_a & (F3 | F5))";
   return /* wgsl */ `
 // === Z80 CPU State (per invocation) ===
 var<private> cpu_a: u32;
@@ -130,7 +131,7 @@ var<private> cpu_r: u32; // memory refresh register (R); bits 0-6 count M1 cycle
 var<private> cpu_wz: u32; // MEMPTR (WZ): internal address latch; visible only through BIT n,(HL) F3/F5
 var<private> cpu_im: u32; // interrupt mode 0, 1 or 2 (set by IM; no interrupts are modelled)
 ${nmos ? `var<private> cpu_q: u32; // Q (Zilog NMOS): F if the last instruction wrote the flags, else 0
-var<private> z80_qf: u32; // set by an instruction that writes F (zilog-nmos)
+var<private> z80_qprev: u32; // Q as the current step began (read by SCF/CCF; set at the start of every step)
 ` : ""}
 // Halt reasons held in cpu_halted. They equal the host contract's ZIL_RUNNING, ZIL_HALT_INSN, ZIL_HALT_HOST and
 // ZIL_HALT_TRAP, so that the core text needs no prelude when its hooks are off.
@@ -186,7 +187,7 @@ fn z80_reset() {
     cpu_a = 0u; cpu_f = 0u; cpu_b = 0u; cpu_c = 0u; cpu_d = 0u; cpu_e = 0u; cpu_h = 0u; cpu_l = 0u;
     cpu_a2 = 0u; cpu_f2 = 0u; cpu_b2 = 0u; cpu_c2 = 0u; cpu_d2 = 0u; cpu_e2 = 0u; cpu_h2 = 0u; cpu_l2 = 0u;
     cpu_ix = 0u; cpu_iy = 0u; cpu_sp = 0u; cpu_pc = 0u; cpu_i = 0u; cpu_r = 0u; cpu_iff1 = 0u; cpu_iff2 = 0u;
-    cpu_wz = 0u; cpu_im = 0u; cpu_halted = Z80_RUNNING;${nmos ? " cpu_q = 0u; z80_qf = 0u;" : ""}
+    cpu_wz = 0u; cpu_im = 0u; cpu_halted = Z80_RUNNING;${nmos ? " cpu_q = 0u; z80_qprev = 0u;" : ""}
     idx_mode = 0u; idx_disp = 0u; idx_uses_mem = 0u;
 }
 
@@ -662,7 +663,7 @@ fn z80_cpd() {
 fn z80_block_repeat() {
     cpu_pc = (cpu_pc - 2u) & 0xffffu;
     cpu_wz = (cpu_pc + 1u) & 0xffffu;
-    cpu_f = (cpu_f & ~(F3 | F5)) | ((cpu_pc >> 8u) & (F3 | F5));
+    cpu_f = (cpu_f & ~(F3 | F5)) | ((cpu_pc >> 8u) & (F3 | F5));${qf}
 }
 
 // Block I/O flags (INI/IND/OUTI/OUTD and the repeating forms). \`val\` is the byte transferred, \`k\` the 8-bit-overflow
@@ -997,12 +998,14 @@ ${h.haltClose}            }
     }
 }
 
-fn ${stepFn}() {
+fn z80_step() {
     // While halted by HALT, the CPU keeps executing it: each step is an M1 fetch of
     // the same opcode (R increments), PC stays put. It resumes only on interrupt.
     // A lane halted by the host (or a trap) is stopped: a step changes nothing.
-    if (cpu_halted != Z80_RUNNING) { if (cpu_halted == Z80_HALT_INSN) { r_inc(); } return; }
-    // Reset per-instruction index-prefix state.
+    if (cpu_halted != Z80_RUNNING) { if (cpu_halted == Z80_HALT_INSN) { r_inc();${nmos ? " cpu_q = 0u;" : ""} } return; }
+${nmos ? `    z80_qprev = cpu_q; // Q as this step begins (SCF/CCF read it)
+    cpu_q = 0u;        // 0 unless the instruction writes F: a wasted prefix, a skipped or ablated one, POP AF ...
+` : ""}    // Reset per-instruction index-prefix state.
     idx_mode = 0u;
     idx_uses_mem = 0u;
     idx_disp = 0u;
@@ -1021,7 +1024,7 @@ ${h.start}    // A DD/FD prefix selects IX/IY for the following opcode.
             return;
         }
         r_inc(); // M1: opcode after the prefix
-${nmos ? "        cpu_q = 0u; // the prefix was an instruction cycle of its own that left F alone: Q = 0 (seen by SCF/CCF)\n" : ""}        op = next;
+${nmos ? "        z80_qprev = 0u; // the prefix was an instruction cycle of its own that left F alone: SCF/CCF see Q = 0\n" : ""}        op = next;
     }
 
     // Host hook for base-page opcodes (and their IX/IY forms). The CB and ED
@@ -1050,15 +1053,7 @@ ${nmos ? "        cpu_q = 0u; // the prefix was an instruction cycle of its own 
     }
     z80_execute(op);
 }
-${nmos ? `
-// One step with the Q latch (zilog-nmos): Q = F if the step wrote the flags, else 0 (a wasted prefix, a halted
-// step, an ablated or skipped instruction, and instructions that leave F alone, POP AF and EX AF,AF' included).
-fn z80_step() {
-    z80_qf = 0u;
-    z80_step_insn();
-    cpu_q = select(0u, cpu_f, z80_qf != 0u);
-}
-` : ""}
+
 // Runs up to \`budget\` steps and returns how many ran; stops after the step that halts.
 fn z80_run(budget: u32) -> u32 {
     var n = 0u;

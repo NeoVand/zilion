@@ -310,7 +310,7 @@ def wz_block() -> None:
               ram_out={0x3000: v}, ports=[[(b0 << 8) | c0, v, "r"]],
               out={"b": b0 - 1, "h": hl1 >> 8, "l": hl1 & 0xFF, "f": io_block(v, k, b0 - 1, None),
                    "wz": ((b0 << 8) | c0) + (-1 if dec else 1)}, m1=2, writes_f=True)
-    for v, c0 in ((0x81, 0xF0), (0x01, 0xF0), (0x01, 0x10)):  # carry with N set, carry with N clear, no carry
+    for v, c0 in ((0x81, 0xF0), (0x7F, 0xF0), (0x01, 0x10)):  # carry with N set, carry with N clear, no carry
         b0 = 0x10
         k = v + ((c0 + 1) & 0xFF)
         probe("wz ed b2", [0xED, 0xB2], init={"pc": pc, "b": b0, "c": c0, "h": 0x30, "l": 0x00}, ram={0x3000: 0},

@@ -15,9 +15,9 @@
 // Then, once:
 //   - the compat '0.2' core text with each of the 16 combinations of v2 hooks has the SHA-256 recorded when the hooks
 //     were introduced (they add text to the 0.2.0 core; 0.2.0 itself has no hooks), and z80.wgsl gives the same text;
-//   - every anchor Algocell's shader generators patch (docs/ARCHITECTURE.md, "Anchors") occurs exactly once, and the
-//     mutant anchors are present, in the core of every semantics (compat '0.2'; compat '0.3' classic and zilog-nmos)
-//     generated with each of the 16 hook combinations;
+//   - every anchor Algocell's shader generators patch (docs/ARCHITECTURE.md, "Anchors") occurs exactly once (the step
+//     anchors inside fn z80_step()), and the mutant anchors are present, in the core of every semantics (compat '0.2';
+//     compat '0.3' classic and zilog-nmos) generated with each of the 16 hook combinations;
 //   - (with an Algocell checkout) how many of its exported shaders embed the current Z80_CORE_WGSL verbatim.
 // Exit status 0 only if every comparison is identical.
 
@@ -195,14 +195,26 @@ for (const sem of SEMANTICS) {
       if (c !== 1) { anchorFail++; bad(`anchor ${JSON.stringify(a.slice(0, 40))} occurs ${c} times ${where}`); }
     }
     const at = text.indexOf(ANCHORS[0]) + ANCHORS[0].length;
-    if (!(text.indexOf(ANCHORS[3], at) < text.indexOf(ANCHORS[4], at))) {
+    const pre = text.indexOf(ANCHORS[3], at);
+    const dec = text.indexOf(ANCHORS[4], at);
+    if (!(pre >= 0 && dec >= 0 && pre < dec)) {
       anchorFail++;
       bad(`prefix resolution does not precede the decode hook ${where}`);
+    }
+    // Algocell's patchers also require the step anchors to lie inside `fn z80_step() {` (the function they patch).
+    const body = text.indexOf("fn z80_step() {");
+    const end = text.indexOf("\nfn ", body + 1);
+    for (const a of [ANCHORS[0], ANCHORS[3], ANCHORS[4]]) {
+      const k = text.indexOf(a);
+      if (!(body >= 0 && k > body && (end < 0 || k < end))) {
+        anchorFail++;
+        bad(`anchor ${JSON.stringify(a.slice(0, 40))} is not inside fn z80_step() ${where}`);
+      }
     }
     for (const a of PRESENT) if (!text.includes(a)) { anchorFail++; bad(`mutant anchor ${JSON.stringify(a)} missing ${where}`); }
   }
 }
-if (anchorFail === 0) ok(`${ANCHORS.length} unique + ${PRESENT.length} present anchors, in all 16 hook combinations of ${SEMANTICS.length} semantics (compat '0.2'; '0.3' classic and zilog-nmos)`);
+if (anchorFail === 0) ok(`${ANCHORS.length} unique + ${PRESENT.length} present anchors, the step anchors inside fn z80_step(), in all 16 hook combinations of ${SEMANTICS.length} semantics (compat '0.2'; '0.3' classic and zilog-nmos)`);
 
 // --- Algocell's exported shaders (information) --------------------------------------------------------------
 const shaderDir = join(algocell, "experiments/algocell_exp/shader");

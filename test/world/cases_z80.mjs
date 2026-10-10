@@ -123,7 +123,8 @@ export const Z80_SEMANTICS_CASES = [
     name: "raw hosts: z80_run(n) = zil_run(n); z80_reset() zeroes the state; a host-halted lane is frozen (compat '0.2': R still counts)",
     // A library-mode host calls the core's own functions. Lane program INC A; 00 with the lethal first unit 0: the
     // 00 halts the lane (host), R = 2. Five more z80_step() calls: compat '0.3' leaves R at 2; '0.2' adds 5 (R = 7).
-    // A second job runs 512 random programs with z80_run(budget) after zil_begin and must equal the kernel.
+    // zilog-nmos: Q set after the halt stays (0x55). A last pair runs 512 random programs with z80_run(budget) after
+    // zil_begin and must equal the kernel.
     setup: ({ Z, addJob }) => {
       const host = (lib, body) => `struct Params { lanes: u32, lane_base: u32, budget: u32, seed: u32 };
 @group(0) @binding(0) var<uniform> params: Params;
@@ -151,9 +152,11 @@ ${body}
           { group: 0, binding: 2, name: "lane_out", role: "record", type: "storage", wordsPerLane: lib.manifest.record.wordsPerLane }] } });
       const names = { memory: "lane_mem", out: "lane_out" };
       const lethal = ring(32, { halting: { lethal: { firstUnit: 0 } } });
-      const frozen = (compat) => {
-        const lib = Z.buildMachine({ isa: Z.z80, compat, world: lethal, mode: "library", bindingNames: names });
-        return asKernel(lib, host(lib, "    var steps = zil_run(params.budget);\n    for (var k = 0u; k < 5u; k++) { z80_step(); }"));
+      const frozen = (compat, variant) => {
+        const lib = Z.buildMachine({ isa: Z.z80, compat, variant, world: lethal, mode: "library", bindingNames: names });
+        // zilog-nmos: Q set by hand after the halt must survive the further steps too
+        const q = variant ? "\n    cpu_q = 0x55u;" : "";
+        return asKernel(lib, host(lib, `    var steps = zil_run(params.budget);${q}\n    for (var k = 0u; k < 5u; k++) { z80_step(); }`));
       };
       // z80_reset: run 3 steps of LD A,0x55 ..., reset, then run the program again from PC 0 with A = 0.
       const libReset = Z.buildMachine({ isa: Z.z80, world: ring(32), mode: "library", bindingNames: names });
@@ -165,6 +168,7 @@ ${body}
       return [
         addJob(frozen(undefined), [{ mem: mem(32, { 0: [0x3c, 0x00] }), expect: { steps: 2, halt: "host", state: { a: 1, r: 2, pc: 1, halted: 2 } } }], { budget: 10 }),
         addJob(frozen("0.2"), [{ mem: mem(32, { 0: [0x3c, 0x00] }), expect: { steps: 2, halt: "host", state: { a: 1, r: 7, pc: 1, halted: 2 } } }], { budget: 10 }),
+        addJob(frozen(undefined, "zilog-nmos"), [{ mem: mem(32, { 0: [0x3c, 0x00] }), expect: { steps: 2, halt: "host", state: { a: 1, r: 2, pc: 1, halted: 2, q: 0x55 } } }], { budget: 10 }),
         // LD A,0x55; LD B,0x66 (2 steps), reset (all 0, PC 0), SP = 0xFF, one more step (LD A,0x55): A = 0x55, B = 0, R = 1.
         addJob(resetHost, [{ mem: mem(32, { 0: [0x3e, 0x55, 0x06, 0x66] }), expect: { steps: 3, state: { a: 0x55, b: 0, r: 1, pc: 2, sp: 0xff, wz: 0 } } }], { budget: 0 }),
         addJob(Z.buildMachine({ isa: Z.z80, world: plain }), random, { budget: 50 }),
@@ -172,7 +176,7 @@ ${body}
       ];
     },
     // z80_run counts steps like zil_run but does not drive the world's fetch counter; the fetch map comes from on_fetch.
-    check: (jobs) => compareJobs(jobs[3], jobs[4], "z80_run lane"),
+    check: (jobs) => compareJobs(jobs[4], jobs[5], "z80_run lane"),
   },
   {
     name: "every hook combination of every semantics compiles and runs (16 x compat '0.2', '0.3' classic, '0.3' zilog-nmos)",

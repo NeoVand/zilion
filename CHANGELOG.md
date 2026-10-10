@@ -57,7 +57,7 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
 **Z80 fixes (work item 3; branch `m1/z80-fixes`; docs/ARCHITECTURE.md, "The Z80 core")**
 
 - *Behaviour changes (the Z80 of `buildMachine`; `compat: '0.2'` restores 0.2.0 exactly):* the default Z80 is now
-  `compat: '0.3'` (`coreVersion` 0.3.0). A wasted DD/FD prefix adds 1 to R (0.2: 2). MEMPTR (WZ) is modelled in
+  `compat: '0.3'` (`coreVersion` 0.3.0): a Z80 world that names no `compat` gets the new semantics. A wasted DD/FD prefix adds 1 to R (0.2: 2). MEMPTR (WZ) is modelled in
   full and `BIT n,(HL)` takes F3/F5 from it. IM is modelled. A repeating block instruction takes X/Y from its own
   address (INxR/OTxR also adjust H and P/V) and sets WZ = PC + 1. `OUT (C),r` and `OUT (C),0` exist without the io
   hooks. A lane halted by the host is frozen (0.2 kept adding 1 to R per further step). The state record gains
@@ -67,10 +67,12 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
   anchors, in all three semantics.
 - *Added:* variant `zilog-nmos` (the Q latch: SCF/CCF X/Y = ((Q ⊕ F) | A); state field `q`); `z80_reset()` and
   `z80_run(budget)` in the core text; halt-reason constants (`Z80_HALT_INSN` …, equal to the contract's);
-  `z80CoreText(hooks, { compat, variant })`; the optional descriptor method `stateFor({ variant, compat })` (the
-  state record per selection), used by the builder.
-- *Validation:* SingleStepTests/z80 (1,604,384 tests): 0 unexpected with only the rules Q, Q-XY (not modelled by
-  `classic`) and EI-P (no interrupts); `zilog-nmos`: 0 unexpected with EI-P only; `--compat 0.2` reproduces the
+  `z80CoreText(hooks, { compat, variant })` and the `Z80Semantics` type; the optional descriptor method
+  `stateFor({ variant, compat })` (the state record per selection), used by the builder.
+- *Fixed:* the 0.2 kernel's manifest (`legacyMachine`) hashes the core it embeds (`Z80_CORE_WGSL`) and reports
+  `coreVersion` 0.2.0.
+- *Validation:* SingleStepTests/z80 (1,604,000 tests) plus 384 wasted-prefix vectors and 86 R/WZ probes: 0
+  unexpected with only the rules Q, Q-XY (not modelled by `classic`) and EI-P (no interrupts); `zilog-nmos`: 0 unexpected with EI-P only; `--compat 0.2` reproduces the
   0.2.0 ledger byte for byte. 86 hand-derived R and WZ probes (`tools/z80-probe-vectors.py`). Baselines
   `test/baselines/z80-v0.3.0-dev.*` and `z80-v0.3.0-dev-zilog-nmos.*`.
 - *Tests and harness:* `tools/zt.py vectors|conformance --compat --variant` (recorded in the run record); conformance

@@ -126,6 +126,11 @@ class _OverrideArtifacts(Artifacts):
     def core(self, isa: str) -> str:
         return self._text if isa == self._isa else super().core(isa)
 
+    def select(self, isa: str, *, variant: str | None = None, compat: str | None = None) -> "Artifacts":
+        if variant is None and compat is None:
+            return self
+        raise HarnessError("select a core configuration before overriding its text (with_core), not after")
+
     def configs(self, isa: str) -> list[dict]:
         """Every emitted core configuration of `isa` (variant, compat, hooks), the default first."""
         return self.manifest.get("coreConfigs", {}).get(isa) or [self.manifest["cores"][isa]]

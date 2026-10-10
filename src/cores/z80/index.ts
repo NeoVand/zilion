@@ -95,7 +95,7 @@ export const z80: IsaCore = {
   stateFor(o) {
     const s = semantics(o);
     if (s.compat === "0.2") return { state: STATE_02, internals: INTERNALS };
-    return { state: s.variant === "zilog-nmos" ? STATE_NMOS : STATE, internals: s.variant === "zilog-nmos" ? [...INTERNALS, "z80_qf"] : INTERNALS };
+    return { state: s.variant === "zilog-nmos" ? STATE_NMOS : STATE, internals: s.variant === "zilog-nmos" ? [...INTERNALS, "z80_qprev"] : INTERNALS };
   },
   symbols: {
     step: "z80_step",

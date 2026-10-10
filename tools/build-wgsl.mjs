@@ -67,7 +67,8 @@ const Z80_CONFIGS = [
 if (zilion.z80.wgsl({ compat: "0.2", hooks: {} }) !== zilion.Z80_CORE_WGSL) throw new Error("compat '0.2' is not Z80_CORE_WGSL");
 const coreConfigs = {
   z80: Z80_CONFIGS.map(({ key, file, variant, compat, hooks, export: ex, text }) => ({
-    key, export: ex, variant, compat, hooks, coreVersion: zilion.z80.coreVersion, ...write(file, text),
+    // coreVersion: the semantics the text has (the frozen Z80_CORE_WGSL is 0.2.0's)
+    key, export: ex, variant, compat, hooks, coreVersion: compat === "0.2" ? "0.2.0" : zilion.z80.coreVersion, ...write(file, text),
   })),
 };
 const cores = { z80: coreConfigs.z80[0] };

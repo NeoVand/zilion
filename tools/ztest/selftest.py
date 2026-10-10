@@ -251,11 +251,12 @@ MUTANTS = [
     ("in-a-n-port-without-a", "let port = (cpu_a << 8u) | z80_fetch();", "let port = z80_fetch();", ["db"], "ports"),
     ("out-c-r-silent", "            z80_out(get_bc(), v);\n", "", ["ed 79"], "ports"),
     # zilog-nmos: the Q latch
-    ("nmos-scf-ignores-q", "| CF | (((cpu_q ^ cpu_f) | cpu_a) & (F3 | F5));", "| CF | (cpu_a & (F3 | F5));", ["37"], "f",
+    ("nmos-scf-ignores-q", "| CF | (((z80_qprev ^ cpu_f) | cpu_a) & (F3 | F5));", "| CF | (cpu_a & (F3 | F5));", ["37"], "f",
      {"variant": "zilog-nmos"}),
-    ("nmos-q-always-f", "cpu_q = select(0u, cpu_f, z80_qf != 0u);", "cpu_q = cpu_f;", ["00", "c5"], "q", {"variant": "zilog-nmos"}),
+    ("nmos-q-kept-by-non-writers", "    cpu_q = 0u;        // 0 unless", "    cpu_q = cpu_q;     // 0 unless", ["00", "c5"], "q",
+     {"variant": "zilog-nmos"}),
     ("nmos-q-kept-after-prefix",
-     "        cpu_q = 0u; // the prefix was an instruction cycle of its own that left F alone: Q = 0 (seen by SCF/CCF)\n",
+     "        z80_qprev = 0u; // the prefix was an instruction cycle of its own that left F alone: SCF/CCF see Q = 0\n",
      "", ["dd 37", "fd 3f"], "f", {"variant": "zilog-nmos"}),
     # compat '0.2': errors next to a model-checked rule of the 0.2.0 ledger, which its predicate must not absorb
     ("c02-bit-hl-xy-not-wz", "                    (val & (F3 | F5));", "                    ((val ^ 0x20u) & (F3 | F5));",

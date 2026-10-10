@@ -119,6 +119,13 @@ test("a plain world emits no v2 hook and calls none (the core is the hook-free t
   if (!m02.wgsl.includes(Z.Z80_CORE_WGSL)) throw new Error("the compat '0.2' core text is not the 0.2.0 core");
   eq(m02.manifest.core.compat, "0.2");
 });
+test("the 0.2 kernel's manifest names the 0.2.0 core it embeds (not the default core)", () => {
+  const m = Z.legacyMachine(64).manifest;
+  eq(m.sha256.core, Z.sha256(Z.Z80_CORE_WGSL));
+  if (!Z.legacyMachine(64).wgsl.includes(Z.Z80_CORE_WGSL)) throw new Error("the 0.2 kernel does not embed Z80_CORE_WGSL");
+  eq([m.core.compat, m.core.coreVersion], ["0.2", "0.2.0"]);
+  if (m.sha256.core === Z.sha256(Z.z80.wgsl({ hooks: {} }))) throw new Error("hash of the compat '0.3' core");
+});
 test("Z80 semantics: the state record per compat and variant; the core's halt reasons are the contract's", () => {
   const names = (o) => build(ring(32), o).manifest.state.map((f) => f.name);
   const r02 = names({ compat: "0.2" });
@@ -133,7 +140,7 @@ test("Z80 semantics: the state record per compat and variant; the core's halt re
   }
   // the world reset zeroes the latches of the configuration (and only those)
   const w = build(ring(32), { variant: "zilog-nmos" }).wgsl;
-  for (const x of ["cpu_wz = 0x0u;", "cpu_im = 0x0u;", "cpu_q = 0x0u;", "z80_qf = 0u;"]) if (!w.includes(x)) throw new Error(`zil_reset lacks ${x}`);
+  for (const x of ["cpu_wz = 0x0u;", "cpu_im = 0x0u;", "cpu_q = 0x0u;", "z80_qprev = 0u;"]) if (!w.includes(x)) throw new Error(`zil_reset lacks ${x}`);
   if (build(ring(32), { compat: "0.2" }).wgsl.includes("cpu_wz")) throw new Error("compat '0.2' names cpu_wz");
   throws(() => Z.z80CoreText({}, { compat: "0.2", variant: "zilog-nmos" }), /needs compat '0.3'/);
   throws(() => Z.z80CoreText({}, { compat: "0.1" }), /unknown compat/);

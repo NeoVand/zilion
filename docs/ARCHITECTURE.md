@@ -108,8 +108,8 @@ every hook combination by SHA-256; `test/world/compat02.mjs` checks the outputs 
 recording made from the 0.2.0 core before any fix (design §5.5). `Z80_CORE_WGSL` and `buildComputeShader` (the 0.2
 API) stay the 0.2.0 text.
 
-**Semantics 0.3** (design §5.2–§5.4). Validated against all 1,604,384 SingleStepTests/z80 vectors, 86 hand-derived
-R and WZ probes and 384 wasted-prefix vectors (docs/TESTING.md); what remains unmodelled is listed in
+**Semantics 0.3** (design §5.2–§5.4). Validated against all 1,604,000 SingleStepTests/z80 vectors, 384 analytic
+wasted-prefix vectors and 86 hand-derived R and WZ probes (docs/TESTING.md); what remains unmodelled is listed in
 `test/vectors/z80/expected-0.3.0.json`.
 
 - **R.** A wasted DD/FD prefix (followed by DD, FD or ED) is one step and one M1: R + 1 (0.2 counted the follower's
@@ -141,14 +141,16 @@ R and WZ probes and 384 wasted-prefix vectors (docs/TESTING.md); what remains un
   zero-initialisation (design Appendix C.5).
 
 **Variant `zilog-nmos`** (compat `'0.3'` only): the Q latch of the Zilog NMOS Z80. Q = F after an instruction that
-writes F, else 0 (POP AF and EX AF,AF' do not write it; a wasted prefix, a halted step, a skipped or ablated
-instruction leave Q = 0, and a DD/FD prefix clears it before the instruction it prefixes); SCF and CCF take X/Y from
-((Q ⊕ F) | A). With it, every SingleStepTests field except the interrupt latches matches
+writes F, else 0 (POP AF and EX AF,AF' do not write it; a wasted prefix, a HALT step, a skipped or ablated
+instruction and a step the host halts leave Q = 0, and a DD/FD prefix clears it before the instruction it prefixes);
+SCF and CCF take X/Y from ((Q ⊕ F) | A), Q being the latch as the step began (`z80_qprev`). A lane already halted by
+the host is frozen, Q included. The variant adds statements inside the same functions, so `z80_step` holds the
+anchors here too. With it, every SingleStepTests field except the interrupt latches matches
 (`expected-0.3.0-zilog-nmos.json`). It is a variant and not a core parameter (decision 4) because it changes the state
 record (`q`), which the record-per-selection mechanism keys on variant and compat; the default `classic` takes
 SCF/CCF X/Y from A, as 0.2 did.
 
-Internals hold nothing between steps (`idx_*`; with `zilog-nmos` also `z80_qf`, cleared at the start of each step),
+Internals hold nothing between steps (`idx_*`; with `zilog-nmos` also `z80_qprev`, set at the start of each step),
 so a resumed run that stores and loads the state record continues exactly (`wz`, `im` and `q` are state fields).
 
 Order within `z80_step`, with the opt-in hooks (each adds text at a fixed insertion point only):
