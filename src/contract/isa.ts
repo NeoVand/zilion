@@ -61,10 +61,21 @@ export type CoreParamDecl =
   | { readonly type: "u32"; readonly default: number; readonly description?: string }
   | { readonly type: "bool"; readonly default: boolean; readonly description?: string }
   /** One of `values`; emitted as its index, with one constant per value. */
-  | { readonly type: "enum"; readonly default: string; readonly values: readonly string[]; readonly description?: string };
+  | { readonly type: "enum"; readonly default: string; readonly values: readonly string[]; readonly description?: string }
+  /**
+   * A table of exactly `length` integers, each in [0, `max`] (a byte → op map is `length: 256`); emitted as a
+   * `const array<u32, length>`. Given as an array or a typed array; resolved to a plain array (recorded whole).
+   */
+  | {
+      readonly type: "table";
+      readonly length: number;
+      readonly max: number;
+      readonly default: readonly number[];
+      readonly description?: string;
+    };
 
-/** A resolved core parameter value: a u32, a bool, or an enum value name. */
-export type CoreParamValue = number | boolean | string;
+/** A resolved core parameter value: a u32, a bool, an enum value name, or a table (an array of integers). */
+export type CoreParamValue = number | boolean | string | readonly number[];
 
 export interface CoreGenOptions {
   /** One of `IsaCore.variants` (default `IsaCore.defaultVariant`). */
@@ -157,9 +168,9 @@ export interface IsaCore {
   /** Accepted `compat` values; the first is the default. */
   readonly compat: readonly string[];
   /**
-   * Compile-time parameters (name → declaration). A machine selects values with `core: { isa, params }`; the
-   * builder validates them, emits `const ZIL_PARAM_<NAME>` ahead of the core text and records them in the
-   * manifest. Names are lower snake case (`[a-z][a-z0-9_]*`), as are enum values.
+   * Compile-time parameters (name → declaration): `u32`, `bool`, `enum` or `table`. A machine selects values with
+   * `core: { isa, params }`; the builder validates them, emits `const ZIL_PARAM_<NAME>` ahead of the core text and
+   * records them in the manifest. Names are lower snake case (`[a-z][a-z0-9_]*`), as are enum values.
    */
   readonly params?: Readonly<Record<string, CoreParamDecl>>;
   /** The core text for these options. Uses the prelude constants (HOST_CONTRACT_PRELUDE_WGSL) when hooks are on. */
