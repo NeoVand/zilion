@@ -3,7 +3,8 @@
 //     mapped to a ring position: pos = (addr mod 65536) mod P;
 //   - positions are worked out by hand in the comments and written as literals; at(P, addr, lit) only cross-checks
 //     the literal against the first-principles formula;
-//   - every world gives init.stack and budget explicitly.
+//   - every world gives init.stack and budget explicitly; the stack is given as firstPushAt (the cross-ISA meaning:
+//     the first byte pushed lands on that position), which on the 6502 is the same S as topAliases.
 //
 // What is covered: zero page, stack page and the 0xFFFE/0xFFFF vector aliasing into rings of 32, 33 and 64 bytes;
 // the NMOS address quirks a soup can reach (zp,X wrap, (zp),Y and (zp,X) pointer wrap, JMP ($xxFF)); the order of
@@ -26,7 +27,7 @@ const mem = (n, place = {}, fill = 0) => {
 const steps = (value) => ({ unit: "steps", value });
 const ring = (P, extra = {}) => ({
   memory: { kind: "ring", bytes: P },
-  init: { stack: { topAliases: "lastByte" }, ...(extra.init ?? {}) },
+  init: { stack: { firstPushAt: "lastByte" }, ...(extra.init ?? {}) },
   budget: steps(64),
   ...Object.fromEntries(Object.entries(extra).filter(([k]) => k !== "init")),
 });
@@ -39,7 +40,7 @@ const range = (a, b) => Array.from({ length: b - a }, (_, i) => a + i);
 
 /**
  * The draft pre-registration's stack rule: the S for which the first push lands on ring position t,
- * S = 0xFF − ((0x1FF − t) mod P). The world's init.stack.topAliases realises the same S on the 6502.
+ * S = 0xFF − ((0x1FF − t) mod P). The world's init.stack.firstPushAt must realise the same S.
  */
 const firstPushS = (P, t) => 0xff - ((0x1ff - t) % P);
 
@@ -88,13 +89,13 @@ const CASES = [
       const expectMem = { 21: 0x5a, [a9e]: 0x5a, [ab7]: 0x77, ...(P === 33 ? { [at(P, 0x115, 13)]: 0 } : {}) };
       return addJob({ isa: m6502, world: ring(P, { outputs: { writeCounts: true } }) }, [
         { mem: mem(P, { 0: [0xa2, 0x16, 0xa9, 0x5a, 0x95, 0xff, 0x85, 0x9e, 0xa4, 0xb7, 0x02], [ab7]: [0x77] }),
-          expect: { steps: 6, halt: "trap", state: { x: 0x16, a: 0x5a, y: 0x77, pc: 10, halted: 3 }, mem: expectMem, writes: [2] } },
+          expect: { steps: 6, halt: "trap", trap: "illegal", state: { x: 0x16, a: 0x5a, y: 0x77, pc: 10, halted: 3, trap: 1 }, mem: expectMem, writes: [2] } },
       ]);
     },
   })),
   ...[[32, 0xff], [33, 0xee], [64, 0xff]].map(([P, s0]) => ({
     name: `6502 stack convention on ring ${P}: S0 = 0x${s0.toString(16)} puts the first push on the last byte (draft rule)`,
-    // topAliases 'lastByte' on the 6502 = the first push lands at P - 1. LDA #$42; PHA; JAM.
+    // firstPushAt 'lastByte': the first push lands at P - 1. LDA #$42; PHA; JAM.
     setup: ({ addJob }) => {
       if (firstPushS(P, P - 1) !== s0) throw new Error(`draft rule gives S = ${firstPushS(P, P - 1)} for P = ${P}`);
       at(P, 0x100 | s0, P - 1);
@@ -132,7 +133,7 @@ const CASES = [
       at(P, 0xfffe, vlo);
       at(P, 0xffff, vhi);
       at(P, 0x100 | s0, 20);
-      const w = ring(P, { init: { stack: { topAliases: 20 }, set: { p: 0x20 } }, outputs: { ...maps, writeCounts: true } });
+      const w = ring(P, { init: { stack: { firstPushAt: 20 }, set: { p: 0x20 } }, outputs: { ...maps, writeCounts: true } });
       return addJob({ isa: m6502, world: w }, [
         { mem: mem(P, { 0: [0x00, 0xea], 16: [0x02], [vlo]: [0x10], [vhi]: [0x00] }),
           expect: { steps: 2, halt: "trap", state: { pc: 0x10, s: s0 - 3, p: 0x24 }, mem: { 20: 0x00, 19: 0x02, 18: 0x30 },
@@ -167,7 +168,7 @@ const CASES = [
     setup: ({ addJob }) => {
       at(33, 0x1f1, 2);
       at(33, 0x1210, 4);
-      return addJob({ isa: m6502, world: ring(33, { init: { stack: { topAliases: 2 } }, outputs: maps }) }, [
+      return addJob({ isa: m6502, world: ring(33, { init: { stack: { firstPushAt: 2 } }, outputs: maps }) }, [
         { mem: mem(33, { 0: [0x20, 0x10, 0x12], 4: [0xea, 0x02], 16: [0x02] }),
           expect: { steps: 2, halt: "trap", state: { pc: 0x10, s: 0xef }, mem: { 1: 0x02, 2: 0x00 }, fetched: [0, 1, 2, 16], starts: [0, 16] } },
       ]);
@@ -206,10 +207,10 @@ const CASES = [
     setup: ({ addJob }) => [
       addJob({ isa: m6502, world: ring(32, { outputs: maps }) },
         JAM.map((op) => ({ label: `JAM ${op.toString(16)}`, mem: mem(32, { 0: [0xea, op, 0xa9, 0x07] }),
-          expect: { steps: 2, halt: "trap", state: { pc: 1, a: 0, halted: 3 }, fetched: [0, 1], starts: [0, 1] } }))),
+          expect: { steps: 2, halt: "trap", trap: "illegal", state: { pc: 1, a: 0, halted: 3, trap: 1 }, fetched: [0, 1], starts: [0, 1] } }))),
       addJob({ isa: m6502, world: ring(32, { halting: { traps: { illegal: "ignore" } }, budget: steps(3) }) },
         JAM.map((op) => ({ label: `JAM ${op.toString(16)}`, mem: mem(32, { 0: [op, 0xa9, 0x07, op] }),
-          expect: { steps: 3, halt: "running", state: { a: 7, pc: 4, halted: 0 } } }))),
+          expect: { steps: 3, halt: "running", trap: 0, state: { a: 7, pc: 4, halted: 0, trap: 0 } } }))),
     ],
   },
   {
@@ -285,7 +286,7 @@ const CASES = [
     name: `6502 metamorphic: ring ${P} = mask ${P}, bit for bit (4096 random programs, 128 steps)`,
     setup: ({ addJob }) => {
       const lanes = lanesOf(randomBytes(4096 * P, 6502 + P), P);
-      const w = { init: { stack: { topAliases: "lastByte" } }, budget: steps(128), outputs: { writeCounts: true, ...maps } };
+      const w = { init: { stack: { firstPushAt: "lastByte" } }, budget: steps(128), outputs: { writeCounts: true, ...maps } };
       return [
         addJob({ isa: m6502, world: { memory: { kind: "ring", bytes: P }, ...w } }, lanes),
         addJob({ isa: m6502, world: { memory: { kind: "mask", bytes: P }, ...w } }, lanes),

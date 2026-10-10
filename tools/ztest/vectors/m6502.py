@@ -1,7 +1,9 @@
 """6502 adapter: SingleStepTests/65x02 `6502/v1` vectors on the Zilion 6502 (NMOS) core.
 
-State record (one u32 per field, vector JSON keys): pc s a x y p, plus `halted`. Every field loads into and stores
-from the core's `m6502_*` variables; nothing is passed through.
+State record (one u32 per field, vector JSON keys): pc s a x y p, plus `halted` and `trap`. pc s a x y p and halted
+load into and store from the core's `m6502_*` variables. `trap` (the contract's trap-cause field, set by JAM) is not in
+the vectors: it is passed through (input to output; declared in the rules file), and m6502_trap is cleared before the
+step. The world tests check the cause a JAM reports.
 
 One test = one call of m6502_step(): one instruction.
 
@@ -37,6 +39,7 @@ FIELDS = (
     Field("y", 8, "regs"),
     Field("p", 8, "p"),
     Field("halted", 8, "halt"),  # compared; its expectation is set per opcode in postprocess (see the docstring)
+    Field("trap", 8, "trap", architectural=False),  # passed through: not in the vectors
 )
 IDX = {f.name: i for i, f in enumerate(FIELDS)}
 VARS = {"pc": "m6502_pc", "s": "m6502_s", "a": "m6502_a", "x": "m6502_x", "y": "m6502_y", "p": "m6502_p"}
@@ -67,7 +70,7 @@ class M6502Adapter:
     addr_bits = 16
     fields = FIELDS
     step_call = "m6502_step();"
-    columns = ("regs", "p", "halt", "mem", "ports", "bus")
+    columns = ("regs", "p", "halt", "mem", "ports", "bus", "trap")
     group_order = GROUPS
     file_glob = "*.json*"
     write_cap = 8  # bus-write log slots per lane (the reference writes at most 3 bytes: BRK)
@@ -104,8 +107,9 @@ class M6502Adapter:
 
     # ---------------------------------------------------------------- state record
     def state_values(self, d: dict) -> list:
-        """Vector state dict -> state-record row. `halted` is not in the vectors: 0 here, set per opcode later."""
-        return [0 if f.name == "halted" else d[f.json_key] for f in FIELDS]
+        """Vector state dict -> state-record row. `halted` and `trap` are not in the vectors: 0 here (`halted` is set
+        per opcode in postprocess, `trap` is passed through)."""
+        return [0 if f.name in ("halted", "trap") else d[f.json_key] for f in FIELDS]
 
     @staticmethod
     def bus_writes(t: dict) -> list[tuple]:
@@ -144,7 +148,7 @@ class M6502Adapter:
         if m is None:
             raise ValueError("the 6502 core text does not declare ZIL_HALT_TRAP (emit it with the host-contract prelude)")
         self.halt_trap = int(m.group(1))
-        self.passthrough = ()
+        self.passthrough = ("trap",)
         L, S = [], []
         for name, var in VARS.items():
             i = IDX[name]
@@ -152,7 +156,10 @@ class M6502Adapter:
             L.append(f"    {var} = zt_state_in[b + {i}u] & {mask};")
             S.append(f"    zt_state_out[b + {i}u] = {var};")
         L.append("    m6502_halted = 0u;")
+        if re.search(r"var<private>\s+m6502_trap\s*:", code):
+            L.append("    m6502_trap = 0u;")
         S.append(f"    zt_state_out[b + {IDX['halted']}u] = m6502_halted; // compared with the per-opcode expectation")
+        S.append(f"    zt_state_out[b + {IDX['trap']}u] = zt_state_in[b + {IDX['trap']}u]; // trap: not in the vectors, passed through")
         hooks = []
         calls = re.search(r"(?<!fn )\bon_decode\s*\(", code) is not None
         defines = re.search(r"\bfn\s+on_decode\s*\(", code) is not None

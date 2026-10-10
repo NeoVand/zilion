@@ -351,7 +351,7 @@ MUTANTS_6502 = [
     ("brk-wrong-vector", "m6502_pc = mem_read(0xfffeu) | (mem_read(0xffffu) << 8u);",
      "m6502_pc = mem_read(0xfffcu) | (mem_read(0xfffdu) << 8u);", ["00"], "pc"),
     # JAM that does not halt (the JAM-PC mapping must not hide it).
-    ("jam-not-halting", "m6502_halted = ZIL_HALT_TRAP; m6502_pc = pc0;", "", ["02", "f2"], "halted"),
+    ("jam-not-halting", "m6502_halted = ZIL_HALT_TRAP; m6502_trap = ZIL_TRAP_ILLEGAL; m6502_pc = pc0;", "", ["02", "f2"], "halted"),
     # An opcode that halts when it should not (NOP sent to the control phase, whose default is JAM).
     ("nop-halts", "    if (cls != 0u) { m6502_control(cls, op, d, base, b1, pc0); }",
      "    if (cls != 0u || op == 0xeau) { m6502_control(cls, op, d, base, b1, pc0); }", ["ea"], "halted"),

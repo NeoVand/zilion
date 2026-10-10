@@ -12,7 +12,7 @@ WORDING = {
             "EI/P interrupt latches are internal and reported in their own columns.", "WZ, Q, EI/P", "prefix group"),
     "6502": ("Architectural fields are PC, S, A, X, Y, P, the halted state (JAM), memory, ports and the bus-write "
              "sequence (`bus`: every memory write in order, including the old-value write of a read-modify-write). "
-             "There are no internal columns.", "none", "opcode group"),
+             "`trap` (the world's trap-cause field) is not in the vectors and is passed through.", "trap", "opcode group"),
 }
 FLAG_FIELD = {"z80": "f", "6502": "p"}
 

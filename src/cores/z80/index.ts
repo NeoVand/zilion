@@ -38,6 +38,14 @@ const STATE: readonly StateField[] = [
   { name: "halted", bits: 8, wgsl: "cpu_halted", note: "0 running; 1 HALT; 2 halted by the host; see haltReason" },
 ];
 
+/**
+ * `init.stack.firstPushAt: t`. PUSH and CALL pre-decrement SP, so the first byte lands at SP − 1 (16-bit): SP is
+ * one above the highest address that aliases t (SP = 0x0000 when that address is 0xFFFF).
+ */
+export function z80FirstPushAt(P: number, t: number): { sp: number } {
+  return { sp: (highestAlias(t, P, 16) + 1) & 0xffff };
+}
+
 const FINE_PAGE_EXPR =
   "select(select(select(select(select(select(0u, 1u, prefix == 0xcbu), 2u, prefix == 0xedu), 3u, prefix == 0xddu), " +
   "4u, prefix == 0xfdu), 5u, prefix == 0xddcbu), 6u, prefix == 0xfdcbu)";
@@ -56,7 +64,13 @@ export const z80: IsaCore = {
   endianness: "little",
   state: STATE,
   internals: ["idx_mode", "idx_disp", "idx_uses_mem"],
-  symbols: { step: "z80_step", haltReason: "cpu_halted", pc: "cpu_pc" },
+  symbols: {
+    step: "z80_step",
+    haltReason: "cpu_halted",
+    pc: "cpu_pc",
+    // HALT (as-chip or by a trap policy) is the only trap that halts the Z80; it leaves halted = 1.
+    trapCause: "select(0u, ZIL_TRAP_HALT_INSN, cpu_halted == 1u)",
+  },
   hooks: ["fetch", "instructionStart", "trap", "io"],
   decode: {
     fn: "on_fetch_opcode",
@@ -98,6 +112,7 @@ export const z80: IsaCore = {
       "One instruction; one iteration of a block repeat (LDIR, CPIR, INIR, OTIR and their decrementing forms); " +
       "a wasted DD/FD prefix (followed by DD, FD or ED). A halted lane takes no further steps.",
     stackTop: (P, t) => ({ sp: highestAlias(t, P, 16) }),
+    firstPushAt: z80FirstPushAt,
     entry: (pos) => {
       if (pos < 0 || pos > 0xffff) throw new Error(`z80: entry position ${pos} is not a 16-bit address`);
       return { pc: pos };

@@ -31,7 +31,18 @@ const STATE: readonly StateField[] = [
   },
   { name: "pc", bits: 16, wgsl: "m6502_pc", note: "parked on the JAM opcode while halted by it" },
   { name: "halted", bits: 8, wgsl: "m6502_halted", note: "0 running; 2 host; 3 trap (JAM)" },
+  { name: "trap", bits: 8, wgsl: "m6502_trap", note: "TRAP_CAUSES code of the trap that halted the core (illegal: JAM); 0 otherwise" },
 ];
+
+/**
+ * `init.stack.firstPushAt: t`: a push writes 0x0100 | S, then decrements S, so the first byte lands at t when
+ * 0x0100 | S aliases t (the largest such S). For the 6502 this is also `stackTop` (topAliases): the stack pointer
+ * addresses the byte the next push writes. It is the draft pre-registration's S = 0xFF − ((0x1FF − t) mod P).
+ */
+export function m6502FirstPushAt(P: number, t: number): { s: number } {
+  for (let s = 0xff; s >= 0; s--) if ((0x100 + s) % P === t) return { s };
+  throw new Error(`m6502: no stack pointer makes 0x0100|S alias position ${t} of ${P} (P > 256)`);
+}
 
 /**
  * The MOS 6502, NMOS. Every byte decodes; the 12 JAM opcodes raise trap `illegal`, which halts the lane as-chip.
@@ -47,7 +58,12 @@ export const m6502: IsaCore = {
   endianness: "little",
   state: STATE,
   internals: [],
-  symbols: { step: "m6502_step", haltReason: "m6502_halted", pc: "m6502_pc" },
+  symbols: {
+    step: "m6502_step",
+    haltReason: "m6502_halted",
+    pc: "m6502_pc",
+    trapCause: "select(0u, m6502_trap, m6502_halted == ZIL_HALT_TRAP)", // the cause only of a halt on a trap
+  },
   hooks: ["fetch", "instructionStart", "trap"],
   decode: {
     fn: "on_decode",
@@ -60,10 +76,8 @@ export const m6502: IsaCore = {
   },
   conventions: {
     step: "One instruction (BRK and JSR are one step each). A halted lane takes no further steps.",
-    stackTop: (P, t) => {
-      for (let s = 0xff; s >= 0; s--) if ((0x100 + s) % P === t) return { s };
-      throw new Error(`m6502: no stack pointer makes 0x0100|S alias position ${t} of ${P} (P > 256)`);
-    },
+    stackTop: m6502FirstPushAt,
+    firstPushAt: m6502FirstPushAt,
     entry: (pos) => {
       if (pos < 0 || pos > 0xffff) throw new Error(`m6502: entry position ${pos} is not a 16-bit address`);
       return { pc: pos };
@@ -71,7 +85,8 @@ export const m6502: IsaCore = {
     traps: { illegal: "halt" },
     halting:
       "No halt instruction. The 12 NMOS JAM opcodes (02 12 22 32 42 52 62 72 92 B2 D2 F2) raise trap 'illegal': " +
-      "as-chip the lane halts (halted = 3, reason trap) with PC parked on the opcode; policy 'ignore' makes JAM a " +
+      "as-chip the lane halts (halted = 3, trap = 1, reason trap, trapCause illegal) with PC parked on the opcode; " +
+      "policy 'ignore' makes JAM a " +
       "1-byte no-op. A host halt from on_instruction_start sets halted = 2 with PC on the opcode (reason host). " +
       "There is no IRQ or NMI line: I only changes the P byte that PHP and BRK push.",
     illegal:

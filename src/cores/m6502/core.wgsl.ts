@@ -21,7 +21,8 @@
 //   * the unstable opcodes use the constants the vectors encode: ANE and LXA with magic 0xEE; SHA, SHX, SHY and TAS
 //     AND the stored value with (H + 1), H the high byte of the base address, and on a page crossing the stored
 //     value replaces the high byte of the target address; LAS loads A, X and S with (memory & S);
-//   * the 12 JAM opcodes call `zil_trap(ZIL_TRAP_ILLEGAL)`; as-chip the lane halts with PC parked on the opcode.
+//   * the 12 JAM opcodes call `zil_trap(ZIL_TRAP_ILLEGAL)`; as-chip the lane halts with PC parked on the opcode and
+//     the trap field set to ZIL_TRAP_ILLEGAL (the only trap this core raises).
 //
 // Dummy reads (the extra bus reads of indexed modes, implied opcodes, RMW and stack operations) are not
 // performed: a read has no side effect in a Zilion world and only instruction-stream fetches are hooked, so they
@@ -168,8 +169,8 @@ export function m6502CoreText(h: M6502Hooks = {}): string {
   // JAM: with the trap hook the world decides (ZIL_TRAP_IGNORE continues after the opcode byte); without it the
   // chip halts with PC parked on the opcode.
   const jam = h.trap
-    ? "if (zil_trap(ZIL_TRAP_ILLEGAL) != ZIL_TRAP_IGNORE) { m6502_halted = ZIL_HALT_TRAP; m6502_pc = pc0; }"
-    : "m6502_halted = ZIL_HALT_TRAP; m6502_pc = pc0;";
+    ? "if (zil_trap(ZIL_TRAP_ILLEGAL) != ZIL_TRAP_IGNORE) { m6502_halted = ZIL_HALT_TRAP; m6502_trap = ZIL_TRAP_ILLEGAL; m6502_pc = pc0; }"
+    : "m6502_halted = ZIL_HALT_TRAP; m6502_trap = ZIL_TRAP_ILLEGAL; m6502_pc = pc0;";
   return /* wgsl */ `
 // === MOS 6502 (NMOS): 151 documented and 105 undocumented opcodes (SingleStepTests 6502/v1 semantics) ===
 var<private> m6502_a: u32;
@@ -179,6 +180,7 @@ var<private> m6502_s: u32;
 var<private> m6502_p: u32;   // N V 1 B D I Z C as stored; PHP/BRK push it with bits 5 and 4 set
 var<private> m6502_pc: u32;
 var<private> m6502_halted: u32;
+var<private> m6502_trap: u32;   // the trap cause that halted the core (symbols.trapCause): ZIL_TRAP_ILLEGAL for JAM
 const M6502_ADDR_MASK: u32 = 0xffffu;
 const M6502_ANE_MAGIC: u32 = ${hex2(M6502_UNSTABLE.aneMagic)};   // ANE (8B): A = (A | magic) & X & imm
 const M6502_LXA_MAGIC: u32 = ${hex2(M6502_UNSTABLE.lxaMagic)};   // LXA (AB): A = X = (A | magic) & imm

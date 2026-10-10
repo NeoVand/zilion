@@ -136,7 +136,7 @@ class RuleTests(unittest.TestCase):
         for path in sorted((REPO / "test" / "vectors" / "6502").glob("expected-*.json")):
             rules, doc = session.load_rules(path)
             self.assertEqual(doc["isa"], "6502")
-            self.assertEqual(doc["passthrough"], [])
+            self.assertEqual(doc["passthrough"], ["trap"])
             for r in rules:
                 self.assertTrue(set(r.fields) <= names, (path.name, r.id))
                 self.assertTrue(r.reason and r.source, (path.name, r.id))
@@ -234,10 +234,11 @@ class M6502AdapterTests(unittest.TestCase):
 
     def test_glue(self):
         core = "// fn on_decode(page: u32, key: u32) -> bool\nconst ZIL_HALT_TRAP: u32 = 3u;\n" \
-               "fn m6502_step() { if (on_decode(0u, 1u)) { return; } }"
+               "var<private> m6502_trap: u32;\nfn m6502_step() { if (on_decode(0u, 1u)) { return; } }"
         ad = M6502Adapter()
         glue = ad.glue(core)
-        self.assertEqual(ad.passthrough, ())
+        self.assertEqual(ad.passthrough, ("trap",))
+        self.assertIn("m6502_trap = 0u;", glue)
         self.assertEqual(ad.halt_trap, 3)
         self.assertIn("fn on_decode(", glue)
         self.assertIn("m6502_halted = 0u;", glue)

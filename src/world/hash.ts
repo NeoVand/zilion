@@ -48,6 +48,19 @@ export function dialThreshold(p: number): number {
   return Math.min(Math.round(p * 4294967296), 4294967295);
 }
 
+/**
+ * CPU mirror of the world's dial draw `zil_draw(salt)` at a 64-bit step index (the dispatch's `stepBase` plus the
+ * steps run since it began): zil_hash(seed ^ zil_mix32(hi), lane, lo, salt) with lo and hi the low and high words
+ * of the step. zil_mix32(0) = 0, so below 2^32 steps it is exactly zilHash(seed, lane, step, salt).
+ */
+export function zilDraw(seed: number, lane: number, step: number | bigint, salt = 0): number {
+  const s = BigInt(step);
+  if (s < 0n || s >= 1n << 64n) throw new Error(`step ${step} is not a 64-bit step index`);
+  const lo = Number(s & 0xffffffffn);
+  const hi = Number(s >> 32n);
+  return zilHash((seed ^ zilMix32(hi)) >>> 0, lane, lo, salt);
+}
+
 /** CPU mirror of the initial-state draw for state field `fieldIndex` (its index in the state record). */
 export function initDraw(seed: number, lane: number, fieldIndex: number, salt = 0, bits = 32): number {
   const v = zilHash(seed, lane, fieldIndex, (salt ^ ZIL_SALT_INIT) >>> 0);

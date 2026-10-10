@@ -29,7 +29,7 @@ const jsonOut = opt("--json", null);
 
 const world = (budget, extra = {}) => ({
   memory: { kind: "segments", segments: [{ bytes: 16, name: "A" }, { bytes: 16, name: "B" }], ring: 32 },
-  init: { stack: { topAliases: "lastByte" }, ...(extra.init ?? {}) },
+  init: { stack: { firstPushAt: "lastByte" }, ...(extra.init ?? {}) },
   entry: { position: 0 },
   budget: { unit: "steps", value: budget },
   outputs: { state: false, memory: true, writeCounts: true },

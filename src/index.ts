@@ -40,14 +40,28 @@ export type {
   DecodePage,
   CoreHook,
   CoreGenOptions,
+  CoreParamDecl,
+  CoreParamValue,
   InstructionInfo,
 } from "./contract/isa.js";
+export { coreParamConstant, resolveCoreParams, checkCoreParamDecls } from "./contract/params.js";
 export { ringPos, highestAlias, lowestAlias, seamOffset } from "./contract/address.js";
 export { z80, z80CoreText } from "./cores/z80/index.js";
 export type { Z80Hooks } from "./cores/z80/index.js";
 
 // L1: worlds and the machine builder
-export { buildMachine, zilHash, zilMix32, dialThreshold, initDraw, ZIL_SALT_INIT } from "./world/index.js";
+export {
+  buildMachine,
+  zilHash,
+  zilMix32,
+  zilDraw,
+  dialThreshold,
+  initDraw,
+  ZIL_SALT_INIT,
+  presets,
+  compat02World,
+  algocellPairWorld,
+} from "./world/index.js";
 export type {
   BuiltMachine,
   WorldSpec,
@@ -56,6 +70,8 @@ export type {
   Segment,
   Position,
   InitSpec,
+  StackSpec,
+  CoreSelection,
   BudgetSpec,
   HaltingSpec,
   Dial,
@@ -83,12 +99,12 @@ export { sha256 } from "./util/sha256.js";
 
 // L2: the batch engine
 export { createEngine, Engine, Machine, Batch } from "./engine/engine.js";
-export type { EngineOptions, MachineRunOptions, LaneInput } from "./engine/engine.js";
+export type { EngineOptions, MachineRunOptions, BatchRunOptions, LaneInput } from "./engine/engine.js";
 export type { MachineResult } from "./engine/result.js";
 export { decodeResult } from "./engine/result.js";
 export { ZilionShaderError } from "./engine/gpu.js";
 export { maxLanesPerChunk, planChunks, DEFAULT_LIMITS } from "./engine/chunks.js";
 export type { ChunkLimits, ChunkPlanOptions } from "./engine/chunks.js";
-export { packMemory, unpackMemory } from "./engine/runner.js";
+export { packMemory, unpackMemory, stepBaseWords } from "./engine/runner.js";
 export type { Slab, SlabBuffers } from "./engine/runner.js";
 export { legacyMachine } from "./legacy/manifest.js";

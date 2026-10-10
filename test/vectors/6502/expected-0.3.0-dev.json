@@ -1,7 +1,7 @@
 {
  "isa": "6502",
  "core": "@neovand/zilion 0.3.0-dev (HOST_CONTRACT_PRELUDE_WGSL + M6502_CORE_WGSL, core 0.3.0)",
- "core_sha256": "0d6fb51c85861d5b1719bb3bf23f6a309b9dee1940ba1ed3981b0ada5dcecd2f",
- "passthrough": [],
+ "core_sha256": "4f4baf4dad24e724d978045be31f17ade978a56a95f77ca43e7186a0e2a765ad",
+ "passthrough": ["trap"],
  "rules": []
 }

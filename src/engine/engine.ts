@@ -7,7 +7,7 @@ import { maxLanesPerChunk, planChunks } from "./chunks.js";
 import { createKernel } from "./gpu.js";
 import { Lock } from "./lock.js";
 import { decodeResult, type MachineResult } from "./result.js";
-import { deviceLimits, LaneRunner, packMemory, unpackMemory, type Slab } from "./runner.js";
+import { deviceLimits, LaneRunner, packMemory, stepBaseWords, unpackMemory, type Slab } from "./runner.js";
 
 export interface EngineOptions {
   /** Use this device (the engine will not destroy it). */
@@ -72,8 +72,34 @@ export interface MachineRunOptions {
   readonly state?: Uint32Array;
   /** Global index of the first lane (hashes see laneBase + i). Default 0. */
   readonly laneBase?: number;
+  /**
+   * The dial index of every lane's first step in this run (a 64-bit integer; default 0). To split a run into
+   * dispatches, pass the steps already run: with a `steps` budget every lane still running has run exactly that many.
+   */
+  readonly stepBase?: number | bigint;
+  /**
+   * Continue lanes instead of beginning them: their previous records (lanes × manifest.record.wordsPerLane, e.g.
+   * the `record` of the previous result), with their previous memory as the input. Needs `manifest.resumable`.
+   * The state, steps, write counts, maps and padding carry over; the raw on_reset hook does not run again. With
+   * per-lane budgets, give each lane its remaining budget capped at the steps of this dispatch, so that every lane
+   * still running has run exactly `stepBase` steps (the engine cannot check this).
+   */
+  readonly resume?: Uint32Array;
   /** Cap on lanes per dispatch (default: as many as the device limits allow). */
   readonly maxLanesPerChunk?: number;
+}
+
+/** Options of `Batch.encode` and `Batch.run`. */
+export interface BatchRunOptions {
+  readonly seed?: number;
+  readonly budget?: number;
+  readonly ablation?: Uint32Array;
+  readonly lanes?: number;
+  readonly laneBase?: number;
+  /** The dial index of every lane's first step in this run (64-bit; default 0). */
+  readonly stepBase?: number | bigint;
+  /** Continue the lanes from the records and memory resident in the batch (needs manifest.resumable). */
+  readonly resume?: boolean;
 }
 
 /** Lane memories as one host-layout byte array (lanes × hostBytesPerLane) or one array per lane (padded/truncated). */
@@ -103,6 +129,13 @@ interface Resolved {
 
 function resolveOptions(runner: LaneRunner, lanes: number, o: MachineRunOptions): Resolved {
   const m = runner.manifest;
+  if (o.resume !== undefined) {
+    if (!m.resumable) throw new Error("zilion: this machine cannot resume lanes (manifest.resumable is false: it needs a steps budget and outputs.state and outputs.memory)");
+    if (!(o.resume instanceof Uint32Array) || o.resume.length !== lanes * m.record.wordsPerLane) {
+      throw new Error(`zilion: { resume } must be the previous records, a Uint32Array of ${lanes} x ${m.record.wordsPerLane} words`);
+    }
+  }
+  stepBaseWords(o.stepBase); // validates
   let budget = 0;
   let budgets: Uint32Array | null = null;
   if (m.budget.perLane) {
@@ -115,11 +148,12 @@ function resolveOptions(runner: LaneRunner, lanes: number, o: MachineRunOptions)
     if (o.budget instanceof Uint32Array) throw new Error("zilion: per-lane budgets need world.budget.value = 'perLane'");
     budget = b;
   }
-  if (runner.hasState) {
+  if (runner.hasState && o.resume === undefined) {
     if (!o.state || o.state.length < lanes * runner.stateWords) throw new Error(`zilion: this machine needs { state } with ${lanes} x ${runner.stateWords} words`);
-  } else if (o.state) throw new Error("zilion: { state } needs init.state = 'perLane'");
+  } else if (o.state && !runner.hasState) throw new Error("zilion: { state } needs init.state = 'perLane'");
+  else if (o.state && o.resume !== undefined) throw new Error("zilion: a resumed run continues from its records; pass { resume } or { state }, not both");
   if (o.ablation && m.ablation.kind !== "uniform") throw new Error("zilion: { ablation } needs ablation: { table: 'uniform' }");
-  return { budget, budgets, seed: o.seed ?? 0, ablation: o.ablation ?? null, state: runner.hasState ? o.state! : null };
+  return { budget, budgets, seed: o.seed ?? 0, ablation: o.ablation ?? null, state: runner.hasState && o.state ? o.state : null };
 }
 
 export class Machine {
@@ -180,7 +214,11 @@ export class Machine {
       this.runner.writeMemory(slab, packMemory(m, bytes.subarray(start * H, (start + count) * H), count));
       if (r.state) this.runner.writeState(slab, r.state.subarray(start * this.runner.stateWords, (start + count) * this.runner.stateWords));
       if (r.budgets) this.runner.writeBudgets(slab, r.budgets.subarray(start, start + count));
-      this.runner.writeParams(slab, { laneCount: count, laneBase: (o.laneBase ?? 0) + start, budget: r.budget, seed: r.seed, ablation: r.ablation });
+      if (o.resume) this.runner.writeRecord(slab, o.resume.subarray(start * R, (start + count) * R));
+      this.runner.writeParams(slab, {
+        laneCount: count, laneBase: (o.laneBase ?? 0) + start, budget: r.budget, seed: r.seed, ablation: r.ablation,
+        stepBase: o.stepBase, resume: o.resume !== undefined,
+      });
       const enc = this.device.createCommandEncoder({ label: this.label });
       const pass = enc.beginComputePass({ label: this.label });
       this.runner.dispatch(pass, slab, count);
@@ -261,16 +299,34 @@ export class Batch {
     this.each(o.lane ?? 0, budgets.length, (s, at, from, n) => this.runner.writeBudgets(s, budgets.subarray(from, from + n), at));
   }
 
-  /** Record a run of the first `lanes` lanes (default: all) into `enc`. */
-  encode(enc: GPUCommandEncoder, o: { seed?: number; budget?: number; ablation?: Uint32Array; lanes?: number; laneBase?: number } = {}): void {
+  /** Upload lane records (manifest.record layout) for a resumed encode, e.g. the `record` of an earlier result. */
+  uploadRecords(records: Uint32Array, o: { lane?: number } = {}): void {
+    const R = this.manifest.record.wordsPerLane;
+    if (records.length % R !== 0) throw new Error(`zilion: records are ${records.length} words, not a whole number of ${R}-word lanes`);
+    this.each(o.lane ?? 0, records.length / R, (s, at, from, n) => this.runner.writeRecord(s, records.subarray(from * R, (from + n) * R), at));
+  }
+
+  /**
+   * Record a run of the first `lanes` lanes (default: all) into `enc`. `resume: true` continues the lanes from the
+   * records and memory resident in the batch (the outputs of the previous encode, or uploaded ones) instead of
+   * beginning them; `stepBase` is the dial index of their first step in this run (the steps already run). The params
+   * are written when encode is called, so submit each encode before the next: several resumed encodes in one
+   * encoder would all run with the last step base.
+   */
+  encode(enc: GPUCommandEncoder, o: BatchRunOptions = {}): void {
     const lanes = o.lanes ?? this.capacity;
     const m = this.manifest;
     const budget = o.budget ?? m.budget.default ?? (m.budget.perLane ? 0 : null);
     if (budget === null) throw new Error("zilion: no budget (pass { budget } or set world.budget.value)");
     if (o.ablation && m.ablation.kind !== "uniform") throw new Error("zilion: { ablation } needs ablation: { table: 'uniform' }");
+    if (o.resume && !m.resumable) throw new Error("zilion: this machine cannot resume lanes (manifest.resumable is false)");
+    stepBaseWords(o.stepBase);
     const pass = enc.beginComputePass({ label: "zilion:batch" });
     this.each(0, lanes, (s, _at, _from, n) => {
-      this.runner.writeParams(s, { laneCount: n, laneBase: (o.laneBase ?? 0) + s.laneStart, budget, seed: o.seed ?? 0, ablation: o.ablation ?? null });
+      this.runner.writeParams(s, {
+        laneCount: n, laneBase: (o.laneBase ?? 0) + s.laneStart, budget, seed: o.seed ?? 0, ablation: o.ablation ?? null,
+        stepBase: o.stepBase, resume: !!o.resume,
+      });
       this.runner.dispatch(pass, s, n);
     });
     pass.end();
@@ -299,7 +355,7 @@ export class Batch {
   }
 
   /** encode + submit + read (all submitted before this returns). */
-  run(o: { seed?: number; budget?: number; ablation?: Uint32Array; lanes?: number; laneBase?: number } = {}): Promise<MachineResult> {
+  run(o: BatchRunOptions = {}): Promise<MachineResult> {
     if (this.destroyed) return Promise.reject(new Error("zilion: batch destroyed"));
     const enc = this.device.createCommandEncoder({ label: "zilion:batch" });
     this.encode(enc, o);
