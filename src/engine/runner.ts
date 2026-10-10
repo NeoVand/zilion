@@ -33,6 +33,19 @@ export interface DispatchParams {
   readonly budget: number;
   readonly seed: number;
   readonly ablation?: Uint32Array | null;
+  /** 64-bit step base (params role `stepBase`), default 0. */
+  readonly stepBase?: number | bigint;
+  /** Continue the lanes from their record and memory (params role `resume`). */
+  readonly resume?: boolean;
+}
+
+/** A step base as (low, high) u32 words: a non-negative safe integer or a bigint below 2^64. */
+export function stepBaseWords(v: number | bigint | undefined): [number, number] {
+  if (v === undefined) return [0, 0];
+  if (typeof v === "number" && !(Number.isSafeInteger(v) && v >= 0)) throw new Error(`zilion: stepBase must be a non-negative integer (got ${v})`);
+  const b = BigInt(v);
+  if (b < 0n || b >= 1n << 64n) throw new Error(`zilion: stepBase must be below 2^64 (got ${v})`);
+  return [Number(b & 0xffffffffn), Number(b >> 32n)];
 }
 
 const words = (n: number) => Math.max(n, 1) * 4; // buffers are never empty
@@ -158,6 +171,13 @@ export class LaneRunner {
         case "laneBase": out[o] = p.laneBase >>> 0; break;
         case "budget": out[o] = p.budget >>> 0; break;
         case "seed": out[o] = p.seed >>> 0; break;
+        case "stepBase": {
+          const [lo, hi] = stepBaseWords(p.stepBase);
+          out[o] = lo;
+          out[o + 1] = hi;
+          break;
+        }
+        case "resume": out[o] = p.resume ? 1 : 0; break;
         case "constant": out[o] = (f.value ?? 0) >>> 0; break;
         case "ablation":
           if (p.ablation) {
@@ -168,7 +188,15 @@ export class LaneRunner {
         default: break;
       }
     }
+    if (p.resume && !this.manifest.params.fields.some((f) => f.role === "resume")) {
+      throw new Error("zilion: this machine cannot resume lanes (manifest.resumable is false)");
+    }
     this.device.queue.writeBuffer(s.buffers.params, 0, out);
+  }
+
+  /** Lane records (manifest.record layout) for `lanes` lanes starting at slab lane `at`: what a resumed dispatch continues from. */
+  writeRecord(s: Slab, records: Uint32Array, at = 0): void {
+    this.device.queue.writeBuffer(s.buffers.record, at * this.recWords * 4, src(records));
   }
 
   /** Storage-layout words for `lanes` lanes starting at slab lane `at`. */

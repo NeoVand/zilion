@@ -4,8 +4,9 @@
 //
 //   node test/world/algocell.mjs [--algocell <repo>] [--python <exe>] [--n 20000] [--only <substring>]
 //
-// For each case it builds a machine from a world spec (segments [L, L] on a ring of P, stack at the last byte,
-// writes counted) and runs the same random pairs through it and through Algocell's shader for that condition:
+// For each case it builds a machine from a world spec (the Algocell pair preset: segments [L, L] on a ring of P, the
+// stack pointer at the last byte, 128 steps, writes counted) and runs the same random pairs through it and through
+// Algocell's shader for that condition:
 // the plain executors (even, odd and padded rings), the lethal-tar executor, the traced and op-traced executors
 // (derived by Algocell's own gen_trace_shader / optrace hunks), the probability dial and the randreg/randsp
 // conventions (both reproduced through raw hooks, the escape hatch for registered PCG streams), and instruction
@@ -31,12 +32,11 @@ if (!existsSync(join(algocell, "experiments/algocell_exp/shader"))) {
   process.exit(0);
 }
 
-const pair = (L, P, extra = {}) => ({
-  memory: { kind: "segments", segments: [{ bytes: L, name: "A" }, { bytes: L, name: "B" }], ring: P },
-  init: { stack: { topAliases: "lastByte" } },
-  ...extra,
-  outputs: { writeCounts: true, ...(extra.outputs ?? {}) },
-});
+const STEPS = 128;
+const pair = (L, P, extra = {}) => {
+  const base = Z.algocellPairWorld({ L, P, steps: STEPS });
+  return { ...base, ...extra, outputs: { ...base.outputs, ...(extra.outputs ?? {}) } };
+};
 
 // Algocell's PCG step (gen_dial_shader.py, gen_conv_shader.py), reproduced through raw hooks.
 const pcg = (state, fn) => `var<private> ${state}: u32;
@@ -89,7 +89,7 @@ const plan = CASES.map((c, i) => {
   writeFileSync(join(dir, `m${i}.wgsl`), m.wgsl);
   writeFileSync(join(dir, `m${i}.manifest.json`), JSON.stringify(m.manifest));
   return { name: c.name, L: c.L, source: c.source, derive: c.derive ?? null, masks: c.masks ?? null,
-    wgsl: join(dir, `m${i}.wgsl`), manifest: join(dir, `m${i}.manifest.json`), n: N, steps: 128, seed: 1000 + i };
+    wgsl: join(dir, `m${i}.wgsl`), manifest: join(dir, `m${i}.manifest.json`), n: N, steps: STEPS, seed: 1000 + i };
 });
 writeFileSync(join(dir, "plan.json"), JSON.stringify({ algocell, cases: plan }));
 const py = spawnSync(python, [join(here, "algocell_equiv.py"), join(dir, "plan.json")], { stdio: "inherit" });

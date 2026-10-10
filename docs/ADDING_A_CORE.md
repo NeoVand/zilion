@@ -10,7 +10,10 @@ first. The two skeletons in `src/cores/m6502/` and `src/cores/bff/` are short, c
 ### 1. WGSL
 
 - **State** as `var<private>` variables with the core's prefix (`m6502_a`, `bff_ip`; the Z80 keeps its 0.2
-  `cpu_*` names). Every value the next step depends on must be a state field or an internal (below).
+  `cpu_*` names). Every value the next step depends on must be a **state field**. Internals (below) are
+  per-instruction temporaries: a step must not depend on their value at its start, because a resumed lane
+  continues from its state record with every internal at 0 (the Z80 clears its index-prefix internals at the top
+  of every step).
 - **A step function** (`<id>_step()`), executing exactly one step as the descriptor defines it. It returns at
   once when the core is halted.
 - **Memory only through the host**: `mem_read(addr) -> u32` and `mem_write(addr, val)`, one byte each, with
@@ -26,9 +29,19 @@ first. The two skeletons in `src/cores/m6502/` and `src/cores/bff/` are short, c
     `true` skips the instruction. What a skip consumes is documented in `decode.skip`; the rule is opcode units
     only, operands run as code;
   - `zil_trap(ZIL_TRAP_<CAUSE>)` for every trap cause, with as-chip behaviour inline when the hook is off;
+    **every path that halts on a trap records the cause** in state (see `symbols.trapCause` below): with the hook
+    on and off, as-chip and re-policied alike;
   - `io_in(port)` / `io_out(port, val)` for port I/O.
 - **Halt reasons** in a u32 the descriptor names: `ZIL_RUNNING`, `ZIL_HALT_INSN` (the ISA's halt instruction),
   `ZIL_HALT_HOST`, `ZIL_HALT_TRAP`.
+- **The trap cause** that halted the core, as a `ZIL_TRAP_<CAUSE>` code (0 otherwise), recoverable from state
+  fields alone. A core whose only halting trap is evident from its halt state can derive it (the Z80:
+  `select(0u, ZIL_TRAP_HALT_INSN, cpu_halted == 1u)`); otherwise keep a state field for it (the skeletons'
+  `trap`, set next to `halted` in every trap path) and report it only while the halt reason says trap
+  (`select(0u, m6502_trap, m6502_halted == ZIL_HALT_TRAP)`), so a running lane never reports a cause.
+- **Core parameters**, if the descriptor declares any, are read only through the builder's constants
+  `ZIL_PARAM_<NAME>` (and `ZIL_PARAM_<NAME>_<VALUE>` for enum values; see docs/ARCHITECTURE.md, Core parameters).
+  They are compile-time constants, so branching on them costs nothing. Never turn one into a uniform.
 - Use the prelude constants (`ZIL_*`), never their numeric values. Stay inside the WGSL subset a CPU twin can
   transpile (u32/i32/bool, `select`, `switch`, `if`/`for`/`loop`, private scalars and arrays).
 
@@ -36,10 +49,16 @@ first. The two skeletons in `src/cores/m6502/` and `src/cores/bff/` are short, c
 
 Fill every field of `IsaCore`: identity and `status` (`skeleton` until the core is conformance-tested);
 `addressBits`; `fetchUnitBytes`; `state` (record order, widths, WGSL lvalues, non-zero `reset` values,
-`randomizable`); `internals`; `symbols`; the hooks it can call; `decode` (hook name and parameters, page
-layouts as WGSL expressions over them, the skip rule); `conventions` (step definition, `stackTop(P, t)` or
-null, `entry(pos, P)`, trap causes with the chip's decision, prose on halting and illegal opcodes); `variants`
-and `compat`; `wgsl(options)`. Add a new trap cause to `TRAP_CAUSES` (`src/contract/host.ts`) only if no
+`randomizable`); `internals`; `symbols` (`step`, `haltReason`, `pc` and `trapCause`, the last an expression over
+state fields); the hooks it can call; `decode` (hook name and parameters, page layouts as WGSL expressions over
+them, the skip rule); `conventions` (step definition; the two stack conventions, both functions or both null:
+`firstPushAt(P, t)`, the state that makes the first byte pushed land at ring position t, and `stackTop(P, t)`, the
+state whose stack pointer aliases t, with the ISA's own meaning; `entry(pos, P)`; trap causes with the chip's
+decision; prose on halting and illegal opcodes); `variants` and `compat`; optional `params` (name →
+`{ type: 'u32' | 'bool' | 'enum', default, values? }`, names and enum values lower snake case, checked by
+`checkCoreParamDecls`); `wgsl(options)` (which also receives the resolved `params`). Keep `firstPushAt` a small
+function of its own (`z80FirstPushAt`, `m6502FirstPushAt`): it is the cross-ISA meaning of the stack, and worlds
+compared across ISAs rely on it. Add a new trap cause to `TRAP_CAUSES` (`src/contract/host.ts`) only if no
 existing cause fits; the list is shared by every ISA.
 
 ### 3. Tests
@@ -47,7 +66,9 @@ existing cause fits; the list is shared by every ISA.
 - **World tests** (`test/world/cases_cores.mjs` shows the pattern): instantiate the shared families with the
   core's own probe programs — a jump to an absolute address, a relative branch, a push, a store and a load —
   on odd and padded rings, across the seam, with every halting policy and the maps, with hand-computed
-  expectations. Then add the core to the "one world, three ISAs" case.
+  expectations, including the trap cause of every trap path. Add the core to the `firstPushAt` case (the first
+  push lands on the last byte on rings of 32 and 33 bytes and on a padded pair) and to the "one world, three ISAs"
+  case, and run a split run (`stepChunks`, k = 1, 2, 7) against one dispatch: it catches state the record misses.
 - **Conformance vectors** (separate work item: the generic per-instruction runner): data-only vectors with a
   divergence ledger; the state record and `zil_load_state`/`zil_store_state` are generated from the
   descriptor, so the adapter only maps field names.
@@ -72,12 +93,14 @@ vector read through positions 65534 mod P and 65535 mod P, and JAM re-policied a
    with the right length), BRK clears D, the `JMP ($xxFF)` fix, the new opcodes.
 4. **Conformance**: SingleStepTests/65x02 through the generic vector runner (needs a `sparse` memory model,
    not in this milestone; state I/O already comes from the descriptor).
-5. **Open points found by the skeleton** (no change made; for review):
-   - *Stack-top meaning.* "The stack top aliases t" is realised per ISA: the 6502's first push lands **at** t,
-     the Z80's at t − 1 (it pre-decrements). Worlds that compare stack use across ISAs may want the shared
-     convention to be "the first push lands at t" instead.
-   - *Halt-cause detail.* JAM and an unimplemented opcode both report `trap`; the record does not say which
-     cause. A `haltCause` word in the record would answer it for every ISA.
+5. **Points found by the skeleton**:
+   - *Stack-top meaning* (resolved, decision 1): `init.stack.firstPushAt: t` makes the first push land at t on
+     every ISA; the 6502's `m6502FirstPushAt` is the same S as its `stackTop`, the Z80's is one above. The full
+     core keeps `m6502FirstPushAt` as is.
+   - *Halt-cause detail* (resolved, decision 2): the record's `trapCause` says `illegal` for JAM and
+     `unimplemented` for an opcode the skeleton lacks. The full core keeps the `trap` state field and sets it in
+     every trap path (`symbols.trapCause: "m6502_trap"`).
+   - *Decimal mode* is a candidate core parameter (decision 4).
    - *Cycle budgets* (M4) need a per-opcode table including page-crossing penalties.
 
 ## What BFF still needs
@@ -99,12 +122,15 @@ including the shared pair world. The contract needed **no change** for it. To be
 3. **The bounds check stays at the end of a step** (as in the skeleton), so `steps` equals bff.py's `executed`
    (bff.py breaks before counting when the pointer is out of range at the top of the next iteration).
 4. **Variant parameters.** `density_map(k)` and the literal-push switch (`literal`, `lit_rep`) are parameters,
-   not names. The contract has only a variant *name*; it needs either a `variantParams` object in
-   `CoreGenOptions` (compile-time tables) or a core-owned uniform table. This is the one contract extension BFF
-   forces; it is not made here.
+   not names. The contract now has core parameters (decision 4): declare them in `params` (for example
+   `density: { type: 'u32', … }`, `literal: { type: 'bool', … }`), read them through `ZIL_PARAM_*` in the core
+   text, and tables that depend on them can be generated in `wgsl(o)` from `o.params`. The mechanism is in place and
+   tested with a test-only core; the BFF semantics are not written yet.
 5. **Records**: bff.py's `writesB` counts writes at positions ≥ 64; on the pair world [64, 64] on ring 128 that
    is the world's write counter for segment B. Its `entered` ("an op executed in B") and `max_pc` are over the
    positions of executed ops, which is the **start map**, not the fetch map: the literal-push op reads its two
    operand bytes as instruction stream (fetched) but never executes them.
-6. **Open points** (for review): the halt cause (bounds vs unmatched; see the 6502 note); resumable runs need a
-   step base in the params so that `zil_step` (and the dial) continue across runs.
+6. **Resolved points**: the halt cause (`trapCause`: `bounds`, `unmatched`, `unimplemented`; the skeleton keeps a
+   `trap` state field); resumable runs (the params' `stepBase` reaches every dial draw, so bff.py's step index `s`
+   is `stepBase` plus the steps run; tested on the skeleton with the bounds dial for k = 1, 2, 7). BFF has no
+   stack: a world for it gives no `init.stack` (giving one is an error).

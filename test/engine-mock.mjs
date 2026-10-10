@@ -15,7 +15,7 @@ globalThis.GPUMapMode = { READ: 1, WRITE: 2 };
 globalThis.GPUShaderStage = { VERTEX: 1, FRAGMENT: 2, COMPUTE: 4 };
 
 function mockDevice(limits = {}) {
-  const stats = { live: 0, errors: [], maxSize: 0 };
+  const stats = { live: 0, errors: [], maxSize: 0, dispatches: [] };
   const lim = { maxStorageBufferBindingSize: 134217728, maxBufferSize: 268435456, maxComputeWorkgroupsPerDimension: 65535, ...limits };
   let lost = false;
   const run = (ops) => {
@@ -70,6 +70,8 @@ function mockDevice(limits = {}) {
                 const mem = buf(1);
                 const rec = buf(2);
                 for (const x of [mem, rec]) if (x.destroyed) stats.errors.push(`dispatch uses destroyed ${x.label}`);
+                // what the kernel would see: the params and the records it would resume from
+                stats.dispatches.push({ params: new Uint32Array(buf(0).data.slice().buffer), recordIn: new Uint32Array(rec.data.slice().buffer) });
                 for (let i = 0; i < mem.data.length; i++) mem.data[i] = (mem.data[i] + 1) & 0xff;
                 new Uint32Array(rec.data.buffer).fill(mem.data[0]);
               });
@@ -119,7 +121,7 @@ const assert = (c, m) => {
 };
 const all = (arr, v, what) => assert(Array.from(arr).every((x) => x === v), `${what}: expected all ${v}, got ${Array.from(arr).slice(0, 8)}…`);
 const clean = (dev) => assert(dev.stats.errors.length === 0, dev.stats.errors.join("; "));
-const world = { memory: { kind: "ring", bytes: 32 }, budget: { value: 10 } };
+const world = { memory: { kind: "ring", bytes: 32 }, budget: { unit: "steps", value: 10 }, init: { stack: { firstPushAt: "lastByte" } } };
 
 await test("Batch.read() snapshots at call time: read, run, read → 1 and 2 dispatches (review bug 1)", async () => {
   const dev = mockDevice();
@@ -200,7 +202,7 @@ await test("staging buffers stay within maxBufferSize; chunks are planned for th
   assert(per === 11, `planned ${per} lanes per chunk, expected 11`);
   const dev = mockDevice(limits);
   const engine = await Z.createEngine({ device: dev });
-  const m = await engine.machine({ isa: Z.z80, world: { memory: { kind: "ring", bytes: 256 }, budget: { value: 1 } } });
+  const m = await engine.machine({ isa: Z.z80, world: { memory: { kind: "ring", bytes: 256 }, budget: { unit: "steps", value: 1 }, init: { stack: { topAliases: "lastByte" } } } });
   const r = await m.run(new Uint8Array(100 * 256));
   all(r.steps, 1, "steps");
   const z = await Z.Zilion.create({ memBytes: 256, device: dev });
@@ -222,6 +224,71 @@ await test("the typed engine refuses 0.2-kernel manifests (review nit 7)", async
     threw2 = true;
   }
   assert(threw2, "decodeResult on a legacy manifest must throw");
+});
+
+await test("Machine.run({ stepBase, resume }): the params carry the 64-bit step base and the resume flag; each chunk's records are uploaded before its dispatch", async () => {
+  const dev = mockDevice();
+  const engine = await Z.createEngine({ device: dev });
+  const m = await engine.machine({ isa: Z.z80, world });
+  assert(m.manifest.resumable, "the world should be resumable");
+  const R = m.manifest.record.wordsPerLane;
+  const at = (role) => m.manifest.params.fields.find((f) => f.role === role).offset / 4;
+  const lanes = 150;
+  const prev = new Uint32Array(lanes * R).map((_, i) => (i * 2654435761) >>> 0);
+  await m.run(new Uint8Array(lanes * 32), { resume: prev, stepBase: 2n ** 32n + 7n, maxLanesPerChunk: 64 });
+  const d = dev.stats.dispatches;
+  assert(d.length === 3, `${d.length} dispatches, expected 3 chunks`);
+  d.forEach((x, k) => {
+    assert(x.params[at("stepBase")] === 7 && x.params[at("stepBase") + 1] === 1, `chunk ${k}: step base words ${x.params[at("stepBase")]}, ${x.params[at("stepBase") + 1]}`);
+    assert(x.params[at("resume")] === 1, `chunk ${k}: resume flag ${x.params[at("resume")]}`);
+    const n = Math.min(64, lanes - 64 * k);
+    const want = prev.subarray(64 * k * R, (64 * k + n) * R);
+    assert(want.every((v, i) => x.recordIn[i] === v), `chunk ${k}: the kernel would not resume from the uploaded records`);
+  });
+  d.length = 0;
+  await m.run(new Uint8Array(2 * 32), { stepBase: 5 });
+  assert(d[0].params[at("resume")] === 0 && d[0].params[at("stepBase")] === 5 && d[0].params[at("stepBase") + 1] === 0, "a begun run");
+  const rejects = async (p, re) => {
+    let msg = "";
+    await p.catch((e) => (msg = String(e.message)));
+    assert(re.test(msg), `expected ${re}, got ${JSON.stringify(msg)}`);
+  };
+  await rejects(m.run(new Uint8Array(2 * 32), { resume: new Uint32Array(5) }), /previous records/);
+  await rejects(m.run(new Uint8Array(32), { stepBase: -1 }), /non-negative/);
+  const nr = await engine.machine({ isa: Z.z80, world: { ...world, budget: { unit: "fetchBytes", value: 10 } } });
+  await rejects(nr.run(new Uint8Array(32), { resume: new Uint32Array(nr.manifest.record.wordsPerLane) }), /cannot resume/);
+  // Batch: uploadRecords + encode({ resume: true, stepBase }) continues the resident lanes
+  const b = m.batch(100, { maxLanesPerSlab: 64 });
+  const recs = new Uint32Array(100 * R).fill(9);
+  b.uploadRecords(recs);
+  d.length = 0;
+  const enc = dev.createCommandEncoder();
+  b.encode(enc, { resume: true, stepBase: 3 });
+  dev.queue.submit([enc.finish()]);
+  assert(d.length === 2 && d.every((x) => x.params[at("resume")] === 1 && x.params[at("stepBase")] === 3 && x.recordIn[0] === 9), "batch resume");
+  let threw = false;
+  try {
+    nr.batch(4).encode(dev.createCommandEncoder(), { resume: true });
+  } catch {
+    threw = true;
+  }
+  assert(threw, "encode({ resume }) on a machine that cannot resume must throw");
+  b.destroy();
+  clean(dev);
+});
+
+await test("typed results decode trapCause through the manifest", async () => {
+  const m = Z.buildMachine({ isa: Z.z80, world }).manifest;
+  const R = m.record.wordsPerLane;
+  const rec = new Uint32Array(3 * R);
+  rec[0 * R + 2] = 0;
+  rec[1 * R + 1] = 1;
+  rec[1 * R + 2] = Z.TRAP_CAUSES["halt-insn"];
+  rec[2 * R + 2] = 99;
+  const r = Z.decodeResult(m, 3, null, rec);
+  assert(r.trapCause.join() === `0,${Z.TRAP_CAUSES["halt-insn"]},99`, `trapCause ${r.trapCause}`);
+  assert(r.trapCauseOf(0) === 0 && r.trapCauseOf(1) === "halt-insn" && r.trapCauseOf(2) === 99, "trapCauseOf");
+  assert(r.haltReasonOf(1) === "halt-insn", "haltReasonOf");
 });
 
 console.log(`${pass} passed, ${fail} failed`);

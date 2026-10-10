@@ -56,6 +56,16 @@ export interface DecodeHook {
 /** Optional host-contract-v2 hooks a core can call (the decode hook is always called when `decode` is set). */
 export type CoreHook = "fetch" | "instructionStart" | "trap" | "io";
 
+/** A compile-time parameter a core declares (`IsaCore.params`). Never a uniform: changing one is a recompile. */
+export type CoreParamDecl =
+  | { readonly type: "u32"; readonly default: number; readonly description?: string }
+  | { readonly type: "bool"; readonly default: boolean; readonly description?: string }
+  /** One of `values`; emitted as its index, with one constant per value. */
+  | { readonly type: "enum"; readonly default: string; readonly values: readonly string[]; readonly description?: string };
+
+/** A resolved core parameter value: a u32, a bool, or an enum value name. */
+export type CoreParamValue = number | boolean | string;
+
 export interface CoreGenOptions {
   /** One of `IsaCore.variants` (default `IsaCore.defaultVariant`). */
   variant?: string;
@@ -63,16 +73,29 @@ export interface CoreGenOptions {
   compat?: string;
   /** Which optional hooks the generated text calls. A disabled hook is never called (WGSL has no defaults). */
   hooks: Readonly<Partial<Record<CoreHook, boolean>>>;
+  /**
+   * Every declared parameter, resolved (the world's choice, else the declared default). The builder also emits
+   * each one as a WGSL constant ahead of the core text (`coreParamConstants`), which is what the core text
+   * should use; the values are passed here for cores that generate text from them.
+   */
+  params?: Readonly<Record<string, CoreParamValue>>;
 }
 
 export interface IsaConventions {
   /** What one step is (the budget unit `steps`). */
   readonly step: string;
   /**
-   * State values that realise the world convention "the stack top aliases ring position t" on a ring of P bytes,
-   * or null for an ISA without a hardware stack. Where the first push lands relative to t is ISA-specific.
+   * State values that realise the world convention `init.stack.topAliases: t` ("the stack pointer aliases ring
+   * position t") on a ring of P bytes, or null for an ISA without a hardware stack. Where the first push lands
+   * relative to t is ISA-specific (Z80: t − 1; 6502: t). Kept for the `compat:'0.2'` and Algocell worlds.
    */
   readonly stackTop: ((P: number, t: number) => Readonly<Record<string, number>>) | null;
+  /**
+   * State values that realise `init.stack.firstPushAt: t`: the first byte pushed lands at ring position t, the
+   * same bytes on every ISA (Z80: SP − 1 aliases t; 6502: 0x0100 | S aliases t). Null exactly when `stackTop`
+   * is null. Keep it a small function of its own: it is the cross-ISA meaning of the stack.
+   */
+  readonly firstPushAt: ((P: number, t: number) => Readonly<Record<string, number>>) | null;
   /** State values that start execution at ring position `pos`. */
   entry(pos: number, P: number): Readonly<Record<string, number>>;
   /** The trap causes this core raises, with what the chip itself does ("as-chip"). */
@@ -119,6 +142,12 @@ export interface IsaCore {
     readonly step: string;
     /** WGSL u32 expression: ZIL_RUNNING or a ZIL_HALT_* reason. */
     readonly haltReason: string;
+    /**
+     * WGSL u32 expression: the TRAP_CAUSES code (ZIL_TRAP_<CAUSE>) of the trap that halted the core, as-chip or by
+     * a world policy, and 0 when it did not halt on a trap. It must depend on state fields only, so that it
+     * survives a state store and load (resumed runs, per-lane state).
+     */
+    readonly trapCause: string;
     /** WGSL u32 expression: address of the next instruction. */
     readonly pc: string;
   };
@@ -132,6 +161,12 @@ export interface IsaCore {
   readonly defaultVariant: string;
   /** Accepted `compat` values; the first is the default. */
   readonly compat: readonly string[];
+  /**
+   * Compile-time parameters (name → declaration). A machine selects values with `core: { isa, params }`; the
+   * builder validates them, emits `const ZIL_PARAM_<NAME>` ahead of the core text and records them in the
+   * manifest. Names are lower snake case (`[a-z][a-z0-9_]*`), as are enum values.
+   */
+  readonly params?: Readonly<Record<string, CoreParamDecl>>;
   /** The core text for these options. Uses the prelude constants (HOST_CONTRACT_PRELUDE_WGSL) when hooks are on. */
   wgsl(o: CoreGenOptions): string;
   /** Mnemonic table (later milestone). */

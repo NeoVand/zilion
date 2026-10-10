@@ -64,6 +64,14 @@ function semantics(o: { variant?: string; compat?: string }): Required<Z80Semant
   return { variant: variant as Z80Semantics["variant"] & string, compat: compat as Z80Semantics["compat"] & string };
 }
 
+/**
+ * `init.stack.firstPushAt: t`. PUSH and CALL pre-decrement SP, so the first byte lands at SP − 1 (16-bit): SP is
+ * one above the highest address that aliases t (SP = 0x0000 when that address is 0xFFFF).
+ */
+export function z80FirstPushAt(P: number, t: number): { sp: number } {
+  return { sp: (highestAlias(t, P, 16) + 1) & 0xffff };
+}
+
 const FINE_PAGE_EXPR =
   "select(select(select(select(select(select(0u, 1u, prefix == 0xcbu), 2u, prefix == 0xedu), 3u, prefix == 0xddu), " +
   "4u, prefix == 0xfdu), 5u, prefix == 0xddcbu), 6u, prefix == 0xfdcbu)";
@@ -89,7 +97,14 @@ export const z80: IsaCore = {
     if (s.compat === "0.2") return { state: STATE_02, internals: INTERNALS };
     return { state: s.variant === "zilog-nmos" ? STATE_NMOS : STATE, internals: s.variant === "zilog-nmos" ? [...INTERNALS, "z80_qf"] : INTERNALS };
   },
-  symbols: { step: "z80_step", haltReason: "cpu_halted", pc: "cpu_pc" },
+  symbols: {
+    step: "z80_step",
+    haltReason: "cpu_halted",
+    pc: "cpu_pc",
+    // HALT (as-chip or by a trap policy) is the only trap that halts the Z80; it leaves halted = 1 (Z80_HALT_INSN in
+    // the compat '0.3' text). A host halt (2) is not a trap. No other trap cause exists in any compat or variant.
+    trapCause: "select(0u, ZIL_TRAP_HALT_INSN, cpu_halted == 1u)",
+  },
   hooks: ["fetch", "instructionStart", "trap", "io"],
   decode: {
     fn: "on_fetch_opcode",
@@ -131,6 +146,7 @@ export const z80: IsaCore = {
       "One instruction; one iteration of a block repeat (LDIR, CPIR, INIR, OTIR and their decrementing forms); " +
       "a wasted DD/FD prefix (followed by DD, FD or ED). A halted lane takes no further steps.",
     stackTop: (P, t) => ({ sp: highestAlias(t, P, 16) }),
+    firstPushAt: z80FirstPushAt,
     entry: (pos) => {
       if (pos < 0 || pos > 0xffff) throw new Error(`z80: entry position ${pos} is not a 16-bit address`);
       return { pc: pos };

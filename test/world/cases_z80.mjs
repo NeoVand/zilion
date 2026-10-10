@@ -200,6 +200,27 @@ ${body}
       return jobs;
     },
   },
+  {
+    name: "resumable runs keep the latches: WZ (BIT n,(HL) after a split), Q (zilog-nmos SCF after a split), and k = 7 dispatches = one for zilog-nmos and compat '0.2'",
+    // LD A,(0x0000); | BIT 0,(HL); HALT: WZ = 1 crosses the split, so F = 0x54 (0x7C if WZ were lost).
+    // LD A,0; CP 0x28 (F = 0xBB: X/Y from the operand; Q = F) | SCF; HALT: X/Y = ((Q ^ F) | A) & 0x28 = 0 → F = 0x81;
+    // with Q lost (0) it would be (F | A) & 0x28 → 0xA9.
+    setup: ({ Z, addJob }) => {
+      const nmos = { isa: Z.z80, variant: "zilog-nmos", world: ring(32, { budget: { unit: "steps", value: 128 } }) };
+      const c02 = { isa: Z.z80, compat: "0.2", world: ring(32, { budget: { unit: "steps", value: 128 } }) };
+      const random = lanesOf(randomBytes(4096 * 32, 123), 32);
+      const chunks = [1, 5, 17, 30, 25, 40, 10];
+      return [
+        addJob({ isa: Z.z80, world: ring(32) }, [{ mem: mem(32, { 0: [0x3a, 0x00, 0x00, 0xcb, 0x46, 0x76] }), expect: { steps: 3, state: { f: 0x54, wz: 1 } } }], { stepChunks: [1, 2] }),
+        addJob(nmos, [{ mem: mem(32, { 0: [0x3e, 0x00, 0xfe, 0x28, 0x37, 0x76] }), expect: { steps: 4, state: { f: 0x81, q: 0 } } }], { stepChunks: [2, 2] }),
+        addJob(nmos, random, { budget: 128 }),
+        addJob(nmos, random, { stepChunks: chunks }),
+        addJob(c02, random, { budget: 128 }),
+        addJob(c02, random, { stepChunks: chunks }),
+      ];
+    },
+    check: (jobs) => [...compareJobs(jobs[2], jobs[3], "zilog-nmos k=7, lane"), ...compareJobs(jobs[4], jobs[5], "compat 0.2 k=7, lane")],
+  },
 ];
 
 // Each case's setup receives an addJob bound to that case (as in cases.mjs).

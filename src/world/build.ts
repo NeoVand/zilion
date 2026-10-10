@@ -7,7 +7,8 @@
 
 import { HALT_REASONS, HOST_CONTRACT, HOST_CONTRACT_PRELUDE_WGSL, TRAP_CAUSES } from "../contract/host.js";
 import type { TrapCause, TrapDecision } from "../contract/host.js";
-import type { CoreHook, IsaCore, StateField } from "../contract/isa.js";
+import type { CoreHook, CoreParamValue, IsaCore, StateField } from "../contract/isa.js";
+import { coreParamsWgsl, resolveCoreParams } from "../contract/params.js";
 import {
   MANIFEST_SCHEMA,
   type BindingInfo,
@@ -20,7 +21,7 @@ import { canonicalJson } from "../util/json.js";
 import { sha256 } from "../util/sha256.js";
 import { ZILION_VERSION } from "../version.js";
 import { HASH_WGSL, ZIL_SALT_INIT, dialThreshold } from "./hash.js";
-import type { BindingNames, Dial, MachineSpec, MemoryModel, Position, TrapPolicy, WorldSpec } from "./spec.js";
+import type { BindingNames, CoreSelection, Dial, MachineSpec, MemoryModel, Position, TrapPolicy, WorldSpec } from "./spec.js";
 
 export interface BuiltMachine {
   readonly wgsl: string;
@@ -128,21 +129,55 @@ function resolvePosition(p: Position, mem: MemPlan, what: string): number {
   return t;
 }
 
+/** The core and its compile-time choices, from either form of the MachineSpec (never both). */
+function selectCore(spec: MachineSpec): CoreSelection {
+  const s = spec as { core?: CoreSelection; isa?: IsaCore; variant?: string; compat?: string; params?: unknown };
+  if (s.params !== undefined) fail("core parameters go in core: { isa, params }, not beside isa");
+  if (s.core !== undefined) {
+    if (s.isa !== undefined || s.variant !== undefined || s.compat !== undefined) {
+      fail("give the core either as core: { isa, variant?, compat?, params? } or as isa (with variant and compat beside it), not both");
+    }
+    if (!s.core || typeof s.core !== "object") fail("core must be { isa, variant?, compat?, params? }");
+    return s.core;
+  }
+  return { isa: s.isa as IsaCore, variant: s.variant, compat: s.compat };
+}
+
+function attempt<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (e) {
+    fail((e as Error).message);
+  }
+}
+
 // --- the build ------------------------------------------------------------------------------------------------
 
 export function buildMachine(spec: MachineSpec): BuiltMachine {
-  const isa: IsaCore = spec.isa;
-  if (!isa || typeof isa.wgsl !== "function") fail("spec.isa must be an IsaCore");
+  if (!spec || typeof spec !== "object") fail("a MachineSpec { isa | core, world } is required");
+  const sel = selectCore(spec);
+  const isa: IsaCore = sel.isa;
+  if (!isa || typeof isa.wgsl !== "function") fail("spec.isa (or spec.core.isa) must be an IsaCore");
+  for (const k of ["step", "haltReason", "pc", "trapCause"] as const) {
+    const v = isa.symbols?.[k];
+    if (typeof v !== "string" || v.trim() === "") fail(`${isa.id}: symbols.${k} must be a WGSL ${k === "step" ? "function name" : "expression"}`);
+  }
+  for (const k of ["stackTop", "firstPushAt"] as const) {
+    const v = isa.conventions?.[k];
+    if (v !== null && typeof v !== "function") fail(`${isa.id}: conventions.${k} must be a function, or null for an ISA without a stack`);
+  }
   const world: WorldSpec = spec.world;
   if (!world) fail("spec.world is required");
   const mode = spec.mode ?? "kernel";
   if (mode !== "kernel" && mode !== "library") fail(`unknown mode '${mode}'`);
   const wg = spec.workgroupSize ?? 64;
   if (!Number.isInteger(wg) || wg < 1 || wg > 1024) fail(`workgroupSize must be an integer in 1..1024 (got ${wg})`);
-  const variant = spec.variant ?? isa.defaultVariant;
+  const variant = sel.variant ?? isa.defaultVariant;
   if (!(variant in isa.variants)) fail(`${isa.id} has no variant '${variant}'`);
-  const compat = spec.compat ?? isa.compat[0];
+  const compat = sel.compat ?? isa.compat[0];
   if (!isa.compat.includes(compat)) fail(`${isa.id} has no compat '${compat}' (known: ${isa.compat.join(", ")})`);
+  const coreParams: Record<string, CoreParamValue> = attempt(() => resolveCoreParams(isa, sel.params));
+  const declaresParams = isa.params !== undefined && Object.keys(isa.params).length > 0;
   if (mode === "kernel" && spec.bindingNames) fail("bindingNames apply to library mode only");
   const names: BindingNames = spec.bindingNames ?? {};
 
@@ -166,12 +201,17 @@ export function buildMachine(spec: MachineSpec): BuiltMachine {
   };
   const raw = world.hooks ?? {};
 
-  // budget
-  const unit = world.budget?.unit ?? "steps";
+  // budget: required, both fields (no silent default)
+  const budget = world.budget as Partial<WorldSpec["budget"]> | undefined;
+  if (budget === undefined) fail("world.budget is required: give { unit: 'steps' | 'fetchBytes', value: n | 'perLane' }");
+  if (!budget || typeof budget !== "object") fail("world.budget must be { unit, value }");
+  if (budget.unit === undefined) fail("world.budget.unit is required: 'steps' or 'fetchBytes'");
+  const unit = budget.unit;
   if (unit !== "steps" && unit !== "fetchBytes") fail(`unknown budget unit '${unit}'`);
-  const budgetValue = world.budget?.value;
+  if (budget.value === undefined) fail("world.budget.value is required: a number of steps (or fetched bytes) per run, or 'perLane'");
+  const budgetValue = budget.value;
   const perLaneBudget = budgetValue === "perLane";
-  if (budgetValue !== undefined && !perLaneBudget) checkU32("budget.value", budgetValue);
+  if (!perLaneBudget) checkU32("world.budget.value (a number or 'perLane')", budgetValue);
 
   // initial state
   const init = world.init ?? {};
@@ -188,10 +228,33 @@ export function buildMachine(spec: MachineSpec): BuiltMachine {
       initLines.push(`    ${f.wgsl} = ${hex(v)}; // ${comment}`);
     }
   };
-  if (init.stack) {
-    if (!isa.conventions.stackTop) fail(`${isa.id} has no hardware stack (init.stack)`);
-    const t = resolvePosition(init.stack.topAliases, mem, "init.stack.topAliases");
-    assign(isa.conventions.stackTop(P, t), "init.stack", `stack top aliases position ${t} of ${P}`);
+  const conv = isa.conventions;
+  if ((conv.stackTop === null) !== (conv.firstPushAt === null)) {
+    fail(`${isa.id}: conventions.stackTop and conventions.firstPushAt must both be functions or both be null`);
+  }
+  const hasStack = conv.stackTop !== null;
+  if (init.stack !== undefined) {
+    if (!hasStack) fail(`${isa.id} has no hardware stack (init.stack)`);
+    const st = init.stack as { firstPushAt?: Position; topAliases?: Position };
+    if (!st || typeof st !== "object") fail("init.stack must be { firstPushAt: t | 'lastByte' } or { topAliases: t | 'lastByte' }");
+    const extra = Object.keys(st).filter((k) => k !== "firstPushAt" && k !== "topAliases");
+    if (extra.length) fail(`init.stack has unknown field(s) ${extra.join(", ")} (give firstPushAt or topAliases)`);
+    const first = st.firstPushAt !== undefined;
+    const top = st.topAliases !== undefined;
+    if (first && top) fail("init.stack gives both firstPushAt and topAliases; give exactly one");
+    if (!first && !top) fail("init.stack needs firstPushAt or topAliases");
+    if (first) {
+      const t = resolvePosition(st.firstPushAt!, mem, "init.stack.firstPushAt");
+      assign(conv.firstPushAt!(P, t), "init.stack", `first push lands at position ${t} of ${P}`);
+    } else {
+      const t = resolvePosition(st.topAliases!, mem, "init.stack.topAliases");
+      assign(conv.stackTop!(P, t), "init.stack", `stack top aliases position ${t} of ${P}`);
+    }
+  } else if (hasStack && !perLaneState) {
+    fail(
+      `world.init.stack is required: ${isa.id} has a stack. Give init.stack = { firstPushAt: t | 'lastByte' } (the first ` +
+        "byte pushed lands at t, on every ISA) or { topAliases: t | 'lastByte' }, or load the state with init.state = 'perLane'",
+    );
   }
   if (world.entry) {
     const t = resolvePosition(world.entry.position, mem, "entry");
@@ -221,7 +284,7 @@ export function buildMachine(spec: MachineSpec): BuiltMachine {
     if (p >= 1) lethalCode = `    if (unit == ${hex(first)}) { return ZIL_HALT; } // lethal first unit\n`;
     else if (p > 0) {
       lethalCode =
-        `    if (unit == ${hex(first)} && zil_hash(zil_seed, zil_lane, zil_step, ${hex(salt)}) < ${hex(t)}) { return ZIL_HALT; } // lethal first unit, p = ${p}\n`;
+        `    if (unit == ${hex(first)} && zil_draw(${hex(salt)}) < ${hex(t)}) { return ZIL_HALT; } // lethal first unit, p = ${p}\n`;
     }
   }
   const trapCases: string[] = [];
@@ -307,6 +370,14 @@ export function buildMachine(spec: MachineSpec): BuiltMachine {
   const STATE_IN = mode === "kernel" ? (perLaneState ? "zil_state_in" : undefined) : names.stateIn;
   const ABL = mode === "kernel" ? "zil_params.ablation" : names.ablation;
 
+  // Resumable: a lane can continue from its record and memory. Needs a step budget (fetched-byte budgets would
+  // need the per-lane fetch count and step index carried too), the state in the record, and stored memory; and no
+  // per-lane state of the raw hooks' own (a `var<private>` in hooks.declarations), which no record carries.
+  const hookPrivates = /\bvar\s*<\s*private\s*>/.test(raw.declarations ?? "");
+  const resumable = unit === "steps" && out.state && !hookPrivates && (mode === "kernel" ? out.memory : !!MEM && !!OUT);
+  const padBytes = mem.padding ? mem.padding.to - mem.padding.from : 0;
+  const padWords = resumable ? Math.ceil(padBytes / 4) : 0;
+
   // record layout
   const recordFields: RecordField[] = [];
   let rw = 0;
@@ -316,17 +387,26 @@ export function buildMachine(spec: MachineSpec): BuiltMachine {
   };
   addField("steps", 1);
   addField("haltReason", 1);
+  addField("trapCause", 1);
   if (out.state) addField("state", fields.length, fields.map((f) => f.name));
   if (out.writeCounts) addField("writeCounts", mem.counters.length, mem.counters);
   const mapWords = Math.ceil(P / 32);
   if (out.fetchMap) addField("fetchMap", mapWords);
   if (out.startMap) addField("startMap", mapWords);
+  if (padWords) addField("padding", padWords);
   const recordOffset = (n: RecordField["name"]) => recordFields.find((f) => f.name === n)!.offset;
 
   // --- emit -----------------------------------------------------------------------------------------------
-  const coreText = isa.wgsl({ variant, compat, hooks: need });
+  const coreText = isa.wgsl({ variant, compat, hooks: need, ...(declaresParams ? { params: coreParams } : {}) });
   const coreHooks = (Object.keys(need) as CoreHook[]).filter((h) => need[h]);
-  const options = { variant, compat, mode, workgroupSize: wg, bindingNames: mode === "library" ? names : undefined };
+  const options = {
+    variant,
+    compat,
+    ...(declaresParams ? { params: coreParams } : {}),
+    mode,
+    workgroupSize: wg,
+    bindingNames: mode === "library" ? names : undefined,
+  };
   const shaCore = sha256(coreText);
   const shaWorld = sha256(canonicalJson(world));
   const shaOptions = sha256(canonicalJson(options));
@@ -346,13 +426,18 @@ const ZIL_MEM_WORDS: u32 = ${u(mem.storageWords)};
 const ZIL_STATE_WORDS: u32 = ${u(fields.length)};
 const ZIL_RECORD_WORDS: u32 = ${u(rw)};
 `);
+  const paramsText = coreParamsWgsl(isa, coreParams);
+  if (paramsText) s.push(paramsText);
 
   if (mode === "kernel") {
     s.push(`struct ZilParams {
     lane_count: u32,
     lane_base: u32,
     budget: u32,
-    seed: u32,${ablationVec4 ? `\n    ablation: array<vec4<u32>, ${ablationVec4}>,` : ""}
+    seed: u32,
+    step_base: vec2<u32>,   // 64-bit step base (low, high): the dial index of the dispatch's first step
+    ${resumable ? "resume: u32,            // 0: lanes begin; 1: lanes continue from their record and memory" : "_pad0: u32,"}
+    _pad1: u32,${ablationVec4 ? `\n    ablation: array<vec4<u32>, ${ablationVec4}>,` : ""}
 };
 @group(0) @binding(0) var<uniform> zil_params: ZilParams;
 @group(0) @binding(1) var<storage, read_write> zil_mem: array<u32>;
@@ -362,9 +447,15 @@ ${perLaneState ? "@group(0) @binding(3) var<storage, read> zil_state_in: array<u
 
   s.push(`var<private> zil_lane: u32;   // global lane index
 var<private> zil_seed: u32;   // run seed
-var<private> zil_step: u32;   // index of the step being executed (since zil_begin)
-var<private> zil_steps_total: u32;   // steps executed since zil_begin
+var<private> zil_step: u32;   // index of the step being executed: low word of step base + steps run (64-bit)
+var<private> zil_step_hi: u32;   // its high word
+var<private> zil_step_base: vec2<u32>;   // the step base (low, high) of this run
+var<private> zil_steps_total: u32;   // steps executed since zil_begin (or zil_resume)
+var<private> zil_steps_prev: u32;   // steps a resumed lane had run before (from its record); 0 after zil_begin
 ${unit === "fetchBytes" ? "var<private> zil_fetched: u32; // instruction-stream bytes fetched\n" : ""}${out.writeCounts ? `var<private> zil_writes: array<u32, ${mem.counters.length}>; // ${mem.counters.join(", ")}\n` : ""}${out.fetchMap ? `var<private> zil_fetch_map: array<u32, ${mapWords}>;\n` : ""}${out.startMap ? `var<private> zil_start_map: array<u32, ${mapWords}>;\n` : ""}var<private> zil_m: array<u32, ${P}>; // lane memory, one byte per u32
+// The dial draw at the current step: zil_hash(seed, lane, step, salt) with the 64-bit step's high word folded into
+// the seed (zil_mix32(0) = 0, so below 2^32 steps this is exactly zil_hash(zil_seed, zil_lane, zil_step, salt)).
+fn zil_draw(salt: u32) -> u32 { return zil_hash(zil_seed ^ zil_mix32(zil_step_hi), zil_lane, zil_step, salt); }
 `);
 
   // memory access
@@ -448,34 +539,62 @@ ${resetLines.join("\n")}
 fn zil_init_state() {   // init conventions (stack, entry, set, random)
 ${initLines.join("\n")}${initLines.length ? "\n" : ""}}
 fn zil_halt_reason() -> u32 { return ${isa.symbols.haltReason}; }
+fn zil_trap_cause() -> u32 { return ${isa.symbols.trapCause}; }   // 0, or the trap cause that halted the lane
 fn zil_pc() -> u32 { return ${isa.symbols.pc}; }
 fn zil_reset_lane(lane: u32, seed: u32) {   // a fresh lane: privates, counters, maps, state, init conventions
     zil_lane = lane;
     zil_seed = seed;
     zil_step = 0u;
+    zil_step_hi = 0u;
+    zil_step_base = vec2<u32>(0u, 0u);
     zil_steps_total = 0u;
+    zil_steps_prev = 0u;
 ${unit === "fetchBytes" ? "    zil_fetched = 0u;\n" : ""}${out.writeCounts ? `    for (var i = 0u; i < ${u(mem.counters.length)}; i++) { zil_writes[i] = 0u; }\n` : ""}${out.fetchMap ? `    for (var i = 0u; i < ${u(mapWords)}; i++) { zil_fetch_map[i] = 0u; }\n` : ""}${out.startMap ? `    for (var i = 0u; i < ${u(mapWords)}; i++) { zil_start_map[i] = 0u; }\n` : ""}    zil_reset();
     zil_init_state();
 }
-fn zil_begin(lane: u32, seed: u32) {   // zil_reset_lane, then the raw on_reset hook (last word on the state)
+fn zil_set_step_base(step_base: vec2<u32>) {   // the dial index of the next step (zil_run continues from it)
+    zil_step_base = step_base;
+    zil_step = step_base.x;
+    zil_step_hi = step_base.y;
+}
+fn zil_begin_at(lane: u32, seed: u32, step_base: vec2<u32>) {   // zil_reset_lane, the step base, then on_reset (last word on the state)
     zil_reset_lane(lane, seed);
+    zil_set_step_base(step_base);
     on_reset();
 }
+fn zil_begin(lane: u32, seed: u32) {   // zil_begin_at with step base 0
+    zil_begin_at(lane, seed, vec2<u32>(0u, 0u));
+}
 // Runs up to \`budget\` more ${unit === "fetchBytes" ? "fetched bytes" : "steps"} and returns the steps executed. It may be called again on
-// the same lane: the step index the dials see (zil_step) continues from zil_begin.
+// the same lane: the step index the dials see (zil_step, zil_step_hi) is the step base plus the steps run since zil_begin.
 fn zil_run(budget: u32) -> u32 {
     var steps = 0u;
 ${unit === "fetchBytes" ? "    let fetched0 = zil_fetched;\n" : ""}    loop {
         if (${unit === "fetchBytes" ? "zil_fetched - fetched0" : "steps"} >= budget) { break; }
         if (zil_halt_reason() != ZIL_RUNNING) { break; }
-        zil_step = zil_steps_total;
+        zil_step = zil_step_base.x + zil_steps_total;
+        zil_step_hi = zil_step_base.y + select(0u, 1u, zil_step < zil_step_base.x);
         ${isa.symbols.step}();
         steps = steps + 1u;
         zil_steps_total = zil_steps_total + 1u;
     }
     return steps;
 }`];
-  const libFns = ["zil_begin(lane, seed)", "zil_reset_lane(lane, seed)", "on_reset()", "zil_run(budget) -> steps", "zil_reset()", "zil_init_state()", "zil_halt_reason()", "zil_pc()", "zil_hash(seed, lane, step, salt)"];
+  const libFns = [
+    "zil_begin(lane, seed)",
+    "zil_begin_at(lane, seed, step_base: vec2<u32>)",
+    "zil_reset_lane(lane, seed)",
+    "zil_set_step_base(step_base: vec2<u32>)",
+    "on_reset()",
+    "zil_run(budget) -> steps",
+    "zil_reset()",
+    "zil_init_state()",
+    "zil_halt_reason()",
+    "zil_trap_cause()",
+    "zil_pc()",
+    "zil_hash(seed, lane, step, salt)",
+    "zil_draw(salt)",
+  ];
 
   if (MEM) {
     const load: string[] = [];
@@ -491,11 +610,11 @@ ${unit === "fetchBytes" ? "    let fetched0 = zil_fetched;\n" : ""}    loop {
         ${MEM}[base + ${u(sg.storageWord)} + w] = v;
     }`);
     }
-    if (mem.padding) load.push(`    for (var p = ${u(mem.padding.from)}; p < ${u(mem.padding.to)}; p++) { zil_m[p] = 0u; } // padding: zero every run, never stored`);
+    if (mem.padding) load.push(`    for (var p = ${u(mem.padding.from)}; p < ${u(mem.padding.to)}; p++) { zil_m[p] = 0u; } // padding: zero at the start of every run, never stored in memory`);
     fns.push(`fn zil_load_memory(base: u32) {   // ${MEM}[base ..] (word-padded segments) -> lane memory
 ${load.join("\n")}
 }
-fn zil_store_memory(base: u32) {   // lane memory -> ${MEM}[base ..]; padding is never stored
+fn zil_store_memory(base: u32) {   // lane memory -> ${MEM}[base ..]; padding is never stored in memory
 ${store.join("\n")}
 }`);
     libFns.push("zil_load_memory(base)", "zil_store_memory(base)");
@@ -504,12 +623,26 @@ ${store.join("\n")}
     fns.push(`fn zil_store_state(o: u32) {
 ${fields.map((f, k) => `    ${OUT}[o + ${u(k)}] = ${masked(f.wgsl, f.bits)}; // ${f.name}`).join("\n")}
 }`);
-    const rec: string[] = [`    ${OUT}[o] = steps;`, `    ${OUT}[o + 1u] = zil_halt_reason();`];
+    const rec: string[] = [
+      `    ${OUT}[o] = zil_steps_prev + steps;`,
+      `    ${OUT}[o + 1u] = zil_halt_reason();`,
+      `    ${OUT}[o + 2u] = zil_trap_cause();`,
+    ];
     if (out.state) rec.push(`    zil_store_state(o + ${u(recordOffset("state"))});`);
     if (out.writeCounts) rec.push(`    for (var i = 0u; i < ${u(mem.counters.length)}; i++) { ${OUT}[o + ${u(recordOffset("writeCounts"))} + i] = zil_writes[i]; }`);
     if (out.fetchMap) rec.push(`    for (var i = 0u; i < ${u(mapWords)}; i++) { ${OUT}[o + ${u(recordOffset("fetchMap"))} + i] = zil_fetch_map[i]; }`);
     if (out.startMap) rec.push(`    for (var i = 0u; i < ${u(mapWords)}; i++) { ${OUT}[o + ${u(recordOffset("startMap"))} + i] = zil_start_map[i]; }`);
-    fns.push(`fn zil_store_record(o: u32, steps: u32) {   // the lane record (manifest.record)
+    if (padWords) {
+      rec.push(`    for (var w = 0u; w < ${u(padWords)}; w++) { // padding (resumable worlds carry it in the record)
+        var v = 0u;
+        for (var k = 0u; k < 4u; k++) {
+            let b = w * 4u + k;
+            if (b < ${u(padBytes)}) { v = v | (zil_m[${u(mem.padding!.from)} + b] << (k * 8u)); }
+        }
+        ${OUT}[o + ${u(recordOffset("padding"))} + w] = v;
+    }`);
+    }
+    fns.push(`fn zil_store_record(o: u32, steps: u32) {   // the lane record (manifest.record); steps: run since zil_begin / zil_resume
 ${rec.join("\n")}
 }`);
     libFns.push("zil_store_state(o)", "zil_store_record(o, steps)");
@@ -520,17 +653,54 @@ ${fields.map((f, k) => `    ${f.wgsl} = ${masked(`${STATE_IN}[o + ${u(k)}]`, f.b
 }`);
     libFns.push("zil_load_state(o)");
   }
+  if (resumable) {
+    // Everything a lane carries from one dispatch to the next besides its loaded segments: the state record, the
+    // steps already run, the write counters, the maps and the padding, all read back from its own record.
+    const so = recordOffset("state");
+    const res: string[] = [
+      "    zil_reset_lane(lane, seed);",
+      "    zil_set_step_base(step_base);",
+      `    zil_steps_prev = ${OUT}[o];`,
+      ...fields.map((f, k) => `    ${f.wgsl} = ${masked(`${OUT}[o + ${u(so + k)}]`, f.bits)}; // ${f.name}`),
+    ];
+    if (out.writeCounts) res.push(`    for (var i = 0u; i < ${u(mem.counters.length)}; i++) { zil_writes[i] = ${OUT}[o + ${u(recordOffset("writeCounts"))} + i]; }`);
+    if (out.fetchMap) res.push(`    for (var i = 0u; i < ${u(mapWords)}; i++) { zil_fetch_map[i] = ${OUT}[o + ${u(recordOffset("fetchMap"))} + i]; }`);
+    if (out.startMap) res.push(`    for (var i = 0u; i < ${u(mapWords)}; i++) { zil_start_map[i] = ${OUT}[o + ${u(recordOffset("startMap"))} + i]; }`);
+    if (padWords) {
+      res.push(`    for (var b = 0u; b < ${u(padBytes)}; b++) { zil_m[${u(mem.padding!.from)} + b] = (${OUT}[o + ${u(recordOffset("padding"))} + (b >> 2u)] >> ((b & 3u) * 8u)) & 0xffu; } // padding`);
+    }
+    fns.push(`// Continue a lane from its record at ${OUT}[o ..] (load its memory with zil_load_memory first). The raw on_reset hook
+// does not run again: the lane is not starting, it is resuming. Raw-hook private state does not carry over.
+fn zil_resume(lane: u32, seed: u32, step_base: vec2<u32>, o: u32) {
+${res.join("\n")}
+}`);
+    libFns.push("zil_resume(lane, seed, step_base: vec2<u32>, o)");
+  }
   s.push(fns.join("\n") + "\n");
 
   if (mode === "kernel") {
+    const begin = perLaneState
+      ? [
+          "zil_reset_lane(zil_params.lane_base + i, zil_params.seed);",
+          "zil_set_step_base(zil_params.step_base);",
+          "zil_load_state(i * ZIL_STATE_WORDS);",
+          "on_reset();",
+        ]
+      : ["zil_begin_at(zil_params.lane_base + i, zil_params.seed, zil_params.step_base);"];
+    const start = resumable
+      ? `    if (zil_params.resume != 0u) {
+        zil_resume(zil_params.lane_base + i, zil_params.seed, zil_params.step_base, i * ZIL_RECORD_WORDS);
+    } else {
+${begin.map((l) => `        ${l}`).join("\n")}
+    }
+`
+      : begin.map((l) => `    ${l}\n`).join("");
     s.push(`@compute @workgroup_size(${wg})
 fn main(@builtin(global_invocation_id) zil_gid: vec3u) {
     let i = zil_gid.x;
     if (i >= zil_params.lane_count) { return; }
     zil_load_memory(i * ZIL_MEM_WORDS);
-${perLaneState
-    ? "    zil_reset_lane(zil_params.lane_base + i, zil_params.seed);\n    zil_load_state(i * ZIL_STATE_WORDS);\n    on_reset();\n"
-    : "    zil_begin(zil_params.lane_base + i, zil_params.seed);\n"}    let steps = zil_run(${perLaneBudget ? "zil_budget_in[i]" : "zil_params.budget"});
+${start}    let steps = zil_run(${perLaneBudget ? "zil_budget_in[i]" : "zil_params.budget"});
 ${out.memory ? "    zil_store_memory(i * ZIL_MEM_WORDS);\n" : ""}    zil_store_record(i * ZIL_RECORD_WORDS, steps);
 }
 `);
@@ -546,7 +716,10 @@ ${out.memory ? "    zil_store_memory(i * ZIL_MEM_WORDS);\n" : ""}    zil_store_r
           { name: "lane_base", role: "laneBase", offset: 4, words: 1 },
           { name: "budget", role: "budget", offset: 8, words: 1 },
           { name: "seed", role: "seed", offset: 12, words: 1 },
-          ...(ablationVec4 ? [{ name: "ablation", role: "ablation" as const, offset: 16, words: ablationVec4 * 4 }] : []),
+          { name: "step_base", role: "stepBase", offset: 16, words: 2 },
+          resumable ? { name: "resume", role: "resume", offset: 24, words: 1 } : { name: "_pad0", role: "pad", offset: 24, words: 1 },
+          { name: "_pad1", role: "pad", offset: 28, words: 1 },
+          ...(ablationVec4 ? [{ name: "ablation", role: "ablation" as const, offset: 32, words: ablationVec4 * 4 }] : []),
         ]
       : [];
   const bindings: BindingInfo[] =
@@ -576,10 +749,11 @@ ${out.memory ? "    zil_store_memory(i * ZIL_MEM_WORDS);\n" : ""}    zil_store_r
       addressBits: isa.addressBits,
       fetchUnitBytes: isa.fetchUnitBytes,
       hooks: coreHooks,
+      params: coreParams,
     },
     world: JSON.parse(canonicalJson(world)),
     sha256: { wgsl: sha256(wgsl), core: shaCore, world: shaWorld, options: shaOptions },
-    params: { bytes: mode === "kernel" ? 16 + ablationVec4 * 16 : 0, fields: params },
+    params: { bytes: mode === "kernel" ? 32 + ablationVec4 * 16 : 0, fields: params },
     bindings,
     memory: {
       model: mem.model,
@@ -595,6 +769,8 @@ ${out.memory ? "    zil_store_memory(i * ZIL_MEM_WORDS);\n" : ""}    zil_store_r
     record: { wordsPerLane: rw, fields: recordFields },
     state: fields.map((f, k) => ({ name: f.name, bits: f.bits, offset: k })),
     haltReasons: HALT_REASONS,
+    trapCauses: TRAP_CAUSES,
+    resumable,
     ablation,
     budget: { unit, perLane: perLaneBudget, default: typeof budgetValue === "number" ? budgetValue : null },
     init: { perLane: perLaneState, stateWords: fields.length },
@@ -614,7 +790,7 @@ function dialTrapBody(dial: Dial, cause: string): string {
   const salt = checkU32(`trap '${cause}' salt`, dial.salt ?? 0);
   if (p >= 1) return "d = ZIL_TRAP_HALT;";
   if (p <= 0) return "d = ZIL_TRAP_IGNORE;";
-  return `d = select(ZIL_TRAP_IGNORE, ZIL_TRAP_HALT, zil_hash(zil_seed, zil_lane, zil_step, ${hex(salt)}) < ${hex(t)});`;
+  return `d = select(ZIL_TRAP_IGNORE, ZIL_TRAP_HALT, zil_draw(${hex(salt)}) < ${hex(t)});`;
 }
 
 function indent(body: string | undefined): string {

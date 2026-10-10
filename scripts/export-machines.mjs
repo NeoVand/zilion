@@ -6,6 +6,8 @@
 //
 // worlds.json: { "<name>": { "isa": "z80", "world": { …WorldSpec… }, "mode"?: "kernel" | "library",
 //                            "workgroupSize"?: 64, "variant"?: …, "compat"?: …, "bindingNames"?: {…} }, … }
+//   or, with core parameters: { "core": { "isa": "z80", "variant"?, "compat"?, "params"?: {…} }, "world": {…}, … }
+// The ISA is named explicitly, and every world states its budget and stack (buildMachine refuses silent defaults).
 // --check writes nothing and exits 1 unless every file on disk equals what would be written (for CI).
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -29,9 +31,13 @@ if (!check) mkdirSync(out, { recursive: true });
 let stale = 0;
 for (const [name, s] of Object.entries(specs)) {
   if (!/^[\w.-]+$/.test(name)) throw new Error(`invalid machine name '${name}'`);
-  const isa = CORES[s.isa ?? "z80"];
-  if (!isa) throw new Error(`${name}: unknown isa '${s.isa}' (known: ${Object.keys(CORES).join(", ")})`);
-  const m = Z.buildMachine({ ...s, isa });
+  const coreOf = (id) => {
+    if (id === undefined) throw new Error(`${name}: name the ISA ("isa": "z80", or "core": { "isa": "z80", … })`);
+    const isa = CORES[id];
+    if (!isa) throw new Error(`${name}: unknown isa '${id}' (known: ${Object.keys(CORES).join(", ")})`);
+    return isa;
+  };
+  const m = Z.buildMachine(s.core !== undefined ? { ...s, core: { ...s.core, isa: coreOf(s.core.isa) } } : { ...s, isa: coreOf(s.isa) });
   const files = { [`${name}.wgsl`]: m.wgsl, [`${name}.manifest.json`]: JSON.stringify(m.manifest, null, 1) + "\n" };
   for (const [f, text] of Object.entries(files)) {
     const path = join(out, f);
