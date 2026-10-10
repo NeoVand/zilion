@@ -8,6 +8,8 @@ export type {
   Segment,
   Position,
   InitSpec,
+  StackSpec,
+  CoreSelection,
   BudgetSpec,
   HaltingSpec,
   Dial,
@@ -17,5 +19,6 @@ export type {
   RawHooks,
   BindingNames,
 } from "./spec.js";
-export { zilHash, zilMix32, dialThreshold, initDraw, ZIL_SALT_INIT, HASH_WGSL } from "./hash.js";
+export { zilHash, zilMix32, zilDraw, dialThreshold, initDraw, ZIL_SALT_INIT, HASH_WGSL } from "./hash.js";
+export { presets, compat02World, algocellPairWorld } from "./presets.js";
 export { ringPos, highestAlias, lowestAlias, seamOffset } from "../contract/address.js";

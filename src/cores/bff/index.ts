@@ -21,6 +21,7 @@ const STATE: readonly StateField[] = [
   { name: "h0", bits: 32, wgsl: "bff_h0" },
   { name: "h1", bits: 32, wgsl: "bff_h1" },
   { name: "halted", bits: 8, wgsl: "bff_halted", note: "0 running; 2 host; 3 trap (left the tape, unmatched bracket)" },
+  { name: "trap", bits: 8, wgsl: "bff_trap", note: "TRAP_CAUSES code of the trap that halted the core (bounds, unmatched, unimplemented); 0 otherwise" },
 ];
 
 /** Op ids 1..10: < > { } + - . , [ ] (bff.py OPS), on the published ASCII alphabet. */
@@ -30,8 +31,8 @@ function text(o: CoreGenOptions): string {
   const h = o.hooks;
   const trap = (cause: string, onIgnore: string) =>
     h.trap
-      ? `if (zil_trap(ZIL_TRAP_${cause}) != ZIL_TRAP_IGNORE) { bff_halted = ZIL_HALT_TRAP; } else { ${onIgnore} }`
-      : `bff_halted = ZIL_HALT_TRAP;`;
+      ? `if (zil_trap(ZIL_TRAP_${cause}) != ZIL_TRAP_IGNORE) { bff_halted = ZIL_HALT_TRAP; bff_trap = ZIL_TRAP_${cause}; } else { ${onIgnore} }`
+      : `bff_halted = ZIL_HALT_TRAP; bff_trap = ZIL_TRAP_${cause};`;
   const cases = Object.entries(ASCII)
     .map(([b, id]) => `        case ${b}u: { return ${id}u; }`)
     .join("\n");
@@ -41,6 +42,7 @@ var<private> bff_ip: u32;
 var<private> bff_h0: u32;
 var<private> bff_h1: u32;
 var<private> bff_halted: u32;
+var<private> bff_trap: u32;     // the trap cause that halted the core (symbols.trapCause)
 const BFF_ADDR_MASK: u32 = 0u;   // ring-native: the core computes positions modulo ZIL_MEM_P itself
 
 fn bff_op(b: u32) -> u32 {       // the alphabet (variant 'ascii'): byte -> op id, 0 = no-op
@@ -89,7 +91,7 @@ export const bff: IsaCore = {
   endianness: "little",
   state: STATE,
   internals: [],
-  symbols: { step: "bff_step", haltReason: "bff_halted", pc: "bff_ip" },
+  symbols: { step: "bff_step", haltReason: "bff_halted", pc: "bff_ip", trapCause: "bff_trap" },
   hooks: ["fetch", "instructionStart", "trap"],
   decode: {
     fn: "on_decode",
@@ -103,6 +105,7 @@ export const bff: IsaCore = {
   conventions: {
     step: "One op, including a whole bracket scan (cubff semantics); a no-op byte is a step.",
     stackTop: null,
+    firstPushAt: null,
     entry: (pos) => ({ ip: pos }),
     traps: { bounds: "halt", unmatched: "halt", unimplemented: "halt" },
     halting:

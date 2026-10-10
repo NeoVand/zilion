@@ -2,7 +2,7 @@
 // names no register and no opcode; it talks to the core only through the descriptor and the host-contract hooks.
 
 import type { TrapCause, TrapDecision } from "../contract/host.js";
-import type { IsaCore } from "../contract/isa.js";
+import type { CoreParamValue, IsaCore } from "../contract/isa.js";
 
 /** One named stretch of the ring that the host loads and stores (a tape, a genome, a program). */
 export interface Segment {
@@ -29,14 +29,27 @@ export type MemoryModel =
 /** Ring position a convention refers to: an index, or the last byte of the last segment (P − 1 without segments). */
 export type Position = number | "lastByte";
 
+/**
+ * The initial stack, required on every ISA with a hardware stack (unless the state is loaded per lane). Exactly one
+ * of the two conventions:
+ *  - `firstPushAt: t`: the first byte pushed lands at position t, the same bytes on every ISA
+ *    (`IsaCore.conventions.firstPushAt`; Z80: SP − 1 aliases t; 6502: 0x0100 | S aliases t). Use it for worlds
+ *    compared across ISAs.
+ *  - `topAliases: t`: the stack pointer aliases position t, with its per-ISA meaning (`conventions.stackTop`; the
+ *    Z80's first push lands at t − 1, the 6502's at t). The `compat:'0.2'` and Algocell worlds are written in it.
+ */
+export type StackSpec =
+  | { readonly firstPushAt: Position; readonly topAliases?: never }
+  | { readonly topAliases: Position; readonly firstPushAt?: never };
+
 export interface InitSpec {
   /**
    * `zero` (default): the core's world reset (every state field at its `reset` value, usually 0), then the
    * conventions below. `perLane`: the whole state record is read per lane from a buffer (excludes the rest).
    */
   readonly state?: "zero" | "perLane";
-  /** "The stack top aliases position t", realised by `IsaCore.conventions.stackTop`. */
-  readonly stack?: { readonly topAliases: Position };
+  /** The initial stack (see `StackSpec`). Required on an ISA with a stack unless `state` is `perLane`. */
+  readonly stack?: StackSpec;
   /** Constant state values (by field name), applied after the stack convention. */
   readonly set?: Readonly<Record<string, number>>;
   /**
@@ -46,11 +59,12 @@ export interface InitSpec {
   readonly random?: { readonly fields?: readonly string[]; readonly salt?: number };
 }
 
+/** Required, both fields: a world never runs on a silent default budget. */
 export interface BudgetSpec {
-  /** `steps` (default): IsaCore steps. `fetchBytes`: instruction-stream bytes, counted ISA-neutrally by on_fetch. */
-  readonly unit?: "steps" | "fetchBytes";
-  /** A default for every run (overridable per run), or `perLane` for a per-lane budget buffer. */
-  readonly value?: number | "perLane";
+  /** `steps`: IsaCore steps. `fetchBytes`: instruction-stream bytes, counted ISA-neutrally by on_fetch. */
+  readonly unit: "steps" | "fetchBytes";
+  /** The budget of every run (a host may override it per run), or `perLane` for a per-lane budget buffer. */
+  readonly value: number | "perLane";
 }
 
 /** A probabilistic halt: halt when zil_hash(seed, lane, step, salt) < round(p · 2^32); p ≥ 1 always halts. */
@@ -92,7 +106,10 @@ export interface OutputSpec {
 
 /**
  * Escape hatch: raw WGSL added to the generated hooks. Bodies run after the world's own hook logic. Every raw
- * hook can use the world privates `zil_lane`, `zil_seed` and `zil_step` (the index of the current step).
+ * hook can use the world privates `zil_lane`, `zil_seed`, `zil_step` and `zil_step_hi` (the low and high words of
+ * the 64-bit index of the current step: the dispatch's step base plus the steps run since it began) and
+ * `zil_draw(salt) -> u32`, the world's dial draw for the current step. A hook that keeps private state of its own
+ * (`declarations`) is not resumable: only the state record, memory and record outputs carry over to a resumed run.
  */
 export interface RawHooks {
   /** Module-scope declarations (private variables, helper functions) the bodies below use. */
@@ -117,8 +134,10 @@ export interface WorldSpec {
   readonly memory: MemoryModel;
   /** The PC starts at the lowest address that maps to this position (default 0). */
   readonly entry?: { readonly position: Position };
+  /** Required on an ISA with a stack (it must give `init.stack` or `init.state: 'perLane'`). */
   readonly init?: InitSpec;
-  readonly budget?: BudgetSpec;
+  /** Required. */
+  readonly budget: BudgetSpec;
   readonly halting?: HaltingSpec;
   readonly ablation?: AblationSpec;
   readonly outputs?: OutputSpec;
@@ -137,10 +156,28 @@ export interface BindingNames {
   readonly ablation?: string;
 }
 
-export interface MachineSpec {
+/** The core of a machine and its compile-time choices. */
+export interface CoreSelection {
   readonly isa: IsaCore;
+  /** One of `isa.variants` (default `isa.defaultVariant`). */
   readonly variant?: string;
+  /** One of `isa.compat` (default: its first entry). */
   readonly compat?: string;
+  /** Values of the parameters the core declares (`isa.params`); undeclared names are errors, omitted ones take the declared default. */
+  readonly params?: Readonly<Record<string, CoreParamValue>>;
+}
+
+/**
+ * The core is given either as `core: { isa, variant?, compat?, params? }` or, without parameters, as the shorthand
+ * `isa` (with `variant` and `compat` beside it). Mixing the two forms is an error.
+ */
+export type MachineSpec = MachineSpecBase &
+  (
+    | { readonly core: CoreSelection; readonly isa?: never; readonly variant?: never; readonly compat?: never }
+    | { readonly isa: IsaCore; readonly variant?: string; readonly compat?: string; readonly core?: never }
+  );
+
+export interface MachineSpecBase {
   readonly world: WorldSpec;
   /** Workgroup size of the kernel entry point (default 64). */
   readonly workgroupSize?: number;
