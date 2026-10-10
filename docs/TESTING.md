@@ -101,8 +101,19 @@ Exit codes: **0**, every divergence is explained by an expected rule; **1**, at 
   result.
 - Nothing in a vector file is executed, used as a path or used as a format string. Opcode keys come from file names
   and are matched against patterns only.
-- The ledger records each file's SHA-256 and a digest over all files, so a baseline names its exact inputs. Design
-  §6.2 adds a fetch script that pins a commit and a SHA-256 per file; until then the digests are the record.
+- The ledger records each file's SHA-256 and a digest over all files, so a baseline names its exact inputs.
+- **Fetching** (`tools/fetch-vectors.py`, design §6.2). It pins a full commit SHA and lists that commit's tree, and
+  a truncated listing is refused. It URL-quotes each path, because names contain spaces (`v1/cb 00.json`); an
+  unquoted URL fails on every prefixed file. Each file's git blob SHA-1 is checked against the tree, and its JSON
+  must parse. The script writes `<name>.gz` atomically, plus a `MANIFEST.json` with each blob SHA-1 and the
+  SHA-256 of the written file:
+
+  ```sh
+  python -I tools/fetch-vectors.py SingleStepTests/z80 <40-hex commit> v1/ ../zilion-vectors/z80
+  ```
+
+  Its URL quoting, blob hashing and file-name checks are unit-tested offline. It has not been run against the
+  network yet: downloading needs the maintainer's approval.
 
 ### The test host
 
@@ -327,7 +338,8 @@ jobs:
       - name: Vectors (cached, pinned commit, SHA-256 checked)
         uses: actions/cache@v4
         with: { path: vectors, key: sst-z80-<pinned commit> }
-      # - run: <fetch script: pinned commit, per-file SHA-256; design §6.2>   (only on a cache miss)
+      - name: Fetch vectors on a cache miss (pinned commit, git blob hashes verified)
+        run: test -f vectors/z80/MANIFEST.json || python3 -I tools/fetch-vectors.py SingleStepTests/z80 <pinned commit> v1/ vectors/z80
       - run: npm run test:conformance
       - run: npm run test:harness
       - run: python3 -I tools/zt.py vectors z80 "$ZILION_Z80_VECTORS" test/vectors/z80/analytic --limit-per-file 100

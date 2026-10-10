@@ -137,5 +137,41 @@ class Z80AdapterTests(unittest.TestCase):
         self.assertIn("cpu_im = zt_state_in", glue)
 
 
+class FetchScriptTests(unittest.TestCase):
+    """Offline checks of tools/fetch-vectors.py (it never touches the network here)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("fetch_vectors", REPO / "tools" / "fetch-vectors.py")
+        cls.m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.m)
+
+    def test_quoting(self):
+        url = self.m.raw_url("SingleStepTests/z80", "0" * 40, "v1/dd cb __ 06.json")
+        self.assertEqual(url, "https://raw.githubusercontent.com/SingleStepTests/z80/" + "0" * 40 + "/v1/dd%20cb%20__%2006.json")
+
+    def test_blob_sha1_matches_git(self):
+        import subprocess
+
+        data = b'[{"name": "00 0000"}]\n'
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(data)
+        try:
+            git = subprocess.run(["git", "hash-object", f.name], capture_output=True, text=True)
+            if git.returncode != 0:
+                self.skipTest("git not available")
+            self.assertEqual(self.m.git_blob_sha1(data), git.stdout.strip())
+        finally:
+            Path(f.name).unlink()
+
+    def test_safe_name(self):
+        self.assertEqual(self.m.safe_name("v1/cb 00.json"), "cb 00.json")
+        for bad in ("v1/..", "v1/.hidden", "v1/", "v1/a\\b"):
+            with self.assertRaises(ValueError):
+                self.m.safe_name(bad)
+
+
 if __name__ == "__main__":
     unittest.main()
