@@ -36,6 +36,10 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
   requires the ISA to be named.
 - `init.stack: { firstPushAt: t | 'lastByte' }`: the first byte pushed lands at t on every ISA (descriptor
   `conventions.firstPushAt`). `topAliases` keeps its per-ISA meaning; giving both is an error.
+- Follow-up: `init.set` or `init.random` covering every stack field (Z80 `sp`, 6502 `s`) counts as giving the stack;
+  a stackless ISA (BFF) accepts `init.stack`, validates it and does not apply it, so one world spec serves every
+  ISA; `manifest.init.stack` records how the stack was set (convention, set, random) or why it was not
+  (`notApplicable: 'no stack' | 'per-lane state'`). The defaults that remain are listed in docs/ARCHITECTURE.md.
 - The lane record carries `trapCause` (word 2; 0 when the lane did not halt on a trap), from the descriptor's
   `symbols.trapCause`; codes in `manifest.trapCauses`. The skeletons gain a `trap` state field.
 - Core parameters: a descriptor may declare `params` (u32, bool, enum); a machine selects them with

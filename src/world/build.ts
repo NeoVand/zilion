@@ -16,6 +16,7 @@ import {
   type RecordField,
   type SegmentLayout,
   type ShaderManifest,
+  type StackInit,
 } from "../manifest.js";
 import { canonicalJson } from "../util/json.js";
 import { sha256 } from "../util/sha256.js";
@@ -233,8 +234,10 @@ export function buildMachine(spec: MachineSpec): BuiltMachine {
     fail(`${isa.id}: conventions.stackTop and conventions.firstPushAt must both be functions or both be null`);
   }
   const hasStack = conv.stackTop !== null;
+  // init.stack is validated the same way on every ISA (one world spec may serve a stack machine and a stackless one);
+  // on an ISA without a stack it is then not applied, and the manifest says so (init.stack.notApplicable).
+  let stackConv: { kind: "firstPushAt" | "topAliases"; t: number } | null = null;
   if (init.stack !== undefined) {
-    if (!hasStack) fail(`${isa.id} has no hardware stack (init.stack)`);
     const st = init.stack as { firstPushAt?: Position; topAliases?: Position };
     if (!st || typeof st !== "object") fail("init.stack must be { firstPushAt: t | 'lastByte' } or { topAliases: t | 'lastByte' }");
     const extra = Object.keys(st).filter((k) => k !== "firstPushAt" && k !== "topAliases");
@@ -243,18 +246,49 @@ export function buildMachine(spec: MachineSpec): BuiltMachine {
     const top = st.topAliases !== undefined;
     if (first && top) fail("init.stack gives both firstPushAt and topAliases; give exactly one");
     if (!first && !top) fail("init.stack needs firstPushAt or topAliases");
-    if (first) {
-      const t = resolvePosition(st.firstPushAt!, mem, "init.stack.firstPushAt");
-      assign(conv.firstPushAt!(P, t), "init.stack", `first push lands at position ${t} of ${P}`);
-    } else {
-      const t = resolvePosition(st.topAliases!, mem, "init.stack.topAliases");
-      assign(conv.stackTop!(P, t), "init.stack", `stack top aliases position ${t} of ${P}`);
+    stackConv = first
+      ? { kind: "firstPushAt", t: resolvePosition(st.firstPushAt!, mem, "init.stack.firstPushAt") }
+      : { kind: "topAliases", t: resolvePosition(st.topAliases!, mem, "init.stack.topAliases") };
+  }
+  const randomFields = init.random ? (init.random.fields ?? fields.filter((f) => f.randomizable).map((f) => f.name)) : [];
+  let stackInit: StackInit;
+  if (!hasStack) {
+    stackInit = { notApplicable: "no stack", ...(init.stack !== undefined ? { given: { ...init.stack } } : {}) };
+    if (stackConv) initLines.push(`    // init.stack (${stackConv.kind} ${stackConv.t}): not applicable, ${isa.id} has no stack`);
+  } else if (perLaneState) {
+    stackInit = { notApplicable: "per-lane state" };
+  } else {
+    // The stack fields are the fields the stack conventions assign (probed on a ring of one byte, where every
+    // position is reachable). init.set and init.random covering all of them count as giving the stack.
+    let stackFields: string[] = [];
+    try {
+      stackFields = [...new Set([...Object.keys(conv.firstPushAt!(1, 0)), ...Object.keys(conv.stackTop!(1, 0))])];
+    } catch (e) {
+      fail(`${isa.id}: conventions.firstPushAt(1, 0) and stackTop(1, 0) must succeed, they name the stack fields (${(e as Error).message})`);
     }
-  } else if (hasStack && !perLaneState) {
-    fail(
-      `world.init.stack is required: ${isa.id} has a stack. Give init.stack = { firstPushAt: t | 'lastByte' } (the first ` +
-        "byte pushed lands at t, on every ISA) or { topAliases: t | 'lastByte' }, or load the state with init.state = 'perLane'",
-    );
+    const bySet = stackFields.filter((f) => init.set !== undefined && Object.prototype.hasOwnProperty.call(init.set, f));
+    const byRandom = stackFields.filter((f) => randomFields.includes(f));
+    const covered = stackFields.length > 0 && stackFields.every((f) => bySet.includes(f) || byRandom.includes(f));
+    if (!stackConv && !covered) {
+      fail(
+        `world.init.stack is required: ${isa.id} has a stack (${stackFields.join(", ")}). Give init.stack = { firstPushAt: t | ` +
+          "'lastByte' } (the first byte pushed lands at t, on every ISA) or { topAliases: t | 'lastByte' }, set every stack field " +
+          "with init.set or init.random, or load the state with init.state = 'perLane'",
+      );
+    }
+    let convention: StackInit["convention"];
+    if (stackConv) {
+      const values = stackConv.kind === "firstPushAt" ? conv.firstPushAt!(P, stackConv.t) : conv.stackTop!(P, stackConv.t);
+      const what = stackConv.kind === "firstPushAt" ? "first push lands at" : "stack top aliases";
+      assign(values, "init.stack", `${what} position ${stackConv.t} of ${P}`);
+      convention = { kind: stackConv.kind, position: stackConv.t, values: { ...values } };
+    }
+    // in the order they apply: the convention, then init.set, then init.random
+    stackInit = {
+      ...(convention ? { convention } : {}),
+      ...(bySet.length ? { set: bySet } : {}),
+      ...(byRandom.length ? { random: byRandom } : {}),
+    };
   }
   if (world.entry) {
     const t = resolvePosition(world.entry.position, mem, "entry");
@@ -263,7 +297,7 @@ export function buildMachine(spec: MachineSpec): BuiltMachine {
   if (init.set) assign(init.set, "init.set", "init.set");
   if (init.random) {
     const salt = checkU32("init.random.salt", init.random.salt ?? 0);
-    const drawn = init.random.fields ?? fields.filter((f) => f.randomizable).map((f) => f.name);
+    const drawn = randomFields;
     if (drawn.length === 0) fail("init.random: no fields to draw");
     for (const name of drawn) {
       const { f, k } = field(name, "init.random");
@@ -773,7 +807,7 @@ ${out.memory ? "    zil_store_memory(i * ZIL_MEM_WORDS);\n" : ""}    zil_store_r
     resumable,
     ablation,
     budget: { unit, perLane: perLaneBudget, default: typeof budgetValue === "number" ? budgetValue : null },
-    init: { perLane: perLaneState, stateWords: fields.length },
+    init: { perLane: perLaneState, stateWords: fields.length, stack: stackInit },
     ...(mode === "library" ? { functions: libFns } : {}),
   };
   return { wgsl, manifest };

@@ -74,7 +74,7 @@ export function legacyMachine(memBytes: number, opts: ShaderOptions = {}): Built
     resumable: false,
     ablation: hook === "false" ? { kind: "none" } : { kind: "expr" },
     budget: { unit: "steps", perLane: false, default: null },
-    init: { perLane: true, stateWords: REGS_PER_PROGRAM },
+    init: { perLane: true, stateWords: REGS_PER_PROGRAM, stack: { notApplicable: "per-lane state" } },
   };
   return { wgsl, manifest };
 }

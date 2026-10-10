@@ -10,8 +10,8 @@ const mem = (n, place = {}, fill = 0) => {
   for (const [pos, bytes] of Object.entries(place)) m.set(bytes, +pos);
   return m;
 };
-// Budgets and stacks are explicit (no silent defaults): the helpers state the budget; 6502 worlds state their stack,
-// BFF worlds have none (giving one is an error).
+// Budgets and stacks are explicit (no silent defaults): the helpers state the budget; 6502 worlds state their stack.
+// BFF has none: a world may still give one (so one spec serves every ISA), and BFF lists it as not applicable.
 const steps = (n) => ({ unit: "steps", value: n });
 const FIRST = { firstPushAt: "lastByte" };
 const ring = (P, extra = {}) => ({ memory: { kind: "ring", bytes: P }, budget: steps(100), ...extra });
@@ -103,15 +103,16 @@ const CASES = [
     // Z80: LD A,7; LD (0x14),A; HALT.  6502: LDA #7; STA $0014; JAM.
     // BFF: thirteen '{' move h1 from 0 to 33 - 13 = 20; '.' writes tape[0] = '{' there; the ip then runs to 33 = P
     // (the copied '{' at 20 moves h1 to 19 on the way) and leaves the tape.
-    // The stack machines add the shared stack convention (first push at the last byte); BFF has no stack, so its
-    // world omits it (decisions 1 and 3). The record tells the three endings apart: halt-insn, illegal, bounds.
+    // One spec for all three, with the shared stack convention (the first push lands on the last byte); BFF has no
+    // stack and lists init.stack as not applicable. The record tells the three endings apart: halt-insn, illegal, bounds.
     setup: ({ Z, addJob }) => {
-      const world = pair(16, 33, { outputs: { fetchMap: true, writeCounts: true } });
-      const stacked = { ...world, init: { stack: FIRST } };
+      const world = pair(16, 33, { init: { stack: FIRST }, outputs: { fetchMap: true, writeCounts: true } });
+      const b = Z.buildMachine({ isa: bff, world });
+      if (b.manifest.init.stack.notApplicable !== "no stack") throw new Error(`bff init.stack: ${JSON.stringify(b.manifest.init.stack)}`);
       return [
-        addJob({ isa: Z.z80, world: stacked }, [{ mem: mem(32, { 0: [0x3e, 0x07, 0x32, 0x14, 0x00, 0x76] }),
+        addJob({ isa: Z.z80, world }, [{ mem: mem(32, { 0: [0x3e, 0x07, 0x32, 0x14, 0x00, 0x76] }),
           expect: { steps: 3, halt: "halt-insn", trap: "halt-insn", mem: { 20: 7 }, writes: [0, 1, 0], fetched: [0, 1, 2, 3, 4, 5] } }], { budget: 40 }),
-        addJob({ isa: m6502, world: stacked }, [{ mem: mem(32, { 0: [0xa9, 0x07, 0x8d, 0x14, 0x00, 0x02] }),
+        addJob({ isa: m6502, world }, [{ mem: mem(32, { 0: [0xa9, 0x07, 0x8d, 0x14, 0x00, 0x02] }),
           expect: { steps: 3, halt: "trap", trap: "illegal", mem: { 20: 7 }, writes: [0, 1, 0], fetched: [0, 1, 2, 3, 4, 5] } }], { budget: 40 }),
         addJob({ isa: bff, world }, [{ mem: mem(32, { 0: ascii("{".repeat(13) + ".") }),
           expect: { steps: 33, halt: "trap", trap: "bounds", state: { h1: 19 }, mem: { 20: 0x7b }, writes: [0, 1, 0], fetched: Array.from({ length: 33 }, (_, i) => i) } }], { budget: 40 }),
