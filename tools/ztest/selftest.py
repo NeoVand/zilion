@@ -3,8 +3,9 @@
 1. host-probe: a 20-line probe core drives every host path (listed / unlisted / final-only reads, writes, stray
    writes, port reads and writes) through synthetic SingleStepTests-format vectors, in both memory models, and the
    ledger must report exactly the planted divergences. This covers io_read/io_write, which the 0.2.0 Z80 never calls.
-2. io-rules: hand-derived IN A,(n) / IN B,(C) / INI results on the real core: a non-zero port read is explained by
-   its I/O rule, a zero read matches exactly, and a planted extra error stays unexpected.
+2. rule-cases: hand-derived IN A,(n) / IN B,(C) / INI / repeating LDIR results on the real core: the case the
+   rule is for is explained, the control case (port value 0, or not repeating) matches exactly, and a planted extra
+   error stays unexpected. This validates the model-checking predicates independently of SingleStepTests.
 3. mutants: single-line mutations of the Z80 core must each produce unexpected divergences in the field they
    break (a harness that cannot fail would report a clean ledger here).
 4. memory-model invariance: sparse and full memory give identical ledgers on real vectors.
@@ -183,7 +184,7 @@ class _ArtifactsWithCore:
         return getattr(self._art, name)
 
 
-# ---------------------------------------------------------------------------------------------- 2b. I/O rules
+# ---------------------------------------------------------------------------------------------- 2. rule cases
 def _z80(pc, **over):
     s = {"pc": pc, "sp": 0x8000, "a": 0, "b": 0, "c": 0, "d": 0, "e": 0, "f": 0, "h": 0, "l": 0, "i": 0, "r": 0,
          "ei": 0, "wz": 0, "ix": 0, "iy": 0, "af_": 0, "bc_": 0, "de_": 0, "hl_": 0, "im": 0, "p": 0, "q": 0,
@@ -232,11 +233,27 @@ IO_FILES = {
                  [[0x300, 0xED], [0x301, 0xA2], [0x2000, 0x77], [0x2001, 0x00]],
                  [[0x300, 0xED], [0x301, 0xA2], [0x2000, 0x81], [0x2001, 0x55]], [[0x0510, 0x81, "r"]]),
     ],
+    # LDIR (ED B0) at PC 0x0100 copying 0x0A with A = 0: n = 0x0A, so the data formula gives X|Y = 0x28, while a
+    # repeating Z80 takes them from PC: (0x01 & 0x28) = 0. P/V = (BC != 0). Not repeating: data formula on both.
+    "ed b0": [
+        _io_case("ed b0 0000", _z80(0x100, b=0x00, c=0x02, d=0x20, e=0x00, h=0x10, l=0x00),
+                 _z80(0x100, b=0x00, c=0x01, d=0x20, e=0x01, h=0x10, l=0x01, f=0x04, r=2, wz=0x0101),
+                 [[0x100, 0xED], [0x101, 0xB0], [0x1000, 0x0A], [0x2000, 0x00]],
+                 [[0x100, 0xED], [0x101, 0xB0], [0x1000, 0x0A], [0x2000, 0x0A]], []),
+        _io_case("ed b0 0001", _z80(0x100, b=0x00, c=0x01, d=0x20, e=0x00, h=0x10, l=0x00),
+                 _z80(0x102, b=0x00, c=0x00, d=0x20, e=0x01, h=0x10, l=0x01, f=0x28, r=2),
+                 [[0x100, 0xED], [0x101, 0xB0], [0x1000, 0x0A], [0x2000, 0x00]],
+                 [[0x100, 0xED], [0x101, 0xB0], [0x1000, 0x0A], [0x2000, 0x0A]], []),
+        _io_case("ed b0 0002", _z80(0x100, b=0x00, c=0x02, d=0x20, e=0x00, h=0x10, l=0x00),  # H set as well
+                 _z80(0x100, b=0x00, c=0x01, d=0x20, e=0x01, h=0x10, l=0x01, f=0x14, r=2, wz=0x0101),
+                 [[0x100, 0xED], [0x101, 0xB0], [0x1000, 0x0A], [0x2000, 0x00]],
+                 [[0x100, 0xED], [0x101, 0xB0], [0x1000, 0x0A], [0x2000, 0x0A]], []),
+    ],
 }
-IO_RULES = {"db": "IO-IN-A", "ed 40": "IO-IN-C", "ed a2": "IO-IN-BLOCK"}
+IO_RULES = {"db": "IO-IN-A", "ed 40": "IO-IN-C", "ed a2": "IO-IN-BLOCK", "ed b0": "REP-XY"}
 
 
-def io_rules(art: Artifacts, log) -> bool:
+def rule_cases(art: Artifacts, log) -> bool:
     ok = True
     with tempfile.TemporaryDirectory() as tmp:
         for key, tests in IO_FILES.items():
@@ -248,8 +265,8 @@ def io_rules(art: Artifacts, log) -> bool:
         planted = {ex["name"] for e in rec["fields"].values() for ex in e.get("examples", [])}
         good = rec["explained"] == 2 and rec["unexpected"] == 1 and hits >= 1 and planted == {f"{key} 0002"}
         ok &= good
-        log(f"  {'ok  ' if good else 'FAIL'} io-rules {key}: {rule} explains the non-zero read, the zero read "
-            f"matches, only the planted error is unexpected (explained {rec['explained']}/3, unexpected {sorted(planted)})")
+        log(f"  {'ok  ' if good else 'FAIL'} rule-cases {key}: {rule} explains case 0, case 1 matches, only the planted "
+            f"error is unexpected (explained {rec['explained']}/3, unexpected {sorted(planted)})")
     return ok
 
 
@@ -280,7 +297,7 @@ def run(art: Artifacts, vectors: Path | None, limit: int, log=print) -> int:
     gpu = G.get_gpu()
     log(f"selftest on {gpu.summary()}")
     ok = host_probe(gpu, log)
-    ok &= io_rules(art, log)
+    ok &= rule_cases(art, log)
     if vectors is None:
         log("  skip mutants, invariance, determinism (no --vectors)")
     else:

@@ -243,6 +243,25 @@ class Z80Adapter:
         hl_ok = (at & slot & (val == 0) & (fb.mem_exp == v[:, None])).any(1)
         return cond & others_ok & hl_ok
 
+    def _rep_model(self, name: str, fb: FileBatch, out: LaneOutputs) -> np.ndarray:
+        """A repeating block instruction. Vector side: YF = PC.13 and XF = PC.11, PC being the address of the ED byte
+        (redcode Z80 Block Flags Test). Core side: Zilion's non-repeating X/Y formula, unchanged by the repeat."""
+        s0, s1, act = fb.state_in, fb.state_exp, out.state
+        pc = s0[:, IDX["pc"]]
+        cond = (s1[:, IDX["pc"]] == pc) & ((s1[:, IDX["f"]] & 0x28) == ((pc >> 8) & 0x28))
+        xy = lambda n: (n & 0x08) | ((n & 0x02) << 4)  # noqa: E731  (LDI/CPI: X = bit 3, Y = bit 1 of n)
+        op = int(fb.key.split()[-1], 16)
+        if name == "rep_io_model":  # INIR/INDR/OTIR/OTDR: Zilion's X/Y come from B after the decrement
+            return cond & ((act[:, IDX["f"]] & 0x28) == (((s0[:, IDX["b"]] - 1) & 0xFF) & 0x28))
+        a = s0[:, IDX["a"]].astype(np.int64)
+        val = self.initial_byte(fb, (s0[:, IDX["h"]] << 8) | s0[:, IDX["l"]])
+        if op & 0x01:  # CPIR/CPDR: n = A - (HL) - HF
+            r = (a - val) & 0xFF
+            n = (r - np.where(((a ^ val ^ r) & 0x10) != 0, 1, 0)) & 0xFF
+        else:  # LDIR/LDDR: n = (HL) + A
+            n = (val + a) & 0xFF
+        return cond & (val >= 0) & ((act[:, IDX["f"]] & 0x28) == xy(n))
+
     def predicate(self, name: str, fb: FileBatch, out: LaneOutputs) -> np.ndarray:
         """Named conditions for expected rules. The *_model predicates check both sides against the documented
         formulas: the vector must follow the hardware rule and the core its known 0.2.0 rule, so the rule cannot
@@ -265,6 +284,8 @@ class Z80Adapter:
             return (s1[:, IDX["r"]] == step(1)) & (act[:, IDX["r"]] == step(2))
         if name in ("in_a_n_model", "in_r_c_model", "in_block_model"):
             return self._in_model(name, fb, out)
+        if name in ("rep_xy_model", "rep_io_model"):
+            return self._rep_model(name, fb, out)
         if name == "repeats":  # a block instruction that loops: the reference leaves PC on the instruction
             return fb.state_exp[:, pc] == fb.state_in[:, pc]
         if name == "not_repeats":

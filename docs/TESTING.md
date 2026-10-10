@@ -265,9 +265,13 @@ A future CI gate should fail on any unexpected divergence (exit 1) and on any ru
   1. **host-probe.** A probe core drives every host path with 15 planted cases (listed, unlisted and final-only
      memory; stray writes; wrap at 0xFFFF; port reads and writes) in both memory models. The ledger must report
      exactly the planted divergences.
-  2. **io-rules.** Hand-derived hardware results for IN A,(n), IN B,(C) and INI run on the real core. For each, a
-     non-zero port read must be explained by its I/O rule, a zero read must match exactly, and a planted extra
-     error must stay unexpected. This validates the I/O predicates without depending on SingleStepTests.
+  2. **rule-cases.** Hand-derived hardware results for IN A,(n), IN B,(C), INI and a repeating LDIR run on the
+     real core. For each:
+     - the case the rule is for must be explained;
+     - the control case (port value 0, or not repeating) must match exactly;
+     - a planted extra error must stay unexpected.
+
+     This validates the model-checking predicates without depending on SingleStepTests.
   3. **mutants.** Single-line mutations of the Z80 core: R not incremented, wrong PUSH byte, wrong INC flags, a wrong
      SCF X/Y that is not the Q effect, a wrong BIT n,(HL) X/Y that is not the WZ effect, DJNZ never branching, HALT
      not halting, a NOP that reads or writes memory. Each must produce unexpected divergences in the field it breaks.
