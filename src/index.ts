@@ -45,3 +45,38 @@ export type {
 export { ringPos, highestAlias, lowestAlias, seamOffset } from "./contract/address.js";
 export { z80, z80CoreText } from "./cores/z80/index.js";
 export type { Z80Hooks } from "./cores/z80/index.js";
+
+// L1: worlds and the machine builder
+export { buildMachine, zilHash, zilMix32, dialThreshold, initDraw, ZIL_SALT_INIT } from "./world/index.js";
+export type {
+  BuiltMachine,
+  WorldSpec,
+  MachineSpec,
+  MemoryModel,
+  Segment,
+  Position,
+  InitSpec,
+  BudgetSpec,
+  HaltingSpec,
+  Dial,
+  TrapPolicy,
+  AblationSpec,
+  OutputSpec,
+  RawHooks,
+  BindingNames,
+} from "./world/index.js";
+export { MANIFEST_SCHEMA } from "./manifest.js";
+export type {
+  ShaderManifest,
+  ParamField,
+  ParamRole,
+  BindingInfo,
+  BindingRole,
+  MemoryLayout,
+  SegmentLayout,
+  RecordLayout,
+  RecordField,
+  RecordFieldName,
+  StateLayoutField,
+} from "./manifest.js";
+export { sha256 } from "./util/sha256.js";

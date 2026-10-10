@@ -1,6 +1,6 @@
 {
 	"name": "@neovand/zilion",
-	"version": "0.2.0",
+	"version": "0.3.0-dev",
 	"publishConfig": {
 		"access": "public"
 	},
@@ -24,7 +24,11 @@
 		"build": "tsc -p tsconfig.json",
 		"prepublishOnly": "npm run build",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
-		"check:bytes": "npm run build && node scripts/check-byte-identity.mjs"
+		"check:bytes": "npm run build && node scripts/check-byte-identity.mjs",
+		"test:unit": "npm run build && node test/unit.mjs",
+		"test:world": "npm run build && node test/world/run.mjs",
+		"test:algocell": "npm run build && node test/world/algocell.mjs",
+		"test": "npm run build && node test/unit.mjs && node scripts/check-byte-identity.mjs && node test/world/run.mjs"
 	},
 	"keywords": [
 		"z80",
