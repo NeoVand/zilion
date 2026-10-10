@@ -113,6 +113,40 @@ class RuleTests(unittest.TestCase):
                 ref = set(ad.reference_keys()) | {"dd dd", "dd fd", "dd ed", "fd dd", "fd fd", "fd ed"}
                 self.assertTrue(any(r.matches_file(k) for k in ref), (path.name, r.id, "matches no file"))
 
+    def test_rules_resolved_by_core_sha(self):
+        from ztest.artifacts import Artifacts
+        files = sorted((REPO / "test" / "vectors" / "z80").glob("expected-*.json"))
+        shas = [json.loads(p.read_text(encoding="utf-8")).get("core_sha256") for p in files]
+        self.assertTrue(all(isinstance(h, str) and len(h) == 64 and int(h, 16) >= 0 for h in shas), shas)
+        self.assertEqual(len(set(shas)), len(shas))
+        for path, sha in zip(files, shas):  # a version bump that leaves the core text alone keeps its rules
+            art = Artifacts(Path("."), {"package": {"version": "9.9.9-test"}, "cores": {"z80": {"sha256": sha}}})
+            self.assertEqual(session.default_rules_path("z80", art), path)
+        art = Artifacts(Path("."), {"package": {"version": "9.9.9-test"}, "cores": {"z80": {"sha256": "0" * 64}}})
+        with self.assertRaises(HarnessError):
+            session.default_rules_path("z80", art)
+
+    def test_q_xy_after_wasted_prefix(self):
+        # SingleStepTests "DD 37 0008": the DD prefix clears Q, so SCF's X/Y come from (F | A), not ((Q ^ F) | A)
+        import numpy as np
+        from ztest.vectors.model import LaneOutputs
+        init = z80_state(pc=0x0B4E, a=0xCE, f=0x23, q=0x23, ram=[[0x0B4E, 0xDD], [0x0B4F, 0x37]])
+        final = dict(init, pc=0x0B50, f=0x29, q=0x29, ram=[[0x0B4E, 0xDD], [0x0B4F, 0x37]])
+        test = {"name": "DD 37 0008", "initial": init, "final": final, "cycles": [], "ports": []}
+        d = Path(tempfile.mkdtemp())
+        try:
+            (d / "t.json").write_text(json.dumps([test]))
+            ad = Z80Adapter()
+            for key, explained in (("dd 37", True), ("37", False)):
+                fb = sst.parse_file(d / "t.json", key, ad, 32, 8)
+                act = fb.state_exp.copy()
+                act[:, [f.name for f in FIELDS if f.compare].index("f")] = 0x09  # Zilion 0.2.0: X/Y from A only
+                out = LaneOutputs(act, *(np.zeros(1) for _ in range(7)))
+                self.assertEqual(bool(ad.predicate("q_xy_model", fb, out)[0]), explained, key)
+        finally:
+            import shutil
+            shutil.rmtree(d)
+
 
 class Z80AdapterTests(unittest.TestCase):
     def test_groups_and_reference_set(self):

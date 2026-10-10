@@ -270,6 +270,8 @@ class Z80Adapter:
         s0, s1, act = fb.state_in, fb.state_exp, out.state
         if name == "q_xy_model":  # SCF/CCF: Zilog NMOS X/Y = ((Q ^ F) | A) & 0x28; Zilion 0.2.0: A & 0x28
             q, f, a = s0[:, IDX["q"]], s0[:, IDX["f"]], s0[:, IDX["a"]]
+            if fb.key[:2] in ("dd", "fd"):  # the wasted prefix is a flag-neutral instruction of its own, so Q = 0
+                q = np.zeros_like(q)
             return (((s1[:, IDX["f"]] & 0x28) == (((q ^ f) | a) & 0x28))
                     & ((act[:, IDX["f"]] & 0x28) == (a & 0x28)))
         if name == "bit_hl_model":  # BIT n,(HL): Z80 X/Y = WZ bits 13/11; Zilion 0.2.0: operand bits 5/3

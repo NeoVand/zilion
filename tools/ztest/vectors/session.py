@@ -21,8 +21,23 @@ from .z80 import Z80Adapter
 ADAPTERS = {"z80": Z80Adapter}
 
 
-def default_rules_path(isa: str, version: str) -> Path:
-    return REPO / "test" / "vectors" / isa / f"expected-{version}.json"
+def default_rules_path(isa: str, art: Artifacts) -> Path:
+    """The rules file written for this core build: the one whose core_sha256 is the core's SHA-256.
+
+    Rules describe a core, not a package version, so a version bump that leaves the core text unchanged keeps its
+    rules. A file without core_sha256 is found by package version only (expected-<version>.json)."""
+    d = REPO / "test" / "vectors" / isa
+    sha = art.manifest["cores"][isa]["sha256"]
+    hits = [p for p in sorted(d.glob("expected-*.json")) if json.loads(p.read_text(encoding="utf-8")).get("core_sha256") == sha]
+    if len(hits) > 1:
+        raise G.HarnessError(f"{len(hits)} rules files claim the {isa} core {sha[:12]}: {', '.join(h.name for h in hits)}")
+    if hits:
+        return hits[0]
+    p = d / f"expected-{art.version}.json"
+    if p.is_file():
+        return p
+    raise G.HarnessError(f"no expected-rules file for the {isa} core {sha[:12]} (package {art.version}); "
+                         f"pass --expected, or set core_sha256 in the rules file written for this core")
 
 
 def load_rules(path: Path) -> tuple[list[Rule], dict]:
@@ -66,7 +81,7 @@ def run(art: Artifacts, isa: str, dirs: list[Path], *, patterns=None, limit_per_
     gpu = G.get_gpu()
     runner = Runner(gpu, adapter, core, mode=mode, mem_cap=mem_cap, port_cap=port_cap, lanes_per_dispatch=lanes,
                     repeat=repeat)
-    rules_path = rules_path or default_rules_path(isa, art.version)
+    rules_path = rules_path or default_rules_path(isa, art)
     rules, rules_doc = load_rules(rules_path)
     declared = sorted(rules_doc.get("passthrough", []))
     if declared != sorted(adapter.passthrough):

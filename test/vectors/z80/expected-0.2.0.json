@@ -1,6 +1,7 @@
 {
  "isa": "z80",
  "core": "@neovand/zilion 0.2.0 (Z80_CORE_WGSL)",
+ "core_sha256": "8db4015dab560cd075b2f4da7de78b6cc5e2b120034bfbf62590eb49784b2955",
  "passthrough": ["ei", "im", "p", "q", "wz"],
  "rules": [
   {"id": "WZ", "files": ["*"], "fields": ["wz"],
@@ -22,7 +23,7 @@
    "reason": "BIT n,(HL) takes F3/F5 from the operand; a Z80 takes them from WZ bits 11 and 13 (MEMPTR leak). Explained only where the vector follows the WZ formula and Zilion the operand formula.",
    "source": "design §4.4 (bit-mem-f3f5), §5.3, Appendix B (BIT-HL-XY)"},
   {"id": "Q-XY", "files": ["37", "3f", "dd 37", "dd 3f", "fd 37", "fd 3f"], "fields": ["f"], "mask": "0x28", "when": "q_xy_model",
-   "reason": "SCF/CCF take F3/F5 from A only; on a Zilog NMOS Z80 they are ((Q xor F) or A) & 0x28, and Q is not modelled. Explained only where the vector follows the NMOS formula and Zilion the A-only formula.",
+   "reason": "SCF/CCF take F3/F5 from A only; on a Zilog NMOS Z80 they are ((Q xor F) or A) & 0x28, and Q is not modelled. After a wasted DD/FD prefix Q is 0, because the prefix executes as a flag-neutral instruction of its own, so the formula there is (F or A) & 0x28. Explained only where the vector follows the NMOS formula and Zilion the A-only formula.",
    "source": "design §5.4 and Appendix B (Q-XY)"},
   {"id": "REP-XY", "files": ["ed b0", "ed b1", "ed b8", "ed b9"], "fields": ["f"], "mask": "0x28", "when": "rep_xy_model",
    "reason": "LDIR/LDDR/CPIR/CPDR when repeating: on a Z80, YF = PC.13 and XF = PC.11 (PC = the ED byte); Zilion keeps its non-repeating formula from the data. Explained only where the vector follows the PC rule and Zilion its data formula.",

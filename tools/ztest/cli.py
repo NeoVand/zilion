@@ -37,7 +37,7 @@ def main(argv: list[str]) -> int:
     v.add_argument("--lanes", type=int, help="lanes per dispatch (default 65536 sparse, 1024 full)")
     v.add_argument("--repeat", type=int, default=1, help="run every dispatch N times and require identical bytes")
     v.add_argument("--workers", type=int, help="parser processes (default min(8, cpus-1); 1 = in-process)")
-    v.add_argument("--expected", type=Path, help="expected-divergence rules (default test/vectors/<isa>/expected-<version>.json)")
+    v.add_argument("--expected", type=Path, help="expected-divergence rules (default: the test/vectors/<isa>/expected-*.json whose core_sha256 is the core's)")
     v.add_argument("--json", type=Path, help="write the ledger JSON here (canonical; deterministic)")
     v.add_argument("--run-json", type=Path, help="write run information (adapter, timing) here")
     v.add_argument("--md", type=Path, help="write the Markdown report here")

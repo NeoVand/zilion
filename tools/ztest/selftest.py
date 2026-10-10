@@ -248,7 +248,8 @@ def mutants(art: Artifacts, gpu: G.Gpu, vectors: Path, log) -> bool:
             log(f"  skip mutant {mid}: vector files {', '.join(files)} absent")
             continue
         fake = with_core(art, "z80", base.replace(old, new), f"mutant {mid}")
-        led, _ = session.run(fake, "z80", [vectors], patterns=files, workers=1, progress=None)
+        led, _ = session.run(fake, "z80", [vectors], patterns=files, workers=1, progress=None,
+                             rules_path=session.default_rules_path("z80", art))  # the base core's rules
         hit = sum(rec["fields"].get(field, {}).get("unexpected", 0) for rec in led.files.values())
         if hit == 0:
             ok = False
