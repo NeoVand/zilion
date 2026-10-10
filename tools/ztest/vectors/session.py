@@ -154,6 +154,7 @@ def run(art: Artifacts, isa: str, dirs: list[Path], *, patterns=None, limit_per_
     }
     run_info = {
         "source": art.source(),
+        "core": art.core_config(isa),
         "adapter": gpu.adapter_info,
         "dispatches": runner.dispatches,
         "lanes_per_dispatch": runner.lanes,

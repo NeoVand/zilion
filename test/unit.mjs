@@ -104,13 +104,47 @@ test("sha256 matches node:crypto", () => {
 });
 
 // --- generality costs nothing ---------------------------------------------------------------------------------
-test("a plain world emits no v2 hook and calls none (the core is the 0.2 text)", () => {
+test("a plain world emits no v2 hook and calls none (the core is the hook-free text; compat '0.2': the 0.2.0 core)", () => {
   const m = build(ring(32));
   for (const f of ["fn on_fetch(", "fn on_instruction_start(", "fn zil_trap(", "fn io_in(", "fn io_out("]) {
     if (m.wgsl.includes(f)) throw new Error(`emitted ${f}`);
   }
-  if (!m.wgsl.includes(Z.Z80_CORE_WGSL)) throw new Error("the core text is not the 0.2 core");
+  const code = Z.z80.wgsl({ hooks: {} }).replace(/\/\/[^\n]*/g, "");
+  for (const f of ["on_fetch(", "on_instruction_start(", "zil_trap(", "io_in(", "io_out(", "ZIL_"]) {
+    if (code.includes(f)) throw new Error(`the hook-free 0.3 core uses ${f}`);
+  }
+  if (!m.wgsl.includes(Z.z80.wgsl({ hooks: {} }))) throw new Error("the core text is not the hook-free core");
   eq(m.manifest.core.hooks, []);
+  eq([m.manifest.core.compat, m.manifest.core.variant, m.manifest.core.coreVersion], ["0.3", "classic", "0.3.0"]);
+  const m02 = build(ring(32), { compat: "0.2" });
+  if (!m02.wgsl.includes(Z.Z80_CORE_WGSL)) throw new Error("the compat '0.2' core text is not the 0.2.0 core");
+  eq(m02.manifest.core.compat, "0.2");
+});
+test("the 0.2 kernel's manifest names the 0.2.0 core it embeds (not the default core)", () => {
+  const m = Z.legacyMachine(64).manifest;
+  eq(m.sha256.core, Z.sha256(Z.Z80_CORE_WGSL));
+  if (!Z.legacyMachine(64).wgsl.includes(Z.Z80_CORE_WGSL)) throw new Error("the 0.2 kernel does not embed Z80_CORE_WGSL");
+  eq([m.core.compat, m.core.coreVersion], ["0.2", "0.2.0"]);
+  if (m.sha256.core === Z.sha256(Z.z80.wgsl({ hooks: {} }))) throw new Error("hash of the compat '0.3' core");
+});
+test("Z80 semantics: the state record per compat and variant; the core's halt reasons are the contract's", () => {
+  const names = (o) => build(ring(32), o).manifest.state.map((f) => f.name);
+  const r02 = names({ compat: "0.2" });
+  eq(r02.length, 25);
+  eq(names({}), [...r02, "wz", "im"]);
+  eq(names({ variant: "zilog-nmos" }), [...r02, "wz", "im", "q"]);
+  eq(Z.z80.state.map((f) => f.name), names({}));
+  const text = Z.z80CoreText({}, { variant: "zilog-nmos" });
+  for (const [k, v] of [["Z80_RUNNING", Z.HALT_REASONS.running], ["Z80_HALT_INSN", Z.HALT_REASONS["halt-insn"]],
+    ["Z80_HALT_HOST", Z.HALT_REASONS.host], ["Z80_HALT_TRAP", Z.HALT_REASONS.trap]]) {
+    if (!text.includes(`const ${k}: u32 = ${v}u;`)) throw new Error(`${k} is not ${v}`);
+  }
+  // the world reset zeroes the latches of the configuration (and only those)
+  const w = build(ring(32), { variant: "zilog-nmos" }).wgsl;
+  for (const x of ["cpu_wz = 0x0u;", "cpu_im = 0x0u;", "cpu_q = 0x0u;", "z80_qprev = 0u;"]) if (!w.includes(x)) throw new Error(`zil_reset lacks ${x}`);
+  if (build(ring(32), { compat: "0.2" }).wgsl.includes("cpu_wz")) throw new Error("compat '0.2' names cpu_wz");
+  throws(() => Z.z80CoreText({}, { compat: "0.2", variant: "zilog-nmos" }), /needs compat '0.3'/);
+  throws(() => Z.z80CoreText({}, { compat: "0.1" }), /unknown compat/);
 });
 test("each feature enables exactly the hook it needs", () => {
   eq(build(ring(32, { outputs: { fetchMap: true } })).manifest.core.hooks, ["fetch"]);
@@ -132,7 +166,8 @@ test("buildMachine rejects inconsistent worlds with a clear message", () => {
   throws(() => build({ memory: { kind: "segments", segments: [{ bytes: 4, name: "padding" }] } }), /reserved/);
   throws(() => build(ring(32, { init: { state: "perLane", stack: { topAliases: 0 } } })), /excludes/);
   throws(() => build(ring(32, { init: { stack: LAST, set: { a: 256 } } })), /does not fit/);
-  throws(() => build(ring(32, { init: { stack: LAST, set: { wz: 1 } } })), /no state field 'wz'/);
+  throws(() => build(ring(32, { init: { stack: LAST, set: { wz: 1 } } }), { compat: "0.2" }), /no state field 'wz'/);
+  throws(() => build(ring(32, { init: { stack: LAST, set: { q: 1 } } })), /no state field 'q'/);
   throws(() => build(ring(32, { init: { stack: { topAliases: 32 } } })), /not on the ring/);
   throws(() => build(ring(32, { halting: { lethal: { firstUnit: 256 } } })), /firstUnit/);
   throws(() => build(ring(32, { halting: { lethal: { firstUnit: 0, probability: 1.5 } } })), /probability/);
@@ -141,8 +176,9 @@ test("buildMachine rejects inconsistent worlds with a clear message", () => {
   throws(() => build(ring(32, { ablation: { table: "uniform", layout: "nope" } })), /no decode layout/);
   throws(() => build(ring(32, { ablation: { expr: "  " } })), /non-empty/);
   throws(() => build(ring(32, { budget: { unit: "steps", value: -1 } })), /u32/);
-  throws(() => build(ring(32), { compat: "0.3" }), /compat/);
-  throws(() => build(ring(32), { variant: "zilog-nmos" }), /variant/);
+  throws(() => build(ring(32), { compat: "0.1" }), /compat/);
+  throws(() => build(ring(32), { variant: "zilog-cmos" }), /variant/);
+  throws(() => build(ring(32), { compat: "0.2", variant: "zilog-nmos" }), /needs compat '0.3'/);
   throws(() => build(ring(32), { bindingNames: { memory: "x" } }), /library mode only/);
   throws(() => build(ring(32, { ablation: { table: "uniform" } }), { mode: "library" }), /bindingNames.ablation/);
 });
@@ -454,7 +490,9 @@ test("resumable machines: a steps budget, the state and the memory stored; the p
     if (m.wgsl.includes("fn zil_resume(")) throw new Error(`${why}: zil_resume emitted`);
   }
   // padding rides in the record only when the machine is resumable
-  eq(build({ ...Z.algocellPairWorld({ L: 16, P: 37, steps: 9 }) }).manifest.record.fields.at(-1), { name: "padding", offset: 31, words: 2 });
+  // (steps, haltReason, trapCause, the state record (27 fields with compat '0.3', 25 with '0.2'), 3 write counters)
+  eq(build({ ...Z.algocellPairWorld({ L: 16, P: 37, steps: 9 }) }).manifest.record.fields.at(-1), { name: "padding", offset: 33, words: 2 });
+  eq(build({ ...Z.algocellPairWorld({ L: 16, P: 37, steps: 9 }) }, { compat: "0.2" }).manifest.record.fields.at(-1), { name: "padding", offset: 31, words: 2 });
   eq(build({ ...Z.algocellPairWorld({ L: 16, P: 37, steps: 9 }), outputs: { memory: false } }).manifest.record.fields.some((f) => f.name === "padding"), false);
   // raw hooks with private state of their own (Algocell's PCG streams) are not resumable; stateless helpers are
   eq(build(ring(32, { hooks: { declarations: "var<private> pcg: u32;\nfn draw() -> u32 { pcg = pcg * 3u; return pcg; }", onReset: "pcg = zil_lane;" } })).manifest.resumable, false);

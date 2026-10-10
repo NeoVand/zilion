@@ -47,7 +47,7 @@ export type {
 export { coreParamConstant, resolveCoreParams, checkCoreParamDecls } from "./contract/params.js";
 export { ringPos, highestAlias, lowestAlias, seamOffset } from "./contract/address.js";
 export { z80, z80CoreText } from "./cores/z80/index.js";
-export type { Z80Hooks } from "./cores/z80/index.js";
+export type { Z80Hooks, Z80Semantics } from "./cores/z80/index.js";
 
 // L1: worlds and the machine builder
 export {

@@ -54,6 +54,32 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
   `core.params`.
 - Unchanged: the 0.2 kernel and the Z80 core text, byte for byte (`npm run check:bytes`), and the anchors.
 
+**Z80 fixes (work item 3; branch `m1/z80-fixes`; docs/ARCHITECTURE.md, "The Z80 core")**
+
+- *Behaviour changes (the Z80 of `buildMachine`; `compat: '0.2'` restores 0.2.0 exactly):* the default Z80 is now
+  `compat: '0.3'` (`coreVersion` 0.3.0): a Z80 world that names no `compat` gets the new semantics. A wasted DD/FD prefix adds 1 to R (0.2: 2). MEMPTR (WZ) is modelled in
+  full and `BIT n,(HL)` takes F3/F5 from it. IM is modelled. A repeating block instruction takes X/Y from its own
+  address (INxR/OTxR also adjust H and P/V) and sets WZ = PC + 1. `OUT (C),r` and `OUT (C),0` exist without the io
+  hooks. A lane halted by the host is frozen (0.2 kept adding 1 to R per further step). The state record gains
+  `wz` and `im` (appended; compat `'0.2'` keeps its 25 fields).
+- *Unchanged:* the 0.2 API (`Zilion`, `buildComputeShader`, `Z80_CORE_WGSL`) and the compat `'0.2'` text in every
+  hook combination, byte for byte (`npm run check:bytes`, now with the SHA-256 of all 16 hooked 0.2 texts); the
+  anchors, in all three semantics.
+- *Added:* variant `zilog-nmos` (the Q latch: SCF/CCF X/Y = ((Q ⊕ F) | A); state field `q`); `z80_reset()` and
+  `z80_run(budget)` in the core text; halt-reason constants (`Z80_HALT_INSN` …, equal to the contract's);
+  `z80CoreText(hooks, { compat, variant })` and the `Z80Semantics` type; the optional descriptor method
+  `stateFor({ variant, compat })` (the state record per selection), used by the builder.
+- *Fixed:* the 0.2 kernel's manifest (`legacyMachine`) hashes the core it embeds (`Z80_CORE_WGSL`) and reports
+  `coreVersion` 0.2.0.
+- *Validation:* SingleStepTests/z80 (1,604,000 tests) plus 384 wasted-prefix vectors and 86 R/WZ probes: 0
+  unexpected with only the rules Q, Q-XY (not modelled by `classic`) and EI-P (no interrupts); `zilog-nmos`: 0 unexpected with EI-P only; `--compat 0.2` reproduces the
+  0.2.0 ledger byte for byte. 86 hand-derived R and WZ probes (`tools/z80-probe-vectors.py`). Baselines
+  `test/baselines/z80-v0.3.0-dev.*` and `z80-v0.3.0-dev-zilog-nmos.*`.
+- *Tests and harness:* `tools/zt.py vectors|conformance --compat --variant` (recorded in the run record); conformance
+  on all three semantics; self-test mutants for each fix (the 0.2 behaviour of each must be caught) and for the Q
+  latch; `npm run test:compat` (design §5.5: 600,000 random programs against outputs recorded from 0.2.0);
+  `test/world/cases_z80.mjs`.
+
 **The NMOS 6502 core (branch `m2/6502`; docs/ARCHITECTURE.md, The 6502 core)**
 
 - `src/cores/m6502/`: all 256 opcodes (151 documented, 85 stable undocumented, 8 unstable, 12 JAM), core 0.3.0,
@@ -65,9 +91,9 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
 - Validated against SingleStepTests/65x02 `6502/v1`: 2,560,000 tests, zero divergences, zero expected-divergence
   rules (`test/baselines/6502-v0.3.0-dev.md`). 18 planted 6502 bugs in the harness self-test, all caught.
 - Harness: the 6502 adapter (`tools/zt.py vectors 6502`), an optional bus-write log compared against the vectors'
-  `cycles` (the `bus` field), `npm run test:vectors:6502`, `ZILION_6502_VECTORS`. The Z80 test-host WGSL and the
-  Z80 ledger JSON are unchanged byte for byte; a regenerated Z80 Markdown report gains one line listing the
-  convention mappings applied (HALT-PC).
+  `cycles` (the `bus` field), `npm run test:vectors:6502`, `ZILION_6502_VECTORS`. With the bus-write log off the Z80
+  test-host WGSL is unchanged byte for byte, and so are the three Z80 ledgers (0.3, zilog-nmos, compat 0.2); a
+  regenerated Z80 Markdown report gains one line listing the convention mappings applied (HALT-PC).
 - `test/world/cases_m6502.mjs`: the 6502 on rings of 32, 33 and 64 bytes, with a self-copier under the soup's init.
 - `test/bench/bench-cores.mjs`: Z80 and 6502 throughput on random 32-byte pairs.
 

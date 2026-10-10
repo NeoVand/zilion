@@ -167,8 +167,8 @@ class RuleTests(unittest.TestCase):
 class Z80AdapterTests(unittest.TestCase):
     def test_groups_and_reference_set(self):
         g = Z80Adapter.group
-        self.assertEqual([g("00"), g("cb 46"), g("ed b0"), g("dd 21"), g("fd cb __ 06"), g("dd ed")],
-                         ["base", "CB", "ED", "DD", "FDCB", "wasted-prefix"])
+        self.assertEqual([g("00"), g("cb 46"), g("ed b0"), g("dd 21"), g("fd cb __ 06"), g("dd ed"), g("wz ed b0"), g("r 00")],
+                         ["base", "CB", "ED", "DD", "FDCB", "wasted-prefix", "probe", "probe"])
         keys = Z80Adapter.reference_keys()
         self.assertEqual(len(keys), 1604)
         self.assertEqual(len(set(keys)), 1604)
@@ -185,6 +185,20 @@ class Z80AdapterTests(unittest.TestCase):
         self.assertEqual(ad.passthrough, ("wz", "q", "ei", "p"))
         self.assertIn("fn on_fetch_opcode(", glue)
         self.assertIn("cpu_im = zt_state_in", glue)
+        self.assertNotIn("io_in", glue)  # a core without the port hooks gets no port glue (the 0.2.0 glue is unchanged)
+        self.assertNotIn("z80_reset", glue)
+
+    def test_glue_for_hooked_cores(self):
+        # A core generated with the io hooks calls io_in/io_out: the glue routes them to the host's vector ports. A
+        # core that defines z80_reset() is reset before the state is loaded, so latches it models start at 0.
+        core = ("var<private> cpu_wz: u32;\nfn z80_reset() { cpu_wz = 0u; }\n"
+                "fn z80_in(port: u32) -> u32 { return io_in(port) & 0xffu; }\nfn z80_out(port: u32, val: u32) { io_out(port, val); }")
+        ad = Z80Adapter()
+        glue = ad.glue(core)
+        self.assertIn("fn io_in(port: u32) -> u32 { return io_read(port); }", glue)
+        self.assertIn("fn io_out(port: u32, val: u32) { io_write(port, val); }", glue)
+        self.assertLess(glue.index("z80_reset();"), glue.index("cpu_pc = zt_state_in"))
+        self.assertEqual(ad.passthrough, ("im", "q", "ei", "p"))
 
 
 def m6502_state(**over):

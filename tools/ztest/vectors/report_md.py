@@ -69,6 +69,10 @@ def render(doc: dict, run: dict, digest: str, analysis: str | None) -> str:
     w("| | |")
     w("|---|---|")
     w(f"| Core | `{prov['package']['name']}@{prov['package']['version']}`, {isa} core SHA-256 `{prov['core']['sha256']}` |")
+    cc = run.get("core") or {}
+    if cc.get("compat") or cc.get("variant"):
+        w(f"| Core configuration | compat `{cc.get('compat')}`, variant `{cc.get('variant')}`, hooks "
+          f"{', '.join(_code(x) for x in cc.get('hooks') or []) or 'none'}; `{cc.get('export')}` |")
     src = run["source"]
     w(f"| Source | git `{src['git']['commit']}`" + (" (src/ modified)" if src["git"].get("srcDirty") else "") +
       f"; emitted with Node {src['toolchain']['node']}, TypeScript {src['toolchain']['typescript']} |")
