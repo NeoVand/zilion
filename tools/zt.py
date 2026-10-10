@@ -3,6 +3,8 @@
 
 Commands:
   conformance           test/conformance.js, headless
+  vectors <isa> <dir>   per-instruction vectors (SingleStepTests format) -> divergence ledger
+  selftest              harness self-tests on the GPU (memory-model invariance, synthetic vectors, determinism)
 """
 
 from __future__ import annotations
