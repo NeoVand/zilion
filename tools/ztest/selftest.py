@@ -3,11 +3,14 @@
 1. host-probe: a 20-line probe core drives every host path (listed / unlisted / final-only reads, writes, stray
    writes, port reads and writes) through synthetic SingleStepTests-format vectors, in both memory models, and the
    ledger must report exactly the planted divergences. This covers io_read/io_write, which the 0.2.0 Z80 never calls.
-2. rule-cases: hand-derived IN A,(n) / IN B,(C) / INI / repeating LDIR results on the real core: the case the
-   rule is for is explained, the control case (port value 0, or not repeating) matches exactly, and a planted extra
-   error stays unexpected. This validates the model-checking predicates independently of SingleStepTests.
-3. mutants: single-line mutations of the Z80 core must each produce unexpected divergences in the field they
-   break (a harness that cannot fail would report a clean ledger here).
+2. rule-cases: hand-derived IN A,(n) / IN B,(C) / INI / repeating LDIR results on the compat '0.2' core (the one
+   whose rules have these model-checking predicates): the case the rule is for is explained, the control case (port
+   value 0, or not repeating) matches exactly, and a planted extra error stays unexpected. This validates the
+   predicates independently of SingleStepTests.
+3. mutants: single-line mutations of the Z80 core (the default 0.3 core, and the zilog-nmos variant for the Q latch)
+   must each produce unexpected divergences in the field they break (a harness that cannot fail would report a clean
+   ledger here). They include the 0.2 behaviour of every 0.3 fix (wasted-prefix R, WZ, BIT n,(HL), IM, block-repeat
+   flags, ports), so each fix is shown to be checked by the vectors.
 4. memory-model invariance: sparse and full memory give identical ledgers on real vectors.
 5. determinism: two sessions give byte-identical ledgers, and repeated dispatches give identical outputs.
 Parts 3-5 need a vector directory (--vectors); parts 1-2 do not.
@@ -21,7 +24,7 @@ import tempfile
 from pathlib import Path
 
 from . import gpu as G
-from .artifacts import Artifacts, with_core
+from .artifacts import REPO, Artifacts, with_core
 from .vectors import session, sst
 from .vectors.ledger import Ledger, canonical_json
 from .vectors.model import Field, natural_key
@@ -197,6 +200,7 @@ IO_RULES = {"db": "IO-IN-A", "ed 40": "IO-IN-C", "ed a2": "IO-IN-BLOCK", "ed b0"
 
 def rule_cases(art: Artifacts, log) -> bool:
     ok = True
+    art = art.select("z80", compat="0.2")  # the rules with these predicates describe the 0.2 core
     with tempfile.TemporaryDirectory() as tmp:
         for key, tests in IO_FILES.items():
             (Path(tmp) / f"{key}.json").write_text(json.dumps(tests))
@@ -213,7 +217,10 @@ def rule_cases(art: Artifacts, log) -> bool:
 
 
 # ---------------------------------------------------------------------------------------------- 3. mutants
-# (id, exact text in the core, replacement, opcode files to run, field that must show unexpected divergences)
+ANALYTIC = REPO / "test" / "vectors" / "z80" / "analytic"  # the wasted-prefix vectors (SingleStepTests has none)
+
+# (id, exact text in the core, replacement, opcode files to run, field that must show unexpected divergences[,
+# core selection]). The core is the default configuration (compat 0.3, classic) unless a selection is given.
 MUTANTS = [
     ("drop-r-inc", "    var op = z80_fetch();\n    r_inc(); // M1: opcode (or prefix) fetch\n",
      "    var op = z80_fetch();\n", ["00", "3c"], "r"),
@@ -223,37 +230,65 @@ MUTANTS = [
     ("inc-overflow-flag", "select(0u, PF, val == 0x7fu)", "select(0u, PF, val == 0x7eu)", ["3c", "04", "0c"], "f"),
     # SCF X/Y wrong in a way that is not the Q effect: the model-checked Q-XY rule must not absorb it.
     ("scf-xy-not-q", "| CF | (cpu_a & (F3 | F5));", "| CF | ((cpu_a ^ 0x08u) & (F3 | F5));", ["37"], "f"),
-    # BIT n,(HL) X/Y wrong in a way that is not the WZ effect: the model-checked BIT-HL-XY rule must not absorb it.
-    ("bit-hl-xy-not-wz", "                    (val & (F3 | F5));", "                    ((val ^ 0x20u) & (F3 | F5));",
-     ["cb 46"], "f"),
-    ("djnz-no-branch", "if (cpu_b != 0u) { cpu_pc = u32(i32(cpu_pc) + d) & 0xffffu; }", "", ["10"], "pc"),
-    ("halt-not-halting", "                cpu_halted = 1u;\n", "", ["76"], "pc"),
+    ("djnz-no-branch", "if (cpu_b != 0u) { cpu_pc = u32(i32(cpu_pc) + d) & 0xffffu; cpu_wz = cpu_pc; }", "", ["10"], "pc"),
+    ("halt-not-halting", "                cpu_halted = Z80_HALT_INSN;\n", "", ["76"], "pc"),
     ("nop-reads", "                case 0u: {} // NOP", "                case 0u: { cpu_a = cpu_a | (mem_read(0x0005u) & 0u); } // NOP",
      ["00"], "mem"),
     ("nop-writes", "                case 0u: {} // NOP", "                case 0u: { mem_write(0x0005u, 0u); } // NOP",
      ["00"], "mem"),
+    # The 0.2 behaviour of each 0.3 fix: no rule may absorb it.
+    ("r-wasted-prefix-twice", "            cpu_pc = (cpu_pc - 1u) & 0xffffu;\n            return;\n",
+     "            r_inc();\n            cpu_pc = (cpu_pc - 1u) & 0xffffu;\n            return;\n", ["dd fd", "fd ed"], "r"),
+    ("bit-hl-xy-from-operand", "let xy = select(val, cpu_wz >> 8u, z == 6u);", "let xy = val;", ["cb 46", "cb 7e"], "f"),
+    ("wz-ld-a-nn-off-by-one", "cpu_a = mem_read(nn); cpu_wz = (nn + 1u) & 0xffffu;", "cpu_a = mem_read(nn); cpu_wz = (nn + 2u) & 0xffffu;",
+     ["3a"], "wz"),
+    ("wz-jp-cc-only-if-taken", "let nn = z80_fetch_word(); cpu_wz = nn; if (check_cc(y)) { cpu_pc = nn; } }",
+     "let nn = z80_fetch_word(); if (check_cc(y)) { cpu_pc = nn; cpu_wz = nn; } }", ["c2", "ca"], "wz"),
+    ("wz-ix-d-missing", "            cpu_wz = (idx_reg16() + idx_disp) & 0xffffu;", "", ["dd 7e", "fd 34"], "wz"),
+    ("im-ignored", "cpu_im = select(0u, m - 1u, m >= 2u);", "", ["ed 56", "ed 5e"], "im"),
+    ("rep-xy-from-data", "    cpu_f = (cpu_f & ~(F3 | F5)) | ((cpu_pc >> 8u) & (F3 | F5));\n", "", ["ed b0", "ed b1"], "f"),
+    ("rep-io-pv-not-adjusted", "        if (!parity(pb & 7u)) { f = f ^ PF; }\n", "", ["ed b2", "ed b3"], "f"),
+    ("in-a-n-port-without-a", "let port = (cpu_a << 8u) | z80_fetch();", "let port = z80_fetch();", ["db"], "ports"),
+    ("out-c-r-silent", "            z80_out(get_bc(), v);\n", "", ["ed 79"], "ports"),
+    # zilog-nmos: the Q latch
+    ("nmos-scf-ignores-q", "| CF | (((z80_qprev ^ cpu_f) | cpu_a) & (F3 | F5));", "| CF | (cpu_a & (F3 | F5));", ["37"], "f",
+     {"variant": "zilog-nmos"}),
+    ("nmos-q-kept-by-non-writers", "    cpu_q = 0u;        // 0 unless", "    cpu_q = cpu_q;     // 0 unless", ["00", "c5"], "q",
+     {"variant": "zilog-nmos"}),
+    ("nmos-q-kept-after-prefix",
+     "        z80_qprev = 0u; // the prefix was an instruction cycle of its own that left F alone: SCF/CCF see Q = 0\n",
+     "", ["dd 37", "fd 3f"], "f", {"variant": "zilog-nmos"}),
+    # compat '0.2': errors next to a model-checked rule of the 0.2.0 ledger, which its predicate must not absorb
+    ("c02-bit-hl-xy-not-wz", "                    (val & (F3 | F5));", "                    ((val ^ 0x20u) & (F3 | F5));",
+     ["cb 46"], "f", {"compat": "0.2"}),
+    ("c02-r-wasted-prefix-thrice", "        r_inc(); // M1: opcode after the prefix\n",
+     "        r_inc(); // M1: opcode after the prefix\n        if (next == 0xfdu) { r_inc(); }\n", ["dd fd"], "r", {"compat": "0.2"}),
 ]
 
 
 def mutants(art: Artifacts, gpu: G.Gpu, vectors: Path, log) -> bool:
     ok = True
-    base = art.core("z80")
-    for mid, old, new, files, field in MUTANTS:
+    for mid, old, new, files, field, *rest in MUTANTS:
+        sel = rest[0] if rest else {}
+        base_art = art.select("z80", **sel)
+        base = base_art.core("z80")
         if base.count(old) != 1:
             log(f"  FAIL mutant {mid}: anchor occurs {base.count(old)} times in the core")
             ok = False
             continue
-        present = session.list_files(session.ADAPTERS["z80"](), [vectors], files)
+        dirs = [vectors, ANALYTIC]
+        present = session.list_files(session.ADAPTERS["z80"](), dirs, files)
         if not present:
             log(f"  skip mutant {mid}: vector files {', '.join(files)} absent")
             continue
-        fake = with_core(art, "z80", base.replace(old, new), f"mutant {mid}")
-        led, _ = session.run(fake, "z80", [vectors], patterns=files, workers=1, progress=None,
-                             rules_path=session.default_rules_path("z80", art))  # the base core's rules
+        fake = with_core(base_art, "z80", base.replace(old, new), f"mutant {mid}")
+        led, _ = session.run(fake, "z80", dirs, patterns=files, workers=1, progress=None,
+                             rules_path=session.default_rules_path("z80", base_art))  # the base core's rules
         hit = sum(rec["fields"].get(field, {}).get("unexpected", 0) for rec in led.files.values())
         if hit == 0:
             ok = False
-        log(f"  {'ok  ' if hit else 'FAIL'} mutant {mid}: {hit} unexpected `{field}` divergences in {', '.join(files)}")
+        where = f" ({', '.join(f'{k} {v}' for k, v in sel.items())})" if sel else ""
+        log(f"  {'ok  ' if hit else 'FAIL'} mutant {mid}{where}: {hit} unexpected `{field}` divergences in {', '.join(files)}")
     return ok
 
 

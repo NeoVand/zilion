@@ -5,8 +5,8 @@ runs that WGSL through [wgpu-py](https://github.com/pygfx/wgpu-py) and does ever
 
 | Suite | Command | What it checks | GPU |
 |---|---|---|---|
-| Conformance | `npm run test:conformance` | the 17 known-answer programs and the 8,192-program batch of `test/conformance.js` | yes |
-| Vectors | `npm run test:vectors` | every instruction against per-instruction golden vectors (SingleStepTests/z80, plus analytic vectors) | yes |
+| Conformance | `npm run test:conformance` | the 17 known-answer programs and the 8,192-program batch of `test/conformance.js`, on the 0.2 kernel and on the same kernel with each 0.3 core | yes |
+| Vectors | `npm run test:vectors` (`:nmos`, `:0.2`) | every instruction against per-instruction golden vectors (SingleStepTests/z80, plus analytic vectors and R/WZ probes), for the default core (compat 0.3, classic), the `zilog-nmos` variant, or the frozen 0.2 core | yes |
 | Harness self-test | `npm run test:harness` | the harness itself: unit tests, planted divergences, mutated cores, memory-model invariance, determinism | yes |
 | BFF equivalence | `npm run test:bff` | the BFF core against Algocell's `experiments/micro/bff.py` (its GPU kernel and its CPU reference), bit for bit; see [BFF equivalence](#bff-equivalence) | yes |
 
@@ -38,7 +38,7 @@ explicitly.
 ## How the pieces fit
 
 ```
-src/*.ts ──tsc──▶ dist/ ──tools/build-wgsl.mjs──▶ build/wgsl/  manifest.json, z80-core.wgsl, conformance/*
+src/*.ts ──tsc──▶ dist/ ──tools/build-wgsl.mjs──▶ build/wgsl/  manifest.json, z80-core*.wgsl, conformance/*
                                                       │
                      tools/zt.py  (Python, wgpu-py) ◀─┘
                        ├─ conformance ─▶ GPU ─▶ results ─▶ tools/conformance-check.mjs (the original checks)
@@ -47,10 +47,19 @@ src/*.ts ──tsc──▶ dist/ ──tools/build-wgsl.mjs──▶ build/wgsl
 ```
 
 - **Emission** (`tools/build-wgsl.mjs`). Runs `tsc -p tsconfig.json` into `dist/`, imports the built package, and
-  writes `Z80_CORE_WGSL`, the conformance shaders (`buildComputeShader(256, { fetchHook })` for each distinct hook)
-  and `manifest.json`. The manifest records the package version, the git commit and whether `src/` was modified, the
-  core's SHA-256, and the Node and TypeScript versions. The harness checks the SHA-256 of every WGSL file it reads.
-  Every `tools/zt.py` command emits first unless given `--no-emit`.
+  writes one Z80 core per configuration the vector harness runs (`manifest.coreConfigs.z80`):
+
+  | Key | File | Core text | Selected by |
+  |---|---|---|---|
+  | `z80` | `z80-core.wgsl` | `z80.wgsl({ hooks: { io: true } })`: compat 0.3, classic, ports through the host | default |
+  | `z80@zilog-nmos` | `z80-core-zilog-nmos.wgsl` | `z80.wgsl({ variant: 'zilog-nmos', hooks: { io: true } })` | `--variant zilog-nmos` |
+  | `z80@0.2` | `z80-core-0.2.wgsl` | `Z80_CORE_WGSL` (the 0.2.0 core, no hooks: the core of the 0.2.0 baseline) | `--compat 0.2` |
+
+  It also writes the conformance shaders (`buildComputeShader(256, { fetchHook })` for each distinct hook, and the
+  same kernels with each 0.3 core substituted for the embedded `Z80_CORE_WGSL`, hooks off) and `manifest.json`. The
+  manifest records the package version, the git commit and whether `src/` was modified, each core's SHA-256,
+  variant, compat and hooks, and the Node and TypeScript versions. The harness checks the SHA-256 of every WGSL
+  file it reads. Every `tools/zt.py` command emits first unless given `--no-emit`.
 - **GPU layer** (`tools/ztest/gpu.py`). A real GPU is preferred: discrete, then integrated, then virtual; Metal or
   Vulkan before D3D12 before GL. A CPU adapter is used only with `ZILION_ALLOW_CPU_ADAPTER=1`. The device is
   requested with the WebGPU **default limits**, so whatever passes here fits on lavapipe too. Bind-group layouts are
@@ -65,7 +74,9 @@ data layout and the ledger do not depend on the host language.
 
 `python -I tools/zt.py conformance` runs the vectors of `test/conformance.js` unchanged:
 
-1. it compiles the shaders emitted from the public `buildComputeShader`;
+1. it compiles the shaders emitted from the public `buildComputeShader`, for each configuration (default: all
+   three; `--compat`/`--variant` select one): compat 0.2 is the 0.2 kernel unchanged, the 0.3 configurations are
+   the same kernel with their core substituted;
 2. it runs each vector as its own one-program batch, as the browser page does. `tools/ztest/conformance.py` is a
    Python twin of `Zilion.run`'s packing: memory zero-padded to `memBytes`; registers all 0 except SP = 0xFFFF;
    `Params {count, memBytes, steps, 0}`; bindings 0–3; `ceil(count/64)` workgroups;
@@ -79,11 +90,18 @@ handling in TypeScript. Only a WebGPU host runs that code: the browser page now,
 ## Per-instruction vectors
 
 ```sh
-python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic \
+python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic test/vectors/z80/analytic/probes \
     --json build/test/z80.json --md build/test/z80.md
+python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic --variant zilog-nmos
+python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic --compat 0.2   # the 0.2.0 baseline
 python -I tools/zt.py vectors z80 ../zilion-vectors/z80 --files 'ed b?' 'cb 4?'     # some opcode files
 python -I tools/zt.py vectors z80 ../zilion-vectors/z80 --files 'ed 70' --test 'ed 70 0012'   # one test
 ```
+
+`--compat {0.3,0.2}` and `--variant {classic,zilog-nmos}` select the core configuration (default: compat 0.3,
+classic). The selection is recorded in the run record (`--run-json`, key `core`: export, variant, compat, hooks,
+SHA-256) and in the report's provenance; the canonical ledger names the core by its SHA-256 and the rules file, so a
+compat 0.2 run reproduces the 0.2.0 ledger byte for byte.
 
 Options: `--files` (fnmatch patterns over opcode keys), `--test` (test names), `--limit-per-file N`,
 `--memory sparse|full`, `--repeat N`, `--lanes`, `--mem-cap`, `--port-cap`, `--workers`, `--expected <rules.json>`,
@@ -143,8 +161,8 @@ zt_mem_begin(); zt_load_state(lane); for (s < steps) { <isa>_step(); } zt_store_
   returns 0 and sets ST_UNLISTED_READ. The vectors list every address the reference touched, so this means the core
   read something the reference did not.
 - **Ports.** `io_read(port)` consumes the vector's `"r"` entries in order (unlisted: 0xFF and ST_UNLISTED_PORT);
-  `io_write(port, value)` appends to a log that is compared with the `"w"` entries. These are the host-contract hooks
-  of design §1.3(b); a core that does not call them (Zilion 0.2.0) simply never reaches them.
+  `io_write(port, value)` appends to a log that is compared with the `"w"` entries. A core generated with the io hooks
+  calls `io_in`/`io_out`, which the Z80 glue routes here; a core without them (Zilion 0.2.0) never reaches them.
 - **Capacity.** 32 table slots and 8 port slots per lane by default (`--mem-cap`, `--port-cap`). The parser keeps at
   least 8 slots free for stray writes. Overflowing either is a harness error, never a divergence.
 
@@ -165,7 +183,16 @@ Fields are grouped into **columns**. Architectural columns: `regs`, `f`, `r`, `i
 Internal columns: `wz` (MEMPTR), `q`, `ei/p`. They are reported separately, so "architectural pass" never depends on
 internal latches.
 
-**Expected rules** (`test/vectors/<isa>/expected-<version>.json`) are the ignore masks. Each rule has an `id`,
+**Expected rules** (`test/vectors/<isa>/expected-<version>.json`) are the ignore masks. The harness picks the file
+whose `core_sha256` is the SHA-256 of the core it runs (`--expected` overrides):
+
+| File | Core | Rules |
+|---|---|---|
+| `expected-0.3.0.json` | compat 0.3, classic, io hooks | Q (not modelled by `classic`, passed through), Q-XY (SCF/CCF X/Y, model-checked), EI-P (no interrupts) |
+| `expected-0.3.0-zilog-nmos.json` | compat 0.3, `zilog-nmos`, io hooks | EI-P |
+| `expected-0.2.0.json` | the 0.2.0 core | 14 rules (WZ, Q, EI-P, IM, R-WASTED, BIT-HL-XY, Q-XY, REP-XY, REP-IO-FLAGS and five I/O rules) |
+
+ Each rule has an `id`,
 `files` (fnmatch patterns over opcode keys), `fields`, an optional bit `mask`, an optional `when` predicate, a
 `reason` and a `source`. A rule *explains* the masked bits of its fields, in its files, for the tests where its
 predicate holds. Whatever no rule explains is **unexpected**. The rules file also declares which fields the core
@@ -209,15 +236,18 @@ Outputs:
 - **State.** pc sp a b c d e f h l i r ix iy af_ bc_ de_ hl_ iff1 iff2 im ei p wz q, plus the host-only `halted`.
   The registers, I, R and IFF1/2 load into the core's `cpu_*` variables; the shadow pairs split into
   `cpu_a2`/`cpu_f2` and so on. `wz`, `im` and `q` map to `cpu_wz`, `cpu_im` and `cpu_q` when the core declares
-  them; otherwise they are passed through. `ei` and `p` (the EI-delay and LD A,I/R interrupt latches) are always
-  passed through. Before the step, `cpu_halted` and the per-instruction `idx_*` state are cleared. No core semantics
-  change; the host only sets and reads state.
+  them (compat 0.3 declares `cpu_wz` and `cpu_im`, `zilog-nmos` also `cpu_q`); otherwise they are passed through.
+  `ei` and `p` (the EI-delay and LD A,I/R interrupt latches) are always passed through. A core that defines
+  `z80_reset()` is reset first; then `cpu_halted` and the per-instruction `idx_*` state are cleared. No core
+  semantics change; the host only sets and reads state.
+- **Ports.** A core generated with the io hooks (the 0.3 configurations) gets `io_in`/`io_out` from the glue, which
+  forward to the host's vector ports; the 0.2.0 core reads 0 and its I/O divergences are rules of its ledger.
 - **One test = one `z80_step()`**: one instruction including its prefixes, one iteration of a block instruction, or
   one wasted DD/FD prefix. SingleStepTests' `cycles` are not compared: Zilion is not cycle-accurate.
 - **HALT-PC.** Zilion parks PC on the HALT opcode; a Z80, and the vectors, leave PC after it. When the core reports
   `halted`, the adapter reports PC + 1. The ledger counts every test where it did (`mapped.halt_pc`), and a
   self-test mutant shows that a core which fails to halt is still caught.
-- **Hooks.** The 0.2.0 `on_fetch_opcode` hook is stubbed to "never ablate".
+- **Hooks.** The `on_fetch_opcode` decode hook is stubbed to "never ablate".
 - **Reference set.** SingleStepTests/z80 v1 has 1,604 files: base (252; every opcode except CB/DD/ED/FD), CB (256),
   ED (80: 40–7F and the block group), DD and FD (252 each), DDCB and FDCB (256 each, named `dd cb __ xx`). The report
   lists which of them were absent.
@@ -225,6 +255,15 @@ Outputs:
   has no wasted-prefix tests (DD or FD followed by DD, FD or ED). These 384 vectors encode the documented rule: one
   M1 cycle, R + 1 in the low 7 bits, PC + 1, nothing else changes. The interrupt latches and Q are 0 before and after,
   so the vectors make no claim about them.
+- **R and WZ probes** (`test/vectors/z80/analytic/probes/`, written by `tools/z80-probe-vectors.py`): 86 tests in 69
+  files (keys `wz …` and `r …`, group `probe`), one file per row of the design's §5.2 (R) and §5.3 (MEMPTR) tables,
+  with every expected value derived by hand from the documented rules: the 16-bit wraps of WZ, the low-byte-only
+  increment of `LD (rp),A`/`LD (nn),A`/`OUT (n),A`, JP cc and CALL cc not taken (WZ still set), JR cc and RET cc not
+  taken (WZ kept), `IN C,(C)` (BC before the load), BIT n,(HL) X/Y from WZ, block repeats (WZ = PC + 1, X/Y from PC,
+  the INxR/OTxR H and P/V cases), R on prefixes, DDCB, `LD R,A` and HALT. Their final Q is the NMOS value (F when
+  the instruction writes F), so `zilog-nmos` checks it. They live in a subdirectory so that the 0.2.0 baseline's
+  inputs (`test/vectors/z80/analytic`) are unchanged; the compat 0.2 core fails 73 of them (WZ, BIT X/Y, block
+  flags, ports), as it should.
 
 ### Adding an ISA
 
@@ -253,22 +292,28 @@ Register it in `ADAPTERS` (`tools/ztest/vectors/session.py`) and the `vectors` c
 
 ## Baselines
 
-`test/baselines/<isa>-v<version>.md` and `.json` record a core's divergences. The Z80 baseline for 0.2.0 was made
-with:
+`test/baselines/<isa>-v<version>.md` and `.json` record a core's divergences. The Z80 baselines were made with:
 
 ```sh
-python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic \
+# 0.2.0 (the frozen core; ledger SHA-256 ba15462725903d54…, reproduced byte for byte while the package version stays
+# 0.3.0-dev: the ledger records the package version)
+python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic --compat 0.2 \
     --json test/baselines/z80-v0.2.0.json --run-json build/test/z80-v0.2.0.run.json \
     --md test/baselines/z80-v0.2.0.md --analysis test/baselines/z80-v0.2.0.analysis.md
+# 0.3.0-dev, the default core (compat 0.3, classic)
+python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic test/vectors/z80/analytic/probes \
+    --json test/baselines/z80-v0.3.0-dev.json --run-json build/test/z80-v0.3.0-dev.run.json \
+    --md test/baselines/z80-v0.3.0-dev.md --analysis test/baselines/z80-v0.3.0-dev.analysis.md
+# 0.3.0-dev, variant zilog-nmos (report only: its ledger is all EI-P)
+python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic test/vectors/z80/analytic/probes \
+    --variant zilog-nmos --run-json build/test/z80-v0.3.0-dev-zilog-nmos.run.json \
+    --md test/baselines/z80-v0.3.0-dev-zilog-nmos.md --analysis test/baselines/z80-v0.3.0-dev-zilog-nmos.analysis.md
 ```
 
-**Workflow for the Z80 fixes (work item 3).**
-
-1. Copy `expected-0.2.0.json` to `expected-<new version>.json`.
-2. Delete the rules the change fixes, and update `passthrough` (for example, remove `wz` once the core declares
-   `cpu_wz`).
-3. Run the vectors. A fix that works leaves no unexpected divergences and no stale rules; a regression shows up as
-   an unexpected class with a reproducer.
+**How the Z80 fixes were brought in (work item 3).** A rules file per new core (`expected-0.3.0*.json`) holds only
+what is deliberately not modelled; `passthrough` lists the fields the core does not declare. A fix that works leaves
+no unexpected divergences and no stale rules; a regression shows up as an unexpected class with a reproducer. The
+self-test plants the 0.2 behaviour of every fix as a mutant, which must be caught.
 
 A future CI gate should fail on any unexpected divergence (exit 1) and on any rule with no hits whose files ran.
 
@@ -276,7 +321,8 @@ A future CI gate should fail on any unexpected divergence (exit 1) and on any ru
 
 - `python -I -m unittest discover -s test/harness` runs the GPU-free unit tests: parser validation of malformed
   data, rule patterns, the rules files, WGSL symbol detection, the reference file set.
-- `python -I tools/zt.py selftest --vectors <z80 dir>` checks the harness itself:
+- `python -I tools/zt.py selftest --vectors <z80 dir>` checks the harness itself (part 2 on the compat 0.2 core,
+  whose rules carry the I/O and REP predicates; parts 3 to 5 on the default core unless a mutant names another):
   1. **host-probe.** A probe core drives every host path with 15 planted cases (listed, unlisted and final-only
      memory; stray writes; wrap at 0xFFFF; port reads and writes) in both memory models. The ledger must report
      exactly the planted divergences.
@@ -288,9 +334,14 @@ A future CI gate should fail on any unexpected divergence (exit 1) and on any ru
 
      This validates the model-checking predicates without depending on SingleStepTests.
   3. **mutants.** Single-line mutations of the Z80 core: R not incremented, wrong PUSH byte, wrong INC flags, a wrong
-     SCF X/Y that is not the Q effect, a wrong BIT n,(HL) X/Y that is not the WZ effect, DJNZ never branching, HALT
-     not halting, a NOP that reads or writes memory. Each must produce unexpected divergences in the field it breaks.
-     Mutants whose vector files are absent are skipped and say so.
+     SCF X/Y that is not the Q effect, DJNZ never branching, HALT not halting, a NOP that reads or writes memory; the
+     0.2 behaviour of each 0.3 fix (a wasted prefix counted twice, BIT n,(HL) X/Y from the operand, WZ off by one,
+     WZ only when JP cc is taken, no WZ for (IX+d), IM ignored, LDIR/CPIR X/Y from the data, INIR/OTIR P/V not
+     adjusted, `IN A,(n)` on port n, a silent `OUT (C),r`); on `zilog-nmos`, SCF ignoring Q, Q kept by instructions that
+     leave F alone, Q kept
+     after a DD/FD prefix; on compat 0.2, errors next to its model-checked BIT-HL-XY and R-WASTED rules. Each must
+     produce unexpected divergences in the field it breaks (24 mutants). Mutants whose vector files are absent are
+     skipped and say so.
   4. **memory-model invariance.** `sparse` and `full` give identical ledgers on real vectors.
   5. **determinism.** Two sessions give the same canonical ledger, and repeated dispatches give identical bytes.
 

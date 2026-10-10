@@ -28,10 +28,12 @@ def flag_names(mask: int, isa: str, field: str) -> str:
 
 def console(doc: dict, run: dict, digest: str, show: int = 20) -> str:
     t = doc["summary"]["totals"]
+    cc = run.get("core") or {}
+    config = f"compat {cc.get('compat')} {cc.get('variant')}, " if cc.get("compat") else ""
     lines = [
         f"{doc['isa']} vectors: {t['files']} files, {t['tests']:,} tests "
         f"(zilion {doc['provenance']['package']['version']}, core {doc['provenance']['core']['sha256'][:12]}, "
-        f"{doc['harness']['memory']} memory) on {run['adapter'].get('device')} ({run['adapter'].get('backend_type')})",
+        f"{config}{doc['harness']['memory']} memory) on {run['adapter'].get('device')} ({run['adapter'].get('backend_type')})",
         f"  architectural pass (raw):   {t['pass_arch']:>9,}  {pct(t['pass_arch'], t['tests'])}",
         f"  all fields pass (raw):      {t['pass_all']:>9,}  {pct(t['pass_all'], t['tests'])}",
         f"  explained by expected rules:{t['explained']:>9,}  {pct(t['explained'], t['tests'])}",

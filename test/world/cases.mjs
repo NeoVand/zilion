@@ -431,9 +431,9 @@ export const CASES = [
         { label: "LD IX,nn; HALT", mem: mem(32, { 0: [0xdd, 0x21, 0x34, 0x12, 0x76] }),
           expect: { steps: 2, state: { ix: 0x1234 }, fetched: [0, 1, 2, 3, 4], starts: [0, 4] } },
         // Wasted DD (followed by FD): step 1 fetches DD and FD and backs up; step 2 starts at the FD.
-        // R = 2 (wasted, 0.2 semantics) + 2 (FD 21) + 1 (HALT) = 5.
+        // R = 1 (one M1 for the wasted prefix) + 2 (FD 21) + 1 (HALT) = 4 (compat '0.2': 5; cases_z80.mjs).
         { label: "wasted prefix", mem: mem(32, { 0: [0xdd, 0xfd, 0x21, 0x00, 0x00, 0x76] }),
-          expect: { steps: 3, state: { r: 5, pc: 5 }, fetched: [0, 1, 2, 3, 4, 5], starts: [0, 1, 5] } },
+          expect: { steps: 3, state: { r: 4, pc: 5 }, fetched: [0, 1, 2, 3, 4, 5], starts: [0, 1, 5] } },
         // SET 0,(IX+5): all four bytes are instruction stream; mem[5] 0 → 1.
         { label: "DDCB", mem: mem(32, { 0: [0xdd, 0xcb, 0x05, 0xc6, 0x76] }),
           expect: { steps: 2, mem: { 5: 0x01 }, fetched: [0, 1, 2, 3, 4], starts: [0, 4] } },

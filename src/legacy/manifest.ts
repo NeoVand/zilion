@@ -2,7 +2,7 @@
 // other machine. The WGSL is buildComputeShader's, unchanged; only this description is new.
 
 import { HALT_REASONS, HOST_CONTRACT, TRAP_CAUSES } from "../contract/host.js";
-import { z80 } from "../cores/z80/index.js";
+import { z80, Z80_CORE_WGSL } from "../cores/z80/index.js";
 import { MANIFEST_SCHEMA, type ShaderManifest } from "../manifest.js";
 import { canonicalJson } from "../util/json.js";
 import { sha256 } from "../util/sha256.js";
@@ -25,7 +25,7 @@ export function legacyMachine(memBytes: number, opts: ShaderOptions = {}): Built
     core: {
       id: z80.id,
       name: z80.name,
-      coreVersion: z80.coreVersion,
+      coreVersion: "0.2.0", // the frozen 0.2.0 kernel, not the descriptor's current semantics
       status: z80.status,
       variant: z80.defaultVariant,
       compat: "0.2",
@@ -37,7 +37,7 @@ export function legacyMachine(memBytes: number, opts: ShaderOptions = {}): Built
     world: null,
     sha256: {
       wgsl: sha256(wgsl),
-      core: sha256(z80.wgsl({ hooks: {} })),
+      core: sha256(Z80_CORE_WGSL), // the core text buildComputeShader embeds (compat '0.2')
       world: "",
       options: sha256(canonicalJson({ memBytes, fetchHook: hook })),
     },

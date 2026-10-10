@@ -2,15 +2,16 @@
 
 import { highestAlias } from "../../contract/address.js";
 import type { IsaCore, StateField } from "../../contract/isa.js";
-import { z80CoreText, Z80_CORE_WGSL } from "./core.wgsl.js";
+import { z80CoreText, Z80_COMPAT, Z80_CORE_WGSL, Z80_VARIANTS } from "./core.wgsl.js";
+import type { Z80Semantics } from "./core.wgsl.js";
 
 export { z80CoreText, Z80_CORE_WGSL };
-export type { Z80Hooks } from "./core.wgsl.js";
+export type { Z80Hooks, Z80Semantics } from "./core.wgsl.js";
 
 const r8 = (name: string, wgsl: string): StateField => ({ name, bits: 8, wgsl, randomizable: true });
 
-/** State record of the Z80, in record order (one u32 per field). */
-const STATE: readonly StateField[] = [
+/** State record of the Z80 with compat '0.2', in record order (one u32 per field). */
+const STATE_02: readonly StateField[] = [
   r8("a", "cpu_a"),
   r8("f", "cpu_f"),
   r8("b", "cpu_b"),
@@ -38,6 +39,31 @@ const STATE: readonly StateField[] = [
   { name: "halted", bits: 8, wgsl: "cpu_halted", note: "0 running; 1 HALT; 2 halted by the host; see haltReason" },
 ];
 
+/** State record of the Z80 (compat '0.3', variant 'classic'): the 0.2 record, then WZ and IM. */
+const STATE: readonly StateField[] = [
+  ...STATE_02.map((f) =>
+    f.name === "r" ? { ...f, note: "bits 0-6 count M1 fetches (a wasted DD/FD prefix is one); bit 7 kept" } : f),
+  { name: "wz", bits: 16, wgsl: "cpu_wz", note: "MEMPTR; visible only through BIT n,(HL) F3/F5" },
+  { name: "im", bits: 2, wgsl: "cpu_im", note: "interrupt mode 0, 1 or 2 (no interrupts are modelled)" },
+];
+
+/** Variant 'zilog-nmos': the classic record, then Q. */
+const STATE_NMOS: readonly StateField[] = [
+  ...STATE,
+  { name: "q", bits: 8, wgsl: "cpu_q", note: "F if the last instruction wrote the flags, else 0 (Zilog NMOS)" },
+];
+
+const INTERNALS = ["idx_mode", "idx_disp", "idx_uses_mem"] as const;
+
+function semantics(o: { variant?: string; compat?: string }): Required<Z80Semantics> {
+  const variant = o.variant ?? "classic";
+  const compat = o.compat ?? "0.3";
+  if (!(Z80_VARIANTS as readonly string[]).includes(variant)) throw new Error(`z80: unknown variant '${variant}'`);
+  if (!(Z80_COMPAT as readonly string[]).includes(compat)) throw new Error(`z80: unknown compat '${compat}' (known: ${Z80_COMPAT.join(", ")})`);
+  if (compat === "0.2" && variant !== "classic") throw new Error(`z80: variant '${variant}' needs compat '0.3'`);
+  return { variant: variant as Z80Semantics["variant"] & string, compat: compat as Z80Semantics["compat"] & string };
+}
+
 /**
  * `init.stack.firstPushAt: t`. PUSH and CALL pre-decrement SP, so the first byte lands at SP − 1 (16-bit): SP is
  * one above the highest address that aliases t (SP = 0x0000 when that address is 0xFFFF).
@@ -51,24 +77,32 @@ const FINE_PAGE_EXPR =
   "4u, prefix == 0xfdu), 5u, prefix == 0xddcbu), 6u, prefix == 0xfdcbu)";
 
 /**
- * The Z80 (Zilion 0.2 semantics). Every byte decodes; the only native halt is HALT (76), which parks PC on the
- * opcode. Addresses are 16-bit and every multi-byte access is decomposed into byte accesses.
+ * The Z80. Every byte decodes; the only native halt is HALT (76), which parks PC on the opcode. Addresses are 16-bit
+ * and every multi-byte access is decomposed into byte accesses. `compat: '0.2'` selects the frozen 0.2.0 semantics
+ * (no WZ, IM ignored, a wasted prefix adds 2 to R) and its 25-field state record; the default is the current
+ * semantics (docs/ARCHITECTURE.md, "The Z80 core").
  */
 export const z80: IsaCore = {
   id: "z80",
   name: "Zilog Z80",
-  coreVersion: "0.2.0",
+  coreVersion: "0.3.0",
   status: "stable",
   addressBits: 16,
   fetchUnitBytes: 1,
   endianness: "little",
   state: STATE,
-  internals: ["idx_mode", "idx_disp", "idx_uses_mem"],
+  internals: INTERNALS,
+  stateFor(o) {
+    const s = semantics(o);
+    if (s.compat === "0.2") return { state: STATE_02, internals: INTERNALS };
+    return { state: s.variant === "zilog-nmos" ? STATE_NMOS : STATE, internals: s.variant === "zilog-nmos" ? [...INTERNALS, "z80_qprev"] : INTERNALS };
+  },
   symbols: {
     step: "z80_step",
     haltReason: "cpu_halted",
     pc: "cpu_pc",
-    // HALT (as-chip or by a trap policy) is the only trap that halts the Z80; it leaves halted = 1.
+    // HALT (as-chip or by a trap policy) is the only trap that halts the Z80; it leaves halted = 1 (Z80_HALT_INSN in
+    // the compat '0.3' text). A host halt (2) is not a trap. No other trap cause exists in any compat or variant.
     trapCause: "select(0u, ZIL_TRAP_HALT_INSN, cpu_halted == 1u)",
   },
   hooks: ["fetch", "instructionStart", "trap", "io"],
@@ -119,23 +153,25 @@ export const z80: IsaCore = {
     },
     traps: { "halt-insn": "halt" },
     halting:
-      "HALT (76) sets halted = 1 and parks PC on the opcode (reason halt-insn). A host halt from " +
-      "on_instruction_start sets halted = 2 and backs PC onto the byte (reason host).",
+      "HALT (76) sets halted = 1 and parks PC on the opcode (reason halt-insn); later steps re-execute it (R + 1 " +
+      "each, PC parked). A host halt from on_instruction_start sets halted = 2 and backs PC onto the byte (reason " +
+      "host); with compat '0.3' later steps change nothing (with compat '0.2' they add 1 to R).",
     illegal: "None: every byte decodes (undefined ED opcodes are 2-byte no-ops).",
   },
-  variants: { classic: "Zilion 0.2 semantics: no MEMPTR (WZ), IM ignored, IN reads 0 and OUT is a no-op by default." },
+  variants: {
+    classic:
+      "No Q latch: SCF/CCF take X/Y from A only. With compat '0.2': Zilion 0.2.0 exactly.",
+    "zilog-nmos":
+      "The Q latch of the Zilog NMOS Z80: Q = F after an instruction that writes F, else 0; SCF/CCF take X/Y from " +
+      "((Q ^ F) | A). Vendor-specific (NEC and CMOS parts differ). Compat '0.3' only.",
+  },
   defaultVariant: "classic",
-  compat: ["0.2"],
+  compat: Z80_COMPAT,
   wgsl(o) {
-    const variant = o.variant ?? this.defaultVariant;
-    if (!(variant in this.variants)) throw new Error(`z80: unknown variant '${variant}'`);
-    const compat = o.compat ?? this.compat[0];
-    if (!this.compat.includes(compat)) throw new Error(`z80: unknown compat '${compat}' (known: ${this.compat.join(", ")})`);
-    return z80CoreText({
-      fetch: !!o.hooks.fetch,
-      instructionStart: !!o.hooks.instructionStart,
-      trap: !!o.hooks.trap,
-      io: !!o.hooks.io,
-    });
+    const s = semantics({ variant: o.variant ?? this.defaultVariant, compat: o.compat ?? this.compat[0] });
+    return z80CoreText(
+      { fetch: !!o.hooks.fetch, instructionStart: !!o.hooks.instructionStart, trap: !!o.hooks.trap, io: !!o.hooks.io },
+      s,
+    );
   },
 };

@@ -1,0 +1,17 @@
+{
+ "isa": "z80",
+ "core": "@neovand/zilion 0.3.0 Z80, compat '0.3', variant 'classic', io hooks on (z80.wgsl({ hooks: { io: true } }))",
+ "core_sha256": "6053c3481d2d85461470338c12cdcad47d962808750144585bc617e3403d89e0",
+ "passthrough": ["ei", "p", "q"],
+ "rules": [
+  {"id": "Q", "files": ["*"], "fields": ["q"],
+   "reason": "The Q latch (the flags written by the last instruction) is Zilog-NMOS-specific and not modelled by the classic variant; passed through. Variant zilog-nmos models it.",
+   "source": "design §5.4 and Appendix B (Q-XY)"},
+  {"id": "Q-XY", "files": ["37", "3f", "dd 37", "dd 3f", "fd 37", "fd 3f"], "fields": ["f"], "mask": "0x28", "when": "q_xy_model",
+   "reason": "SCF/CCF take F3/F5 from A only in the classic variant; on a Zilog NMOS Z80 they are ((Q xor F) or A) & 0x28 (variant zilog-nmos). After a DD/FD prefix Q is 0 (the prefix is an instruction cycle of its own that leaves F alone), so for DD/FD 37 and 3F the formula is (F or A) & 0x28. Explained only where the vector follows the NMOS formula and Zilion the A-only formula.",
+   "source": "design §5.4 and Appendix B (Q-XY)"},
+  {"id": "EI-P", "files": ["*"], "fields": ["ei", "p"],
+   "reason": "The interrupt-acceptance latches (EI delay; LD A,I/R parity bug) are not modelled: Zilion has no interrupts. Passed through.",
+   "source": "SingleStepTests/z80 README (fields ei, p)"}
+ ]
+}

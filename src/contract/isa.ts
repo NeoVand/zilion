@@ -139,10 +139,15 @@ export interface IsaCore {
   /** Width of the unit passed to `on_instruction_start`. `on_fetch` is always per byte. */
   readonly fetchUnitBytes: 1 | 2 | 4;
   readonly endianness: "little";
-  /** The state record, in record order. */
+  /** The state record, in record order (for the default variant and compat). */
   readonly state: readonly StateField[];
   /** Private per-instruction temporaries (WGSL lvalues) that the world reset also zeroes. */
   readonly internals: readonly string[];
+  /**
+   * The state record and internals for a variant and compat, when they differ from `state` and `internals` (a newer
+   * semantics may model more latches than a historical one). The builder uses this when present.
+   */
+  stateFor?(o: { variant: string; compat: string }): { readonly state: readonly StateField[]; readonly internals: readonly string[] };
   readonly symbols: {
     /** WGSL function that executes one step. */
     readonly step: string;

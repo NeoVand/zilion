@@ -45,6 +45,31 @@ class Artifacts:
     def json(self, rel: str) -> dict:
         return json.loads((self.root / rel).read_text(encoding="utf-8"))
 
+    def configs(self, isa: str) -> list[dict]:
+        """Every emitted core configuration of `isa` (variant, compat, hooks), the default first."""
+        return self.manifest.get("coreConfigs", {}).get(isa) or [self.manifest["cores"][isa]]
+
+    def core_config(self, isa: str) -> dict:
+        """The selected configuration of `isa`'s core: export, variant, compat, hooks, SHA-256 (for run records)."""
+        e = self.manifest["cores"][isa]
+        return {k: e[k] for k in ("key", "export", "variant", "compat", "hooks", "coreVersion", "sha256", "override") if k in e}
+
+    def select(self, isa: str, *, variant: str | None = None, compat: str | None = None) -> "Artifacts":
+        """These artifacts with `isa`'s core switched to the emitted configuration matching variant and compat
+        (unspecified: the default configuration's value). Raises when no configuration matches."""
+        if variant is None and compat is None:
+            return self
+        configs = self.configs(isa)
+        want_v = variant if variant is not None else configs[0].get("variant")
+        want_c = compat if compat is not None else configs[0].get("compat")
+        hits = [c for c in configs if c.get("variant") == want_v and c.get("compat") == want_c]
+        if not hits:
+            have = ", ".join(f"variant {c.get('variant')} compat {c.get('compat')}" for c in configs)
+            raise HarnessError(f"no emitted {isa} core with variant {want_v!r} and compat {want_c!r} (emitted: {have})")
+        m = json.loads(json.dumps(self.manifest))
+        m["cores"][isa] = hits[0]
+        return Artifacts(root=self.root, manifest=m)
+
     def provenance(self, isa: str | None = None) -> dict:
         """What the results depend on: the package version and the core text's SHA-256."""
         m = self.manifest
@@ -87,7 +112,9 @@ def run_node(script: str, *args: str) -> subprocess.CompletedProcess:
 def with_core(art: Artifacts, isa: str, text: str, origin: str) -> Artifacts:
     """Artifacts whose `isa` core is replaced by `text` (an override, recorded by SHA-256 and origin)."""
     m = json.loads(json.dumps(art.manifest))
-    m["cores"][isa] = {"export": f"override:{origin}", "file": None, "sha256": sha256_text(text), "override": True}
+    base = m["cores"][isa]
+    m["cores"][isa] = {"export": f"override:{origin}", "file": None, "sha256": sha256_text(text), "override": True,
+                       **{k: base[k] for k in ("variant", "compat", "hooks") if k in base}}
     return _OverrideArtifacts(root=art.root, manifest=m, _text=text, _isa=isa)
 
 
@@ -98,6 +125,36 @@ class _OverrideArtifacts(Artifacts):
 
     def core(self, isa: str) -> str:
         return self._text if isa == self._isa else super().core(isa)
+
+    def select(self, isa: str, *, variant: str | None = None, compat: str | None = None) -> "Artifacts":
+        if variant is None and compat is None:
+            return self
+        raise HarnessError("select a core configuration before overriding its text (with_core), not after")
+
+    def configs(self, isa: str) -> list[dict]:
+        """Every emitted core configuration of `isa` (variant, compat, hooks), the default first."""
+        return self.manifest.get("coreConfigs", {}).get(isa) or [self.manifest["cores"][isa]]
+
+    def core_config(self, isa: str) -> dict:
+        """The selected configuration of `isa`'s core: export, variant, compat, hooks, SHA-256 (for run records)."""
+        e = self.manifest["cores"][isa]
+        return {k: e[k] for k in ("key", "export", "variant", "compat", "hooks", "coreVersion", "sha256", "override") if k in e}
+
+    def select(self, isa: str, *, variant: str | None = None, compat: str | None = None) -> "Artifacts":
+        """These artifacts with `isa`'s core switched to the emitted configuration matching variant and compat
+        (unspecified: the default configuration's value). Raises when no configuration matches."""
+        if variant is None and compat is None:
+            return self
+        configs = self.configs(isa)
+        want_v = variant if variant is not None else configs[0].get("variant")
+        want_c = compat if compat is not None else configs[0].get("compat")
+        hits = [c for c in configs if c.get("variant") == want_v and c.get("compat") == want_c]
+        if not hits:
+            have = ", ".join(f"variant {c.get('variant')} compat {c.get('compat')}" for c in configs)
+            raise HarnessError(f"no emitted {isa} core with variant {want_v!r} and compat {want_c!r} (emitted: {have})")
+        m = json.loads(json.dumps(self.manifest))
+        m["cores"][isa] = hits[0]
+        return Artifacts(root=self.root, manifest=m)
 
     def provenance(self, isa: str | None = None) -> dict:
         out = super().provenance(isa)
