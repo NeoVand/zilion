@@ -42,6 +42,7 @@ export type {
   CoreGenOptions,
   CoreParamDecl,
   CoreParamValue,
+  CoreParamInput,
   InstructionInfo,
 } from "./contract/isa.js";
 export { coreParamConstant, resolveCoreParams, checkCoreParamDecls } from "./contract/params.js";

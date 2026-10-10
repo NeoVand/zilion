@@ -114,7 +114,8 @@ vector read through positions 65534 mod P and 65535 mod P, and JAM re-policied a
 ## BFF: what the full core needed
 
 The skeleton ran the eight head and byte ops and stubbed the brackets. The full core (`src/cores/bff/index.ts`,
-status `stable`) reproduces Algocell's `experiments/micro/bff.py` bit for bit in every configuration it has; the
+status `stable`) reproduces Algocell's `experiments/micro/bff.py` bit for bit in every configuration it has (through
+the mapping in `test/world/bff_machine.mjs`); the
 semantics, the mapping of bff.py's switches onto world policies and core parameters, and the mapping of its
 per-encounter record onto the lane record are in docs/ARCHITECTURE.md, "The BFF core". What it took:
 

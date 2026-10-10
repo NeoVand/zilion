@@ -1,7 +1,8 @@
 // BFF, the Brainfuck family of Agüera y Arcas et al. 2024 (arXiv 2406.19108): a ring-native tape machine.
 //
 // Semantics are those of Algocell's experiments/micro/bff.py (which follows cubff `bff.inc.h`), reproduced bit for
-// bit in every variant (test/world/bff.mjs; report in test/baselines/bff-equivalence.md):
+// bit in every configuration (test/world/bff_equiv.py with the mapping in test/world/bff_machine.mjs; report in
+// test/baselines/bff-equivalence.md):
 //   - the tape is the world's ring of P positions (bff.py: the pair of two 64-byte tapes, P = 128); the instruction
 //     pointer and the two heads start at 0 (or at the world's entry); the heads move modulo P;
 //   - each byte maps to an op id through the alphabet (a 256-entry table): 0 no-op, 1..10 `< > { } + - . , [ ]`,

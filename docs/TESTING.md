@@ -431,7 +431,7 @@ python -I test/world/bff_equiv.py --quick          # a smoke run
 Options: `--pairs` (per configuration, default 1,048,576) and `--batch` (65,536), `--cpu` (the fraction of each batch
 also run on `reference_execute`, default 1), `--workers` (CPU processes), `--only <substring>` (configurations),
 `--skip variants,mutants,kernel,probe`, `--partial <file.jsonl>` (finished configurations are appended to it and
-reused by a rerun with the same settings and the same WGSL, so an interrupted run resumes), `--report <path>`
+reused by a rerun with the same settings, the same WGSL and the same bff.py, so an interrupted run resumes), `--report <path>`
 (writes `<path>.md` and `<path>.json`).
 
 What it does, all on the same pairs for the three implementations (the Zilion machine run by `gpu_runner.Machine`,
@@ -443,10 +443,16 @@ What it does, all on the same pairs for the three implementations (the Zilion ma
    `roll_seed` 1 + b and the same pairs in every configuration with the same alphabet; even batches are uniform
    random bytes, odd batches op-rich (55% instruction bytes of the alphabet, 15% zero bytes, 30% uniform), so loops
    run, heads reach the partner and literal pushes fire. Compared: the final memory and bff.py's `executed`,
-   `entered`, `max_pc`, `writesB`, decoded from the lane record (docs/ARCHITECTURE.md, "The BFF core").
-2. **Non-vacuity**: how encounters ended (budget, `bounds`, `unmatched`), how many entered or wrote the partner or
-   changed memory, a steps histogram; for each dial, how many lanes drew both outcomes (their result differs from
-   bff.py's always-halt and never-halt kernels on the same pairs).
+   `entered`, `max_pc`, `writesB`, decoded from the lane record (docs/ARCHITECTURE.md, "The BFF core"). Five edge
+   configurations follow (CPU reference on 1/16 of each batch): `bff_soup.py`'s density map with the literal push,
+   the two selections the mapping normalises, a custom table (byte 0 → `[`, extra op-11 bytes, op ids above 11) with
+   `lit_rep` 0 and a half-to-even `halt_q`, and `lit_rep` 5 with a dial.
+2. **Non-vacuity**, part of the exit status: every configuration must run some encounters to the budget, enter and
+   write into the partner, leave the tape unless the pointer wraps (and never when it does), halt on unmatched
+   brackets unless they are ignored (and never when they are), run literal pushes when the switch is on (fetch map ≠
+   start map) and never otherwise, and, for a dial, draw both outcomes (a lane whose result differs from bff.py's
+   always-halt and never-halt kernels on the same pairs). The report also gives a steps histogram and how often the
+   fetch map would give another `entered` or `max_pc`.
 3. **Negative controls**: six mutated Zilion machines (scan, nesting, literal, wrap, dial salt, seed) must each
    disagree with bff.py on an op-rich batch. A mutant must still terminate (a scan running past position 0 would
    loop for 2³² iterations on the GPU).
@@ -454,7 +460,8 @@ What it does, all on the same pairs for the three implementations (the Zilion ma
    test module's `BFF` by a subclass mirroring every `execute` on Zilion and on `reference_execute`.
 5. **The dial hash**: a probe machine writes `zil_draw(0)` into memory through a raw `on_instruction_start` hook, so
    the world's draw is read back for any lane, seed and step base and compared with bff.py's `hash32` and
-   `bracket_halts`; the thresholds in the generated WGSL are compared with bff.py's `halt_q`.
+   `bracket_halts`; what the generated WGSL does on an unmatched bracket is compared with bff.py's `halt_q` for twelve
+   probabilities, including the half-to-even and 2³² corners.
 
 Exit status 0 only if every comparison is identical and every negative control is caught. The full baseline
 (1,048,576 pairs × 15 configurations with the CPU reference on every pair) is CPU-bound: bff.py's reference is

@@ -77,6 +77,19 @@ VARIANTS = [
     ("wraplit_hp0.03", {"ip_wrap": True, "literal": True, "halt_p": 0.03}),
     ("wraplit_hp0.01", {"ip_wrap": True, "literal": True, "halt_p": 0.01}),
 ]
+# Edge configurations beyond the paper's: bff_soup.py's density map with the literal push ('P' -> 11), the selections
+# bff_machine.mjs normalises (the switch without an op-11 byte; op-11 bytes without the switch), a custom table (byte 0
+# -> '[', more op-11 bytes, op ids above 11) with lit_rep 0 and a halt_p whose halt_q is a half-to-even case, and
+# lit_rep 5 with a dial. The GPU comparison covers every pair; the CPU reference covers EDGE_CPU of each batch.
+EDGES = [
+    ("std_d2_lit", {"alphabet": "d2lit", "literal": True}),
+    ("edge_literal_no_op11", {"alphabet": "d4", "literal": True, "lit_rep": 3}),
+    ("edge_op11_no_literal", {"alphabet": "asciilit"}),
+    ("edge_table_rep0", {"alphabet": "custom", "literal": True, "lit_rep": 0, "ip_wrap": True, "halt_p": 0.5 + 2 ** -33}),
+    ("edge_rep5_hp0.7", {"ip_wrap": True, "literal": True, "lit_rep": 5, "halt_p": 0.7}),
+]
+EDGE_CPU = 1 / 16
+ALL = VARIANTS + EDGES
 
 # negative controls: (name, base variant, WGSL mutations, world salt, run-seed offset)
 MUTANTS = [
@@ -190,10 +203,10 @@ def run_variants(a, bffpy, alphabets, machines, pool) -> tuple[list[dict], bool]
     if a.partial and Path(a.partial).exists():  # rows of an interrupted run with the same settings and the same WGSL
         for line in Path(a.partial).read_text().splitlines():
             r = json.loads(line)
-            if (r["settings"] == settings_of(a) and r["variant"] in machines
+            if (r["settings"] == settings_of(a) and r["variant"] in machines and r.get("bffpy_sha256") == a.bff_sha
                     and r["wgsl_sha256"] == hashlib.sha256(machines[r["variant"]][0].encode()).hexdigest()):
                 done[r["variant"]] = r
-    for name, kw0 in VARIANTS:
+    for name, kw0 in ALL:
         if a.only and a.only not in name:
             continue
         if name in done:
@@ -216,13 +229,15 @@ def run_variants(a, bffpy, alphabets, machines, pool) -> tuple[list[dict], bool]
         acc = {"pairs": 0, "cpu_pairs": 0, "z_vs_gpu": 0, "z_vs_cpu": 0, "gpu_vs_cpu": 0, "mem_eq": 0,
                "field_eq": {k: 0 for k in FIELDS}, "budget": 0, "bounds": 0, "unmatched": 0, "running_other": 0,
                "entered": 0, "writesB_pos": 0, "mem_changed": 0, "partner_changed": 0, "steps_sum": 0, "writesB_sum": 0,
-               "fetch_eq_start": 0, "fetch_entered_differs": 0, "start_subset_fetch": 0, "steps_hist": np.zeros(5, dtype=np.int64)}
+               "fetch_eq_start": 0, "fetch_entered_differs": 0, "fetch_maxpc_differs": 0, "start_subset_fetch": 0,
+               "steps_hist": np.zeros(5, dtype=np.int64)}
+        cpu_frac = min(a.cpu, EDGE_CPU) if name in dict(EDGES) else a.cpu
         if dial:
             acc["dial_both_outcomes"] = 0
         for b in range(nb):
             pairs = make_pairs(b, a.batch, amap)
             seed = 1 + b
-            ncpu = int(round(a.cpu * a.batch))
+            ncpu = int(round(cpu_frac * a.batch))
             cpu_job = None
             if ncpu:
                 chunk = 512
@@ -263,6 +278,8 @@ def run_variants(a, bffpy, alphabets, machines, pool) -> tuple[list[dict], bool]
             acc["fetch_eq_start"] += int(np.all(zo["fetched"] == zo["starts"], axis=1).sum())
             acc["start_subset_fetch"] += int(np.all(~zo["starts"] | zo["fetched"], axis=1).sum())
             acc["fetch_entered_differs"] += int((zo["fetched"][:, TAPE:].any(1) != zo["starts"][:, TAPE:].any(1)).sum())
+            top = lambda m: np.where(m.any(1), PAIR - 1 - np.argmax(m[:, ::-1], axis=1), 0)  # noqa: E731
+            acc["fetch_maxpc_differs"] += int((top(zo["fetched"]) != top(zo["starts"])).sum())
             if dial:  # a lane whose result differs from both drew a continue (first unmatched bracket) and a halt
                 d = digest(z_out, z_mem)
                 d_hi = digest(*g_hi.execute(pairs, roll_seed=seed)[::-1])
@@ -271,12 +288,13 @@ def run_variants(a, bffpy, alphabets, machines, pool) -> tuple[list[dict], bool]
             print(f"    {name} batch {b + 1}/{nb}: {int(same_zg.sum())}/{a.batch} identical to bff.py GPU"
                   + (f", CPU {ncpu} pairs" if ncpu else ""), file=sys.stderr, flush=True)
         n = acc["pairs"]
-        literal = bool(kw.get("literal"))
-        good = acc["z_vs_gpu"] == n and acc["z_vs_cpu"] == acc["cpu_pairs"] and acc["gpu_vs_cpu"] == acc["cpu_pairs"]
-        good = good and (acc["start_subset_fetch"] == n) and (literal or acc["fetch_eq_start"] == n)
+        good = acc["z_vs_gpu"] == n and acc["z_vs_cpu"] == acc["cpu_pairs"] and acc["gpu_vs_cpu"] == acc["cpu_pairs"] and acc["cpu_pairs"] > 0
+        gates = vacuity_gates(kw, amap, acc)
+        good = good and not gates
         ok &= good
         row = {"variant": name, "bffpy_args": {k: (v if not isinstance(v, np.ndarray) else kw0["alphabet"]) for k, v in kw.items()},
-               "ok": bool(good), "seconds": round(time.time() - t0, 1), "settings": settings_of(a),
+               "ok": bool(good), "gates_failed": gates, "seconds": round(time.time() - t0, 1), "settings": settings_of(a),
+               "bffpy_sha256": a.bff_sha, "cpu_fraction": cpu_frac,
                "wgsl_sha256": hashlib.sha256(wgsl.encode()).hexdigest(),
                **{k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in acc.items()}}
         rows.append(row)
@@ -284,8 +302,29 @@ def run_variants(a, bffpy, alphabets, machines, pool) -> tuple[list[dict], bool]
             with open(a.partial, "a") as fh:
                 fh.write(json.dumps(row) + "\n")
         print(f"  {'ok  ' if good else 'FAIL'}  {name}: Zilion = bff.py GPU on {acc['z_vs_gpu']}/{n}, Zilion = CPU on "
-              f"{acc['z_vs_cpu']}/{acc['cpu_pairs']}, GPU = CPU on {acc['gpu_vs_cpu']}/{acc['cpu_pairs']} ({row['seconds']} s)", flush=True)
+              f"{acc['z_vs_cpu']}/{acc['cpu_pairs']}, GPU = CPU on {acc['gpu_vs_cpu']}/{acc['cpu_pairs']} ({row['seconds']} s)"
+              + (f"; NOT EXERCISED: {', '.join(gates)}" if gates else ""), flush=True)
     return rows, ok
+
+
+def vacuity_gates(kw: dict, amap: np.ndarray, acc: dict) -> list[str]:
+    """What a configuration must exercise for its comparison to mean something; the names of the gates that fail."""
+    n = acc["pairs"]
+    halts = not kw.get("nohalt") and kw.get("halt_p", 1.0) > 0
+    literal_on = bool(kw.get("literal")) and bool((np.asarray(amap) == 11).any())
+    want = {
+        "some encounters ran the budget out": acc["budget"] > 0,
+        "some pointers entered the partner": acc["entered"] > 0,
+        "some encounters wrote into the partner": acc["writesB_pos"] > 0 and acc["partner_changed"] > 0,
+        "the start map is inside the fetch map": acc["start_subset_fetch"] == n,
+        ("some unmatched brackets halted" if halts else "no unmatched bracket halted"): (acc["unmatched"] > 0) == halts,
+        ("no pointer left the tape" if kw.get("ip_wrap") else "some pointers left the tape"): (acc["bounds"] > 0) != bool(kw.get("ip_wrap")),
+        ("some literal pushes ran (fetch map > start map)" if literal_on else "fetch map = start map"):
+            (acc["fetch_eq_start"] < n) if literal_on else (acc["fetch_eq_start"] == n),
+    }
+    if "dial_both_outcomes" in acc:
+        want["some lanes drew both dial outcomes"] = acc["dial_both_outcomes"] > 0
+    return [k for k, v in want.items() if not v]
 
 
 def settings_of(a) -> dict:
@@ -296,7 +335,7 @@ def run_mutants(a, bffpy, machines, rows_by_name) -> tuple[list[dict], bool]:
     out, ok = [], True
     b = 1  # an op-rich batch
     for k, (label, base, _, _, seed_off) in enumerate(MUTANTS):
-        kw = dict(VARIANTS[[v[0] for v in VARIANTS].index(base)][1])
+        kw = dict(dict(ALL)[base])
         g = bffpy.BFF(max_pairs=a.batch, steps=STEPS, **kw)
         pairs = make_pairs(b, a.batch, g.alphabet)
         seed = 1 + b
@@ -431,6 +470,28 @@ def run_dial_probe(a, bffpy, machines) -> tuple[dict, bool]:
 _THRESHOLDS: dict = {}
 
 
+def check_thresholds(bffpy, machines, ps) -> tuple[dict, bool]:
+    """bff.py's halt_q (its constructor) against what the generated WGSL does on an unmatched bracket."""
+    out, ok = {}, True
+    for p in ps:
+        q = bffpy.BFF(max_pairs=64, halt_p=p).halt_q
+        wgsl = machines[f"thr{p}"][0]
+        if q >= 0xFFFFFFFF:  # bff.py's "always" (2^32 cannot even be passed to its kernel): the as-chip halt
+            z, good = "as-chip halt", "zil_trap(" not in wgsl and re.search(r"zil_draw\(0x[0-9a-f]+u\) <", wgsl) is None
+        elif q == 0:
+            z, good = "never", re.search(r"case 3u: \{ d = ZIL_TRAP_IGNORE; \} // unmatched", wgsl) is not None
+        else:
+            z = threshold_from_wgsl(p, machines)
+            good = z == q
+        out[repr(p)] = {"halt_q": q, "zilion": z, "equal": bool(good)}
+        ok &= bool(good)
+        if not good:
+            print(f"  FAIL  dial threshold for halt_p = {p!r}: bff.py halt_q {q:#x}, Zilion {z}")
+    print(f"  {'ok  ' if ok else 'FAIL'}  dial thresholds: bff.py's halt_q = the generated WGSL's for {sum(v['equal'] for v in out.values())}/{len(ps)} "
+          "probabilities (including the half-to-even and 2^32 corners)", flush=True)
+    return out, ok
+
+
 def threshold_from_wgsl(p: float, machines) -> int:
     """The dial threshold the generated WGSL compares the draw with, for a dial machine of probability p."""
     if p not in _THRESHOLDS:
@@ -460,7 +521,8 @@ def write_report(path: Path, rep: dict) -> None:
          + (" (modified in the checkout)" if rep["bffpy"]["dirty"] else ""),
          f"- {rep['adapter']}; Python {rep['python']}, numpy {rep['numpy']}, wgpu {rep['wgpu']}",
          f"- {rep['pairs_per_variant']:,} pairs per variant ({rep['batches']} batches of {rep['batch']:,}: even batches uniform random bytes, odd "
-         f"batches op-rich), {STEPS} steps per encounter, roll_seed 1 + batch; CPU reference on {rep['cpu_fraction'] * 100:g}% of every batch",
+         f"batches op-rich), {STEPS} steps per encounter, roll_seed 1 + batch; CPU reference on {rep['cpu_fraction'] * 100:g}% of every batch "
+         f"({EDGE_CPU * 100:g}% for the edge configurations, the rows from std_d2_lit on)",
          "",
          "Compared on every pair: final memory, `executed` (record `steps`), `entered` (start map ∩ [64, 128)), `max_pc` "
          "(highest start-map position) and `writesB` (write counter of segment B).",
@@ -486,8 +548,14 @@ def write_report(path: Path, rep: dict) -> None:
         f"{r['variant']} [1–127: {r['steps_hist'][0]:,}, 128: {r['steps_hist'][1]:,}, 129–1023: {r['steps_hist'][2]:,}, 1024–8191: {r['steps_hist'][3]:,}, 8192: {r['steps_hist'][4]:,}]"
         for r in rep["variants"]), "",
           "Fetch map: equal to the start map on every pair of the variants without the literal push; with it, a superset "
-          "(the push fetches its two operand bytes). `entered` read from the fetch map instead would differ on: " + ", ".join(
-              f"{r['variant']} {r['fetch_entered_differs']:,}" for r in rep["variants"] if r["bffpy_args"].get("literal")) + " pairs.", ""]
+          "(the push fetches its two operand bytes). Read from the fetch map instead, `entered` / `max_pc` would differ on: " + ", ".join(
+              f"{r['variant']} {r['fetch_entered_differs']:,} / {r['fetch_maxpc_differs']:,}" for r in rep["variants"] if r["bffpy_args"].get("literal"))
+          + " pairs.", "",
+          "Non-vacuity gates (part of the exit status): every configuration ran some encounters to the budget, entered and wrote "
+          "into the partner, left the tape unless the pointer wraps (and never when it does), halted on unmatched brackets unless "
+          "they are ignored (and never when they are), ran literal pushes when the switch is on (fetch map ≠ start map) and "
+          "never otherwise, and, for a dial, drew both outcomes. Failed: " + (", ".join(
+              f"{r['variant']}: {'; '.join(r['gates_failed'])}" for r in rep["variants"] if r.get("gates_failed")) or "none") + ".", ""]
     L += ["## Negative controls", "", "Mutated Zilion machines on one op-rich batch; each must disagree with bff.py.", "",
           "| mutant | on | pairs differing |", "|---|---|---:|"]
     for m in rep["mutants"]:
@@ -509,6 +577,12 @@ def write_report(path: Path, rep: dict) -> None:
         for p, v in d["bracket_halts"].items():
             t = rep["thresholds"][p]
             L.append(f"| {p} | {t['halt_q']:#x} | {t['zilion']:#x} | {v['equal']:,}/{v['checked']:,} | {v['halt_fraction']} |")
+    L += ["", "Thresholds, including the corners (Python rounds half to even; bff.py's halt_q of 0xFFFFFFFF means always, and 2³² "
+          "cannot be passed to its kernel): `test/world/bff_machine.mjs` maps halt_p to probability halt_q / 2³², or to the as-chip "
+          "halt when halt_q ≥ 0xFFFFFFFF.", "", "| halt_p | bff.py halt_q | Zilion | equal |", "|---|---:|---:|:---:|"]
+    for p, t in rep["thresholds"].items():
+        z = t["zilion"] if isinstance(t["zilion"], str) else f"{t['zilion']:#x}"
+        L.append(f"| {p} | {t['halt_q']:#x} | {z} | {'yes' if t['equal'] else 'NO'} |")
     parts = [k for k, v in (("variants", rep["variants"]), ("negative controls", rep["mutants"]), ("kernel tests", rep.get("kernel_tests")),
                                 ("dial probe", rep.get("dial_probe"))) if not v]
     L += ["", f"**Result: {'all identical, every negative control caught' if rep['ok'] else 'FAILED'}"
@@ -540,7 +614,13 @@ def main() -> int:
         print(f"no Algocell checkout at {a.algocell}; skipped")
         return 0
     bffpy = load_bffpy(a.algocell)
-    alphabets = {"d2": bffpy.density_map(2, seed=0), "d4": bffpy.density_map(4, seed=0)}
+    a.bff_sha = hashlib.sha256(bff_path.read_bytes()).hexdigest()
+    d2lit = bffpy.density_map(2, seed=0).copy()
+    d2lit[ord("P")] = 11  # bff_soup.py's density map with the literal push
+    custom = bffpy.ascii_map(True)
+    custom[0x00], custom[0x01], custom[0xFF], custom[0x80], custom[0x81] = 9, 11, 11, 13, 200
+    alphabets = {"d2": bffpy.density_map(2, seed=0), "d4": bffpy.density_map(4, seed=0), "d2lit": d2lit,
+                 "asciilit": bffpy.ascii_map(True), "custom": custom}
     ok = True
 
     with tempfile.TemporaryDirectory(prefix="zilion-bff-") as td:
@@ -557,26 +637,21 @@ def main() -> int:
                     "nohalt": kw.get("nohalt", False), "halt_p": kw.get("halt_p", 1.0), "lit_rep": kw.get("lit_rep", 1),
                     "alphabet": [int(x) for x in amap]}
 
-        var_kw = dict(VARIANTS)
-        configs += [cfg_of(n, kw) for n, kw in VARIANTS]
+        var_kw = dict(ALL)
+        configs += [cfg_of(n, kw) for n, kw in ALL]
         for k, (_, base, mut, salt, _) in enumerate(MUTANTS):
             c = cfg_of(f"mutant{k}", var_kw[base])
             c["mutate"] = mut
             if salt is not None:
                 c["salt"] = salt
             configs.append(c)
-        ps = [0.5, 0.3, 0.1, 0.03, 0.01]
+        # the dial thresholds: the probabilities used, and the corners (half-to-even rounding, halt_q of 2^32 - 1 and 2^32)
+        ps = [0.5, 0.3, 0.1, 0.03, 0.01, 0.7, 0.5 + 2 ** -33, 0.25 + 2 ** -33, 0.75 + 2 ** -33, 1 - 2 ** -32, 1 - 2 ** -33, 0.0]
         configs += [cfg_of(f"thr{p}", {"halt_p": p}) for p in ps]
         configs.append({"name": "probe", "probe": True})
         machines = build_machines(configs, tmp)
-        thresholds = {str(p): {"halt_q": int(round(p * 4294967296.0)), "zilion": threshold_from_wgsl(p, machines)} for p in ps}
-        for p, t in thresholds.items():
-            if t["halt_q"] != t["zilion"]:
-                ok = False
-                print(f"  FAIL  dial threshold for p = {p}: bff.py halt_q {t['halt_q']:#x}, Zilion {t['zilion']:#x}")
-        # bff.py's own halt_q (computed by its constructor) must agree with the formula used above
-        for p in ps:
-            assert bffpy.BFF(max_pairs=64, halt_p=p).halt_q == thresholds[str(p)]["halt_q"]
+        thresholds, good = check_thresholds(bffpy, machines, ps)
+        ok &= good
 
         rep = {"generated": time.strftime("%Y-%m-%d %H:%M:%S %Z"), "ok": None,
                "zilion": {"commit": git("rev-parse", "--short", "HEAD", cwd=ROOT), "dirty": bool(git("status", "--porcelain", "src", cwd=ROOT)),

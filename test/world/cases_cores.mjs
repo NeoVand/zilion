@@ -220,7 +220,7 @@ const CASES = [
       const b = Z.buildMachine({ isa: bff, world });
       if (b.manifest.init.stack.notApplicable !== "no stack") throw new Error(`bff init.stack: ${JSON.stringify(b.manifest.init.stack)}`);
       return [
-        addJob({ isa: Z.z80, world }, [{ mem: mem(32, { 0: [0x3e, 0x07, 0x32, 0x14, 0x00, 0x76] }),
+        addJob({ isa: Z.z80, compat: "0.3", world }, [{ mem: mem(32, { 0: [0x3e, 0x07, 0x32, 0x14, 0x00, 0x76] }),
           expect: { steps: 3, halt: "halt-insn", trap: "halt-insn", mem: { 20: 7 }, writes: [0, 1, 0], fetched: [0, 1, 2, 3, 4, 5] } }], { budget: 40 }),
         addJob({ isa: m6502, world }, [{ mem: mem(32, { 0: [0xa9, 0x07, 0x8d, 0x14, 0x00, 0x02] }),
           expect: { steps: 3, halt: "trap", trap: "illegal", mem: { 20: 7 }, writes: [0, 1, 0], fetched: [0, 1, 2, 3, 4, 5] } }], { budget: 40 }),

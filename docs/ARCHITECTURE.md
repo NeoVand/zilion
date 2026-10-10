@@ -186,7 +186,8 @@ that the prefix-resolution anchor is unchanged:
 
 `src/cores/bff/index.ts` is BFF, the Brainfuck family of Agüera y Arcas et al. 2024 (arXiv 2406.19108), with the
 semantics of Algocell's `experiments/micro/bff.py` (which follows cubff `bff.inc.h`), reproduced **bit for bit** in
-every configuration bff.py has (`test/world/bff_equiv.py`; report in `test/baselines/bff-equivalence.md`). It is
+every configuration bff.py has, through the mapping below (`test/world/bff_equiv.py`; report in
+`test/baselines/bff-equivalence.md`). It is
 ring-native (`addressBits: 0`): the tape is the world's ring of P positions, so the same world (a pair of tapes,
 padding, write counts, dials, resumable runs) runs it unchanged.
 
@@ -212,8 +213,9 @@ padding, write counts, dials, resumable runs) runs it unchanged.
   shuffles with numpy's `Generator` (SeedSequence, PCG64, its bounded-integer draws), which TypeScript does not
   reproduce, so a density map is passed as its table (computed by bff.py) and recorded whole in the manifest. Three
   cross-parameter rules make silent no-ops errors: `literal: true` needs an op-11 byte in the alphabet, an op-11 byte
-  needs `literal: true`, and `lit_rep` other than 1 needs `literal: true` (bff.py accepts these selections; each is
-  equivalent to a consistent one).
+  needs `literal: true`, and `lit_rep` other than 1 needs `literal: true`. bff.py accepts these selections; each is
+  equivalent to a consistent one, which is what `test/world/bff_machine.mjs` passes (and op ids above 11, no-ops in
+  bff.py, become 0).
 
 **bff.py's configurations as worlds** (`test/world/bff_machine.mjs` holds exactly this mapping):
 
@@ -222,9 +224,9 @@ padding, write counts, dials, resumable runs) runs it unchanged.
 | `BFF(steps=n)`: two 64-byte tapes, 128 bytes | `memory: { kind: 'segments', segments: [{ bytes: 64, name: 'A' }, { bytes: 64, name: 'B' }] }` (ring 128, no padding), `budget: { unit: 'steps', value: n }` |
 | `ip_wrap=True` | `halting.traps.bounds = 'ignore'` (the published rule is the as-chip halt) |
 | `nohalt=True` | `halting.traps.unmatched = 'ignore'` |
-| `halt_p=p` with p < 1 | `halting.traps.unmatched = { halt: { probability: p } }` (salt 0) |
-| `alphabet=m` (default `ascii_map(literal)`) | `core.params.alphabet = m` (`BFF_ASCII`, `BFF_ASCII_LITERAL`) |
-| `literal=True`, `lit_rep=r` | `core.params.literal = true`, `core.params.lit_rep = r` |
+| `halt_p=p`: `halt_q` = Python's `round(p · 2³²)` (half to even) | `halt_q` ≥ 0xFFFFFFFF (bff.py's "always"): the as-chip halt; otherwise `halting.traps.unmatched = { halt: { probability: halt_q / 2³² } }` (salt 0), whose threshold is exactly `halt_q` |
+| `alphabet=m` (default `ascii_map(literal)`) | `core.params.alphabet = m` (`BFF_ASCII`, `BFF_ASCII_LITERAL`); without `literal` its op-11 bytes become 0, op ids above 11 become 0 |
+| `literal=True`, `lit_rep=r` | `core.params.literal = true`, `core.params.lit_rep = r` (without an op-11 byte in the alphabet: `literal` false, `lit_rep` 1) |
 | `execute(pairs, roll_seed=s)`, pair index p | run `seed` s, lane p (`laneBase` 0 for each `execute` call) |
 
 **bff.py's per-encounter record from the lane record** (outputs `writeCounts`, `startMap`):
@@ -244,11 +246,12 @@ push's two operand bytes, so `entered` read from the fetch map would differ (the
 with `zil_mix32(0)` = 0 and `zil_mix32` = bff.py's `hash32`, at the 0-based index of the current step, which is
 bff.py's loop index `s`; the threshold `round(p · 2³²)` is bff.py's `halt_q`. Verified, not assumed: the draws read
 back from the GPU equal `hash32(p·C1 ^ (s+1)·C2 ^ roll_seed)` over lanes up to 2³² − 1, steps up to 2³² − 1 and
-four seeds, every decision equals `bracket_halts`, and the thresholds in the generated WGSL equal `halt_q` for the
-probabilities used. Two corners differ by construction, neither reachable with the probabilities used: where
-p · 2³² is exactly k + ½ (p an odd multiple of 2⁻³³), Zilion rounds up and Python rounds to even; and for p in
-[1 − 1.5·2⁻³², 1), bff.py's `halt_q` is 0xFFFFFFFF, its "always" (or 2³², which its params array cannot hold), while
-Zilion's clamped threshold 2³² − 1 lets the draw 0xFFFFFFFF continue.
+four seeds, and every decision equals `bracket_halts`. A probability passed to the world as is would differ from bff.py
+in two corners: where p · 2³² is exactly k + ½ (p an odd multiple of 2⁻³³), `dialThreshold` rounds up and Python rounds
+to even; and for p in [1 − 1.5·2⁻³², 1), bff.py's `halt_q` is 0xFFFFFFFF, its "always" (or 2³², which its kernel
+cannot take), while the world's clamped threshold 2³² − 1 lets the draw 0xFFFFFFFF continue. The mapping above closes
+both (it passes `halt_q / 2³²`, and the as-chip halt for `halt_q` ≥ 0xFFFFFFFF); the harness checks the generated
+WGSL against bff.py's `halt_q` for twelve probabilities, these corners included.
 
 ## L1: the world spec
 
@@ -390,7 +393,7 @@ resumable (see Resumable runs).
 A descriptor may declare `params`: name → `{ type: 'u32' | 'bool' | 'enum', default, values? }` or
 `{ type: 'table', length, max, default }` (names and enum values lower snake case). A `table` is exactly `length`
 integers in [0, `max`] (`length` 1..65536, `max` a u32), such as a byte → op map; a machine gives it as an array
-or a typed array. A machine selects values with `core: { isa, variant?, compat?, params? }` (the shorthand
+or a typed array (the input type is `CoreParamInput`; resolved values are `CoreParamValue`). A machine selects values with `core: { isa, variant?, compat?, params? }` (the shorthand
 `isa`, with `variant` and `compat` beside it, remains; mixing the two forms is an error). The builder validates the
 selection (an unknown name, a wrong type, a u32 out of range, an enum value outside `values`, or a table of the
 wrong length or with an entry outside [0, max] are errors; an omitted parameter takes its declared default), emits
@@ -501,7 +504,7 @@ b.encode(encoder, { budget: 64, stepBase: 128, resume: true });   // continue th
 | `npm run test:unit` | address math, hash, SHA-256, validation, hook minimality, manifest invariants, chunk planner, packing, ISA neutrality; the required budget and stack and their error messages, presets, `firstPushAt` mappings, the trap-cause plumbing, core-param validation and constants (test-only core), the step base and resumability |
 | `npm run test:world` | the world spec on the GPU through `gpu_runner.py` (Python wgpu): hand-computed cases for odd and padded rings, the seam, stack conventions (`firstPushAt` on the Z80 and the 6502), budgets, halt and trap policies with trap causes, dials, ablation, maps, init, io hooks; ring = mask, hook neutrality, library = kernel, chunk invariance, 0.2 kernel = the `compat:'0.2'` preset; resumable runs (k = 1, 2, 7 dispatches = one, Z80 and BFF (a dial, the wrap, the literal push, an odd padded ring), with a negative control; the step base across 2³²; a hand-built record; library `zil_resume`); core params of every kind on a test-only core; the 6502 skeleton; BFF by hand (brackets, unmatched and bounds policies, the dial, the literal push, alphabet tables, ablation, the 64 + 64 pair, padding); one world on three ISAs; the Z80 semantics (`test/world/cases_z80.mjs`: §5.2's R programs and BIT n,(HL) from WZ under both compats, the state record per selection, the Q latch, LDIR repeat flags, `z80_run`/`z80_reset`/frozen host halts in a raw host, every hook combination of every semantics compiled and run, resumed runs keeping WZ and Q). Set `ZILION_PYTHON` to an interpreter with `wgpu` and `numpy`. |
 | `npm run test:algocell` | 33 conditions against the executors Algocell exported with 0.2.0 (20,000 random pairs each), with compat `'0.2'` |
-| `npm run test:bff` | BFF against Algocell's `experiments/micro/bff.py`, its GPU kernel and its CPU reference, in 15 configurations, with negative controls, bff.py's own kernel tests mirrored and the dial hash read back from the GPU (`test/world/bff_equiv.py`; the npm script runs 131,072 pairs per configuration; the baseline `test/baselines/bff-equivalence.md` was made with 1,048,576) |
+| `npm run test:bff` | BFF against Algocell's `experiments/micro/bff.py`, its GPU kernel and its CPU reference, in 15 configurations and 5 edge ones, with non-vacuity gates, negative controls, bff.py's own kernel tests mirrored and the dial hash read back from the GPU (`test/world/bff_equiv.py`; the npm script runs 131,072 pairs per configuration; the baseline `test/baselines/bff-equivalence.md` was made with 1,048,576) |
 | `npm run test:engine` | the engine's ordering and lifecycle on a mock device (no GPU): read snapshots, the 0.2 facade's buffer lifetime and destroy races, staging within `maxBufferSize`, the step base and resume params and the record upload per chunk, `trapCause` decoding |
 | `test/engine.html` | the engine and the facade on browser WebGPU (`node scripts/serve.mjs`), including a run split into k = 1, 2, 7 resumed dispatches and a batch resumed in place |
 

@@ -77,6 +77,9 @@ export type CoreParamDecl =
 /** A resolved core parameter value: a u32, a bool, an enum value name, or a table (an array of integers). */
 export type CoreParamValue = number | boolean | string | readonly number[];
 
+/** A core parameter value as a machine gives it: a resolved value, or a table as any array-like (a typed array). */
+export type CoreParamInput = CoreParamValue | ArrayLike<number>;
+
 export interface CoreGenOptions {
   /** One of `IsaCore.variants` (default `IsaCore.defaultVariant`). */
   variant?: string;
