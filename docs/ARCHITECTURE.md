@@ -52,7 +52,8 @@ descriptor, so a new core writes only its state variables and its step function.
 | `hooks` | which optional hooks the core can call: `fetch`, `instructionStart`, `trap`, `io` |
 | `decode` | the decode (ablation) hook: its WGSL name and parameters, page layouts, what a skip consumes |
 | `conventions` | step definition; `firstPushAt(P, t)` and `stackTop(P, t)` (both null without a stack); `entry(pos, P)`; trap causes with as-chip decisions; prose on halting and illegal opcodes |
-| `variants`, `compat` | named semantics; `compat` selects historical semantics (the Z80 has only `'0.2'` in this milestone) |
+| `variants`, `compat` | named semantics; `compat` selects historical semantics (the Z80: `'0.3'`, the default, and `'0.2'`) |
+| `stateFor({ variant, compat })` (optional) | the state record and internals for that selection, when they differ from `state` and `internals` (the Z80's 0.2 record has no `wz`/`im`, its `zilog-nmos` record adds `q`) |
 | `params` (optional) | compile-time parameters: name → `{ type: 'u32' \| 'bool' \| 'enum', default, values? }` (see Core parameters) |
 | `wgsl({ variant, compat, hooks, params? })` | the core text; a disabled hook is never called (WGSL has no default functions) |
 
@@ -92,30 +93,84 @@ trap and reports 0; the skeletons have none and halt on any decision but `ignore
 
 ### The Z80 core
 
-`src/cores/z80/core.wgsl.ts` generates the core text with `z80CoreText(hooks)`. With every hook off it is the
-0.2.0 core **byte for byte** (`Z80_CORE_WGSL`; `npm run check:bytes`). Each hook only adds text at a fixed
-insertion point. Order within `z80_step`:
+`src/cores/z80/core.wgsl.ts` generates the core text with `z80CoreText(hooks, { compat, variant })` (the
+descriptor's `wgsl` calls it). Two semantics:
+
+| `compat` | Text | State record | Use |
+|---|---|---|---|
+| `'0.3'` (default) | the current core (`core.wgsl.ts`) | the 25 fields of 0.2, then `wz` (16 bits) and `im` (2); `zilog-nmos` adds `q` (8) | new work |
+| `'0.2'` | the frozen 0.2 generator (`core-0.2.wgsl.ts`); with every hook off the 0.2.0 core **byte for byte** (`Z80_CORE_WGSL`) | the 25 fields of 0.2.0 | registered work, Algocell's executors |
+
+The record differs by semantics, so the descriptor gives it per selection (`stateFor({ variant, compat })`, an
+optional descriptor method the builder uses when present); new fields are appended, so 0.2 offsets are unchanged.
+`npm run check:bytes` proves the 0.2 text against the v0.2.0 tag and the published package and pins the 0.2 text of
+every hook combination by SHA-256; `test/world/compat02.mjs` checks the outputs of 600,000 random programs against a
+recording made from the 0.2.0 core before any fix (design §5.5). `Z80_CORE_WGSL` and `buildComputeShader` (the 0.2
+API) stay the 0.2.0 text.
+
+**Semantics 0.3** (design §5.2–§5.4). Validated against all 1,604,384 SingleStepTests/z80 vectors, 86 hand-derived
+R and WZ probes and 384 wasted-prefix vectors (docs/TESTING.md); what remains unmodelled is listed in
+`test/vectors/z80/expected-0.3.0.json`.
+
+- **R.** A wasted DD/FD prefix (followed by DD, FD or ED) is one step and one M1: R + 1 (0.2 counted the follower's
+  M1 too, R + 2). The follower is still fetched in the wasted step (`on_fetch`, fetch maps), as before.
+- **MEMPTR (WZ)** in full, per the design's §5.3 table: `LD A,(rp)` rp + 1; `LD (rp),A` and `LD (nn),A`
+  (A ≪ 8) | ((addr + 1) & 0xFF); 16-bit loads and stores through (nn) nn + 1; `ADD/ADC/SBC HL,rr` the old HL + 1;
+  RLD/RRD HL + 1; JR, DJNZ, RET cc taken: the target (not taken: unchanged); JP cc and CALL cc nn **taken or not**;
+  RET, RETN, RETI, RST, EX (SP),HL: the new PC or HL; every (IX+d)/(IY+d) instruction (DDCB included, after the
+  decode hook) IX/IY + d; `IN A,(n)` port + 1; `OUT (n),A` (A ≪ 8) | ((n + 1) & 0xFF); `IN r,(C)`, `OUT (C),r`
+  BC + 1 (BC before the load); CPI/CPD WZ ± 1; INI/IND BC(before) ± 1; OUTI/OUTD BC(after) ± 1; a repeating block
+  instruction PC + 1. LDI, LDD, JP (HL), LD SP,HL, PUSH, POP and an ablated instruction leave it. The only flag that
+  reads it: `BIT n,(HL)` takes F3/F5 from WZ bits 11 and 13.
+- **IM.** IM 0/1/2 and the mirrors (ED 46 4E 66 6E → 0, 56 76 → 1, 5E 7E → 2) set `cpu_im`. No interrupts exist.
+- **Block repeats.** A repeating LDIR/LDDR/CPIR/CPDR/INIR/INDR/OTIR/OTDR takes X/Y from bits 13/11 of its own
+  address; INIR/INDR/OTIR/OTDR also adjust H and P/V (redcode Z80 Block Flags Test). The flags of a repeating
+  iteration are normally overwritten by the next one; they survive when the budget ends mid-repeat, or when the
+  instruction overwrites its own bytes (self-copying code), after which F can reach memory through `PUSH AF`.
+- **Ports.** Without the io hooks IN reads 0 and OUT does nothing, as in 0.2; `OUT (C),r` and `OUT (C),0` now exist
+  in every build (they set WZ). With the io hooks: port `(A << 8) | n` for `IN A,(n)`/`OUT (n),A`, `BC` for the
+  `(C)` forms, `BC` before B is decremented for INI/IND and after for OUTI/OUTD.
+- **Halt reasons.** `cpu_halted` holds `Z80_RUNNING`, `Z80_HALT_INSN` (HALT, PC parked on it) or `Z80_HALT_HOST`
+  (`on_instruction_start` returned `ZIL_HALT`, PC backed onto the byte), constants equal to the contract's
+  `ZIL_RUNNING`, `ZIL_HALT_INSN`, `ZIL_HALT_HOST` (the core text needs no prelude with its hooks off). A lane halted
+  by HALT keeps executing it (R + 1 per step); a lane halted by the host is frozen (0.2 kept adding 1 to R). The Z80
+  has no other halting trap, so `symbols.trapCause` is `halt-insn` exactly when `halted` = 1, in both semantics.
+- **Raw hosts.** `z80_reset()` is the world reset (every register, latch and internal 0, PC 0, running);
+  `z80_run(budget) -> u32` runs up to `budget` steps and stops after the step that halts. Hosts that embed the core
+  text without the world builder (the vector harness, a soup shader) use them instead of relying on WGSL
+  zero-initialisation (design Appendix C.5).
+
+**Variant `zilog-nmos`** (compat `'0.3'` only): the Q latch of the Zilog NMOS Z80. Q = F after an instruction that
+writes F, else 0 (POP AF and EX AF,AF' do not write it; a wasted prefix, a halted step, a skipped or ablated
+instruction leave Q = 0, and a DD/FD prefix clears it before the instruction it prefixes); SCF and CCF take X/Y from
+((Q ⊕ F) | A). With it, every SingleStepTests field except the interrupt latches matches
+(`expected-0.3.0-zilog-nmos.json`). It is a variant and not a core parameter (decision 4) because it changes the state
+record (`q`), which the record-per-selection mechanism keys on variant and compat; the default `classic` takes
+SCF/CCF X/Y from A, as 0.2 did.
+
+Internals hold nothing between steps (`idx_*`; with `zilog-nmos` also `z80_qf`, cleared at the start of each step),
+so a resumed run that stores and loads the state record continues exactly (`wz`, `im` and `q` are state fields).
+
+Order within `z80_step`, with the opt-in hooks (each adds text at a fixed insertion point only):
 
 1. `z80_fetch()` of the first byte → `on_fetch(pc)` → read → PC + 1; `r_inc()` (M1);
 2. `on_instruction_start(pc, byte)`: `ZIL_HALT` sets `cpu_halted = 2` and backs PC onto the byte (exactly
    Algocell's lethal-tar hunk, with a distinguishable value); `ZIL_SKIP` returns;
-3. DD/FD: the next byte (`on_fetch`), `r_inc()`; a wasted prefix returns here (PC backed up);
+3. DD/FD: the next byte (`on_fetch`); a wasted prefix returns here (PC backed up; compat `'0.2'` counts its M1 first),
+   otherwise `r_inc()`;
 4. the decode hook `on_fetch_opcode(prefix, op)` for base-page opcodes; DDCB/FDCB fetch the displacement and
    the opcode first; CB and ED pages call it from their own dispatch;
 5. execute (operands and displacements through `z80_fetch`, so `on_fetch` sees every instruction byte);
    HALT calls `zil_trap(ZIL_TRAP_HALT_INSN)` when the trap hook is on (`ignore` makes it a 1-byte no-op);
-   IN/OUT call `io_in`/`io_out` when the io hooks are on (port `(A << 8) | n` for `IN A,(n)`/`OUT (n),A`,
-   `BC` for the `(C)` forms, `BC` before B is decremented for INI/IND and after for OUTI/OUTD; the io hooks
-   also add the `OUT (C),r` cases, which are no-ops without them).
-
-Semantics are 0.2's in every configuration: no MEMPTR (WZ), a wasted DD/FD prefix adds 2 to R, IN reads 0
-and OUT is a no-op unless the io hooks say otherwise. The fixes come in a separate, `compat`-gated step.
+   IN/OUT and the block I/O instructions call `io_in`/`io_out` when the io hooks are on (with compat `'0.2'` the io
+   hooks also add the `OUT (C),r` cases, which are no-ops without them there).
 
 ### Anchors
 
-Algocell's shader generators patch the core text. These anchors occur exactly once in the default core **and**
-in the core generated with each of the 16 hook combinations (checked by `scripts/check-byte-identity.mjs`); the
-commitment holds through 0.3.x:
+Algocell's shader generators patch the core text. These anchors occur exactly once in the core of every semantics
+(compat `'0.2'`; compat `'0.3'` classic and `zilog-nmos`) generated with each of the 16 hook combinations (48 texts,
+checked by `scripts/check-byte-identity.mjs`); the commitment holds through 0.3.x. The R fix of §5.2 is written so
+that the prefix-resolution anchor is unchanged:
 
 | Exact text | Used by (Algocell) |
 |---|---|
@@ -363,10 +418,11 @@ b.encode(encoder, { budget: 64, stepBase: 128, resume: true });   // continue th
 
 | Command | What |
 |---|---|
-| `npm run check:bytes` | byte identity of the 0.2 configuration against the v0.2.0 tag (built from source) and the published 0.2.0 package; anchors in all hook combinations |
+| `npm run check:bytes` | byte identity of the 0.2 configuration against the v0.2.0 tag (built from source) and the published 0.2.0 package; the compat `'0.2'` text of all 16 hook combinations against their recorded SHA-256; anchors in all 48 core texts (3 semantics × 16 hook combinations) |
+| `npm run test:compat` | design §5.5: compat `'0.2'` reproduces outputs recorded from the 0.2.0 core on 100,000 random programs at each of P = 32, 38, 40, 64, 100, 128 (per-chunk SHA-256 digests, `test/world/compat-0.2.0.json`); `--compat 0.3` is its negative control |
 | `npm run test:unit` | address math, hash, SHA-256, validation, hook minimality, manifest invariants, chunk planner, packing, ISA neutrality; the required budget and stack and their error messages, presets, `firstPushAt` mappings, the trap-cause plumbing, core-param validation and constants (test-only core), the step base and resumability |
-| `npm run test:world` | the world spec on the GPU through `gpu_runner.py` (Python wgpu): hand-computed cases for odd and padded rings, the seam, stack conventions (`firstPushAt` on the Z80 and the 6502), budgets, halt and trap policies with trap causes, dials, ablation, maps, init, io hooks; ring = mask, hook neutrality, library = kernel, chunk invariance, 0.2 kernel = the `compat:'0.2'` preset; resumable runs (k = 1, 2, 7 dispatches = one, Z80 and BFF, with a negative control; the step base across 2³²; a hand-built record; library `zil_resume`); core params on a test-only core; the 6502 and BFF skeletons and one world on three ISAs. Set `ZILION_PYTHON` to an interpreter with `wgpu` and `numpy`. |
-| `npm run test:algocell` | 33 conditions against the executors Algocell exported with 0.2.0 (20,000 random pairs each) |
+| `npm run test:world` | the world spec on the GPU through `gpu_runner.py` (Python wgpu): hand-computed cases for odd and padded rings, the seam, stack conventions (`firstPushAt` on the Z80 and the 6502), budgets, halt and trap policies with trap causes, dials, ablation, maps, init, io hooks; ring = mask, hook neutrality, library = kernel, chunk invariance, 0.2 kernel = the `compat:'0.2'` preset; resumable runs (k = 1, 2, 7 dispatches = one, Z80 and BFF, with a negative control; the step base across 2³²; a hand-built record; library `zil_resume`); core params on a test-only core; the 6502 and BFF skeletons and one world on three ISAs; the Z80 semantics (`test/world/cases_z80.mjs`: §5.2's R programs and BIT n,(HL) from WZ under both compats, the state record per selection, the Q latch, LDIR repeat flags, `z80_run`/`z80_reset`/frozen host halts in a raw host, every hook combination of every semantics compiled and run, resumed runs keeping WZ and Q). Set `ZILION_PYTHON` to an interpreter with `wgpu` and `numpy`. |
+| `npm run test:algocell` | 33 conditions against the executors Algocell exported with 0.2.0 (20,000 random pairs each), with compat `'0.2'` |
 | `npm run test:engine` | the engine's ordering and lifecycle on a mock device (no GPU): read snapshots, the 0.2 facade's buffer lifetime and destroy races, staging within `maxBufferSize`, the step base and resume params and the record upload per chunk, `trapCause` decoding |
 | `test/engine.html` | the engine and the facade on browser WebGPU (`node scripts/serve.mjs`), including a run split into k = 1, 2, 7 resumed dispatches and a batch resumed in place |
 
@@ -404,7 +460,9 @@ The first architecture review left six questions open. Decided as follows; all s
    the manifest's provenance. A param is a compile-time constant (a recompile), never a uniform. BFF's variant
    parameters (alphabet density, literal push) are the first use; the 6502's decimal mode and the Z80's
    `zilog-nmos` Q latch are the next. **The generic mechanism is implemented** (see Core parameters), tested with a
-   test-only descriptor; the BFF parameters themselves come with the BFF core (M2).
+   test-only descriptor; the BFF parameters themselves come with the BFF core (M2). The Z80's Q latch stays a
+   **variant** (`variant: 'zilog-nmos'`), not a parameter: it adds a state field (`q`), and the state record is
+   chosen per variant and compat (`stateFor`), not per parameter value (see The Z80 core).
 5. **Resumable runs: a step base.** The params struct gains `stepBase` (64-bit, as two u32), added to the step
    counter in every dial draw, so a run split across dispatches draws exactly what one long dispatch draws.
    Test: k chunked dispatches equal one dispatch, byte for byte, for k = 1, 2, 7. **Implemented** (see Resumable
@@ -413,7 +471,8 @@ The first architecture review left six questions open. Decided as follows; all s
    on BFF, with a negative control, across 2³² against the CPU mirror, and in the browser engine.
 6. **Anchors stay through 0.3.x** (the commitment under Anchors). Registered Algocell work is pinned to 0.2.0
    output semantics in any case; the anchors keep its shader patchers working until the equivalence proof lets
-   them retire. **Holds**: `npm run check:bytes` (decisions 1 to 5 did not touch the Z80 core text).
+   them retire. **Holds**: `npm run check:bytes` (decisions 1 to 5 did not touch the Z80 core text; the 0.3
+   semantics keep every anchor too).
 
 ## Defaults that remain
 
@@ -434,7 +493,7 @@ manifest (the world as given, `core`, `init`, `budget`, `record`, the options ha
 | trap dial `salt` | 0 | |
 | `world.ablation` | none | |
 | `variant` | `isa.defaultVariant`: Z80 `classic`, 6502 `nmos`, BFF `ascii` | recorded in `manifest.core` |
-| `compat` | `isa.compat[0]`: Z80 `'0.2'`, 6502 and BFF `'skeleton'` | recorded in `manifest.core` |
+| `compat` | `isa.compat[0]`: Z80 `'0.3'` (the current semantics; `'0.2'` must be asked for), 6502 and BFF `'skeleton'` | recorded in `manifest.core` |
 | core `params` | each declared parameter's `default` | recorded in `manifest.core.params` |
 | `mode` | `'kernel'` | |
 | `workgroupSize` | 64 | |
@@ -445,7 +504,8 @@ manifest (the world as given, `core`, `init`, `budget`, `record`, the options ha
 1. **No monorepo yet** (see Packaging).
 2. **Fewer per-core WGSL obligations.** The design asks each core for `<id>_reset`, `<id>_store`, `<id>_load`,
    `<id>_halted` and `<id>_pc`. Here the descriptor's state fields (WGSL lvalues), `internals` and `symbols`
-   let the builder generate all of them, the same way for every ISA.
+   let the builder generate all of them, the same way for every ISA. The Z80 (compat `'0.3'`) also has
+   `z80_reset()` and `z80_run(budget)` in its text, for hosts that use the core without the builder.
 3. **`on_reset` is called by the world** (`zil_begin`, after the init conventions), not by the core.
 4. **Names.** The decode hook keeps the Z80's 0.2 name `on_fetch_opcode(prefix, op)`; the descriptor declares
    each core's decode-hook name and parameters (`on_decode(page, key)` for the skeletons). Port hooks are
