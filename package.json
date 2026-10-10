@@ -23,7 +23,10 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
 		"prepublishOnly": "npm run build",
-		"typecheck": "tsc -p tsconfig.json --noEmit"
+		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"test:conformance": "${ZILION_PYTHON:-python3} -I tools/zt.py conformance",
+		"test:harness": "${ZILION_PYTHON:-python3} -I -m unittest discover -s test/harness && ${ZILION_PYTHON:-python3} -I tools/zt.py selftest --vectors ${ZILION_Z80_VECTORS:-../zilion-vectors/z80}",
+		"test:vectors": "${ZILION_PYTHON:-python3} -I tools/zt.py vectors z80 ${ZILION_Z80_VECTORS:-../zilion-vectors/z80} test/vectors/z80/analytic"
 	},
 	"keywords": [
 		"z80",
