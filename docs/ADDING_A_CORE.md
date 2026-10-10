@@ -58,7 +58,9 @@ decision; prose on halting and illegal opcodes); `variants` and `compat`; option
 `{ type: 'u32' | 'bool' | 'enum', default, values? }`, names and enum values lower snake case, checked by
 `checkCoreParamDecls`); `wgsl(options)` (which also receives the resolved `params`). Keep `firstPushAt` a small
 function of its own (`z80FirstPushAt`, `m6502FirstPushAt`): it is the cross-ISA meaning of the stack, and worlds
-compared across ISAs rely on it. Add a new trap cause to `TRAP_CAUSES` (`src/contract/host.ts`) only if no
+compared across ISAs rely on it. Both stack conventions must succeed on a ring of one byte (`P = 1, t = 0`): the
+builder calls them there to learn the stack fields (the keys they assign), so that a world that sets every stack
+field with `init.set` or `init.random` may omit `init.stack`. Add a new trap cause to `TRAP_CAUSES` (`src/contract/host.ts`) only if no
 existing cause fits; the list is shared by every ISA.
 
 ### 3. Tests
@@ -133,4 +135,5 @@ including the shared pair world. The contract needed **no change** for it. To be
 6. **Resolved points**: the halt cause (`trapCause`: `bounds`, `unmatched`, `unimplemented`; the skeleton keeps a
    `trap` state field); resumable runs (the params' `stepBase` reaches every dial draw, so bff.py's step index `s`
    is `stepBase` plus the steps run; tested on the skeleton with the bounds dial for k = 1, 2, 7). BFF has no
-   stack: a world for it gives no `init.stack` (giving one is an error).
+   stack: a world may still give `init.stack` (so one spec serves every ISA); BFF validates it, does not apply it and
+   lists it as `notApplicable: 'no stack'` in the manifest.

@@ -130,6 +130,26 @@ export interface StateLayoutField {
   readonly offset: number;
 }
 
+/**
+ * How the stack was initialised (manifest.init.stack), in the order the steps apply. Nothing a world gives is
+ * dropped silently: an `init.stack` on an ISA without a stack is listed here as not applicable, with what was given.
+ */
+export interface StackInit {
+  /** No stack set up: the ISA has none (`given` is the init.stack it did not apply), or the state is loaded per lane. */
+  readonly notApplicable?: "no stack" | "per-lane state";
+  readonly given?: { readonly firstPushAt?: number | "lastByte"; readonly topAliases?: number | "lastByte" };
+  /** The convention applied first: which one, the resolved ring position and the state values it set. */
+  readonly convention?: {
+    readonly kind: "firstPushAt" | "topAliases";
+    readonly position: number;
+    readonly values: Readonly<Record<string, number>>;
+  };
+  /** Stack fields then given by init.set. */
+  readonly set?: readonly string[];
+  /** Stack fields then drawn by init.random. */
+  readonly random?: readonly string[];
+}
+
 export interface ShaderManifest {
   readonly schema: typeof MANIFEST_SCHEMA;
   readonly zilion: string;
@@ -187,7 +207,7 @@ export interface ShaderManifest {
     readonly words?: number;
   };
   readonly budget: { readonly unit: "steps" | "fetchBytes"; readonly perLane: boolean; readonly default: number | null };
-  readonly init: { readonly perLane: boolean; readonly stateWords: number };
+  readonly init: { readonly perLane: boolean; readonly stateWords: number; readonly stack: StackInit };
   /** Library mode: the WGSL functions a host shader calls. */
   readonly functions?: readonly string[];
   /** Host shaders that run several lanes per invocation (not emitted by buildMachine): dispatch size divisor. */

@@ -212,7 +212,7 @@ test("the world layer names no register, opcode or core function of any ISA", ()
 
 // --- skeleton cores: the contract rejects what a core cannot do ---------------------------------------------------
 test("skeletons: the builder refuses what a core cannot do, and accepts each core's own traps and pages", () => {
-  throws(() => Z.buildMachine({ isa: bff, world: bare(32, { init: { stack: { topAliases: 0 } } }) }), /no hardware stack/);
+  eq(Z.buildMachine({ isa: bff, world: bare(32, { init: { stack: { topAliases: 0 } } }) }).manifest.init.stack, { notApplicable: "no stack", given: { topAliases: 0 } });
   throws(() => Z.buildMachine({ isa: bff, world: bare(32, { hooks: { ioIn: "return 0u;" } }) }), /does not call the 'io' hook/);
   throws(() => Z.buildMachine({ isa: m6502, world: ring(32, { halting: { traps: { "halt-insn": "ignore" } } }) }), /never raises trap 'halt-insn'/);
   throws(() => Z.buildMachine({ isa: Z.z80, world: ring(32, { halting: { traps: { bounds: "ignore" } } }) }), /never raises trap 'bounds'/);
@@ -235,13 +235,12 @@ test("no silent defaults: a world without budget (or its unit or value) or, on a
   throws(() => build({ memory: mem, init: { stack: LAST }, budget: { value: 10 } }), /world\.budget\.unit is required/);
   throws(() => build({ memory: mem, init: { stack: LAST }, budget: { unit: "steps" } }), /world\.budget\.value is required/);
   throws(() => build({ memory: mem, init: { stack: LAST }, budget: { unit: "steps", value: "lots" } }), /world\.budget\.value.*u32/);
-  throws(() => build({ memory: mem, budget: STEPS }), /world\.init\.stack is required: z80 has a stack/);
-  throws(() => build({ memory: mem, budget: STEPS, init: { set: { sp: 0x1234 } } }), /world\.init\.stack is required/);
-  throws(() => Z.buildMachine({ isa: m6502, world: { memory: mem, budget: STEPS } }), /world\.init\.stack is required: m6502 has a stack/);
-  // not required: per-lane state loads SP with everything else; BFF has no stack (and giving one is an error)
-  build({ memory: mem, budget: STEPS, init: { state: "perLane" } });
-  Z.buildMachine({ isa: bff, world: { memory: mem, budget: STEPS } });
-  throws(() => Z.buildMachine({ isa: bff, world: { memory: mem, budget: STEPS, init: { stack: { firstPushAt: "lastByte" } } } }), /bff has no hardware stack/);
+  throws(() => build({ memory: mem, budget: STEPS }), /world\.init\.stack is required: z80 has a stack \(sp\)/);
+  throws(() => build({ memory: mem, budget: STEPS, init: { set: { a: 1 }, random: { fields: ["ix"] } } }), /world\.init\.stack is required/);
+  throws(() => Z.buildMachine({ isa: m6502, world: { memory: mem, budget: STEPS } }), /world\.init\.stack is required: m6502 has a stack \(s\)/);
+  // not required: per-lane state loads SP with everything else; BFF has no stack
+  eq(build({ memory: mem, budget: STEPS, init: { state: "perLane" } }).manifest.init.stack, { notApplicable: "per-lane state" });
+  eq(Z.buildMachine({ isa: bff, world: { memory: mem, budget: STEPS } }).manifest.init.stack, { notApplicable: "no stack" });
   // the budget a world states is the manifest's default; perLane has none
   eq(build(ring(32, { budget: { unit: "steps", value: 77 } })).manifest.budget, { unit: "steps", perLane: false, default: 77 });
   eq(build(ring(32, { budget: { unit: "fetchBytes", value: "perLane" } })).manifest.budget, { unit: "fetchBytes", perLane: true, default: null });
@@ -249,6 +248,7 @@ test("no silent defaults: a world without budget (or its unit or value) or, on a
 test("presets supply the stack and the budget explicitly: compat02World (0.2's Zilion.run world) and algocellPairWorld", () => {
   eq(Z.compat02World({ memBytes: 256, steps: 50 }), { memory: { kind: "mask", bytes: 256 }, init: { stack: { topAliases: "lastByte" } }, budget: { unit: "steps", value: 50 } });
   eq(Z.compat02World({ memBytes: 64, steps: 9, registers: "perLane" }).init, { state: "perLane" });
+  eq(Z.legacyMachine(64).manifest.init.stack, { notApplicable: "per-lane state" });
   // 0.2's default SP = 0xFFFF: the stack pointer aliases the last byte of a power-of-two memory
   if (!build(Z.compat02World({ memBytes: 256, steps: 1 }), { compat: "0.2" }).wgsl.includes("cpu_sp = 0xffffu;")) throw new Error("compat02: SP is not 0xFFFF");
   eq(Z.algocellPairWorld({ L: 16, P: 37, steps: 128 }), {
@@ -258,6 +258,42 @@ test("presets supply the stack and the budget explicitly: compat02World (0.2's Z
   throws(() => Z.compat02World({ memBytes: 48, steps: 1 }), /power of two/);
   throws(() => Z.algocellPairWorld({ L: 16, P: 31, steps: 1 }), /smaller than the pair/);
   eq(Z.presets.algocellPair, Z.algocellPairWorld);
+});
+
+test("covering the stack fields with init.set or init.random counts as giving the stack; the manifest records how the stack was set", () => {
+  const mem = { kind: "ring", bytes: 32 };
+  const w = (init) => ({ memory: mem, budget: STEPS, init });
+  // Z80: sp; 6502: s (the fields the stack conventions assign)
+  eq(build(w({ set: { sp: 0x1234 } })).manifest.init.stack, { set: ["sp"] });
+  eq(build(w({ random: { fields: ["sp", "a"] } })).manifest.init.stack, { random: ["sp"] });
+  eq(Z.buildMachine({ isa: m6502, world: w({ set: { s: 0x80 } }) }).manifest.init.stack, { set: ["s"] });
+  eq(Z.buildMachine({ isa: m6502, world: w({ random: { fields: ["s"] } }) }).manifest.init.stack, { random: ["s"] });
+  if (!build(w({ set: { sp: 0x1234 } })).wgsl.includes("cpu_sp = 0x1234u; // init.set")) throw new Error("init.set sp not emitted");
+  // a 6502 on a ring above 256 bytes has no stack convention, but an explicit S is fine
+  eq(Z.buildMachine({ isa: m6502, world: { memory: { kind: "ring", bytes: 512 }, budget: STEPS, init: { set: { s: 0xff } } } }).manifest.init.stack, { set: ["s"] });
+  // both: the convention first, then init.set, then init.random; all three recorded
+  const both = build(w({ stack: { topAliases: "lastByte" }, set: { sp: 0x4000 }, random: { fields: ["sp"] } }));
+  eq(both.manifest.init.stack, { convention: { kind: "topAliases", position: 31, values: { sp: 0xffff } }, set: ["sp"], random: ["sp"] });
+  const body = both.wgsl.slice(both.wgsl.indexOf("fn zil_init_state()"), both.wgsl.indexOf("fn zil_halt_reason()"));
+  const order = ["cpu_sp = 0xffffu; // stack top aliases", "cpu_sp = 0x4000u; // init.set", "cpu_sp = zil_hash("].map((t) => body.indexOf(t));
+  if (order.some((i) => i < 0) || !(order[0] < order[1] && order[1] < order[2])) throw new Error(`order ${order}`);
+  eq(build(w({ stack: { firstPushAt: 5 } })).manifest.init.stack, { convention: { kind: "firstPushAt", position: 5, values: { sp: 0xffe6 } } });
+});
+test("a stackless ISA accepts init.stack, validates it, does not apply it, and lists it as not applicable", () => {
+  const world = { memory: { kind: "segments", segments: [{ bytes: 16 }, { bytes: 16 }], ring: 33 }, budget: STEPS, init: { stack: { firstPushAt: "lastByte" } } };
+  const b = Z.buildMachine({ isa: bff, world });
+  eq(b.manifest.init.stack, { notApplicable: "no stack", given: { firstPushAt: "lastByte" } });
+  eq(b.manifest.world.init, { stack: { firstPushAt: "lastByte" } }); // the world as given, hashed into the provenance
+  if (!b.wgsl.includes("// init.stack (firstPushAt 31): not applicable, bff has no stack")) throw new Error("no trace of init.stack in the WGSL");
+  const without = Z.buildMachine({ isa: bff, world: { ...world, init: undefined } });
+  const strip = (x) => x.replace(/^\/\/ (world|options) .*$/gm, "").replace(/^    \/\/ init\.stack .*\n/m, "");
+  eq(strip(b.wgsl).replace(/sha256 [0-9a-f]+/g, ""), strip(without.wgsl).replace(/sha256 [0-9a-f]+/g, ""), "the stack changes nothing but the record of it");
+  // the same validation as on a stack ISA
+  throws(() => Z.buildMachine({ isa: bff, world: { ...world, init: { stack: { firstPushAt: 1, topAliases: 1 } } } }), /both firstPushAt and topAliases/);
+  throws(() => Z.buildMachine({ isa: bff, world: { ...world, init: { stack: {} } } }), /needs firstPushAt or topAliases/);
+  throws(() => Z.buildMachine({ isa: bff, world: { ...world, init: { stack: { firstPushAt: 33 } } } }), /not on the ring/);
+  throws(() => Z.buildMachine({ isa: bff, world: { ...world, init: { stack: { top: 1 } } } }), /unknown field/);
+  throws(() => Z.buildMachine({ isa: bff, world: { ...world, init: { state: "perLane", stack: { firstPushAt: 0 } } } }), /excludes/);
 });
 
 // --- decision 1: init.stack.firstPushAt ---------------------------------------------------------------------------

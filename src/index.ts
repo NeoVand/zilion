@@ -94,6 +94,7 @@ export type {
   RecordField,
   RecordFieldName,
   StateLayoutField,
+  StackInit,
 } from "./manifest.js";
 export { sha256 } from "./util/sha256.js";
 
