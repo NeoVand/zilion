@@ -188,12 +188,20 @@ def render(doc: dict, run: dict, digest: str, analysis: str | None) -> str:
     w("")
     w("| File | Tests | Arch. pass | Unexpected | Divergent fields |")
     w("|---|---:|---:|---:|---|")
-    internal_only = 0
+    internal_only = clean = 0
+    mapped_tests: dict[str, int] = {}
+    mapped_files: dict[str, int] = {}
     arch_cols = {f["name"] for f in doc["fields"] if f["architectural"]}
     for key, rec in doc["files"].items():
+        for k, v in rec["mapped"].items():
+            mapped_tests[k] = mapped_tests.get(k, 0) + v
+            mapped_files[k] = mapped_files.get(k, 0) + 1
         arch = {n: e for n, e in rec["fields"].items() if n in arch_cols}
         if not arch and not rec["unexpected"]:
-            internal_only += 1
+            if rec["fields"]:
+                internal_only += 1
+            else:
+                clean += 1
             continue
         parts = []
         for n, e in rec["fields"].items():
@@ -206,6 +214,11 @@ def render(doc: dict, run: dict, digest: str, analysis: str | None) -> str:
         mapped = "; mapped " + ", ".join(f"{k} {v}" for k, v in rec["mapped"].items()) if rec["mapped"] else ""
         w(f"| `{key}` | {rec['tests']} | {rec['pass_arch']} | {rec['unexpected']} | {'; '.join(parts) or '—'}{mapped} |")
     w("")
-    w(f"{internal_only} further files diverge only in the internal columns.")
+    w(f"{internal_only} further files diverge only in the internal columns"
+      + (f"; {clean} files match the reference in every field." if clean else "."))
+    if mapped_tests:
+        w("")
+        w("Convention mappings applied (adapter `postprocess`): " + "; ".join(
+            f"`{k}` in {mapped_tests[k]:,} tests of {mapped_files[k]} files" for k in sorted(mapped_tests)) + ".")
     w("")
     return "\n".join(L)

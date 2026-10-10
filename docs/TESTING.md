@@ -6,8 +6,10 @@ runs that WGSL through [wgpu-py](https://github.com/pygfx/wgpu-py) and does ever
 | Suite | Command | What it checks | GPU |
 |---|---|---|---|
 | Conformance | `npm run test:conformance` | the 17 known-answer programs and the 8,192-program batch of `test/conformance.js` | yes |
-| Vectors | `npm run test:vectors` | every instruction against per-instruction golden vectors (SingleStepTests/z80, plus analytic vectors) | yes |
-| Harness self-test | `npm run test:harness` | the harness itself: unit tests, planted divergences, mutated cores, memory-model invariance, determinism | yes |
+| Vectors | `npm run test:vectors` | every Z80 instruction against per-instruction golden vectors (SingleStepTests/z80, plus analytic vectors) | yes |
+| 6502 vectors | `npm run test:vectors:6502` | every 6502 opcode against SingleStepTests/65x02 `6502/v1` (2,560,000 tests) | yes |
+| Harness self-test | `npm run test:harness` | the harness itself: unit tests, planted divergences, mutated Z80 and 6502 cores, memory-model invariance, determinism | yes |
+| Throughput | `node test/bench/bench-cores.mjs` | Z80 and 6502 on a soup-like workload (random 32-byte pairs, 128 and 512 steps); a measurement, not a gate | yes |
 
 The browser page `test/index.html` still runs `test/conformance.js` through `Zilion.run`. It is a demo, not a gate.
 
@@ -30,6 +32,7 @@ explicitly.
 | `ZILION_PYTHON` | Python used by the npm scripts (default `python3`) |
 | `ZILION_NODE` | Node used by the harness to emit WGSL (default: `node` on `PATH`) |
 | `ZILION_Z80_VECTORS` | SingleStepTests/z80 directory for `test:vectors` and `test:harness` (default `../zilion-vectors/z80`) |
+| `ZILION_6502_VECTORS` | SingleStepTests/65x02 `6502/v1` directory for `test:vectors:6502` and `test:harness` (default `../zilion-vectors/6502`) |
 | `ZILION_ALLOW_CPU_ADAPTER=1` | permit a CPU adapter (lavapipe, llvmpipe, SwiftShader, WARP); refused otherwise |
 | `ZILION_ADAPTER=<text>` | only consider adapters whose device name or backend contains `<text>` (e.g. `vulkan`, `llvmpipe`) |
 | `ZILION_SKIP_TSC=1` | `tools/build-wgsl.mjs` reuses the existing `dist/` instead of running `tsc` |
@@ -82,6 +85,8 @@ python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analyti
     --json build/test/z80.json --md build/test/z80.md
 python -I tools/zt.py vectors z80 ../zilion-vectors/z80 --files 'ed b?' 'cb 4?'     # some opcode files
 python -I tools/zt.py vectors z80 ../zilion-vectors/z80 --files 'ed 70' --test 'ed 70 0012'   # one test
+python -I tools/zt.py vectors 6502 ../zilion-vectors/6502                                     # all 256 opcodes
+python -I tools/zt.py vectors 6502 ../zilion-vectors/6502 --files 6? 7?                      # some opcode files
 ```
 
 Options: `--files` (fnmatch patterns over opcode keys), `--test` (test names), `--limit-per-file N`,
@@ -144,8 +149,15 @@ zt_mem_begin(); zt_load_state(lane); for (s < steps) { <isa>_step(); } zt_store_
 - **Ports.** `io_read(port)` consumes the vector's `"r"` entries in order (unlisted: 0xFF and ST_UNLISTED_PORT);
   `io_write(port, value)` appends to a log that is compared with the `"w"` entries. These are the host-contract hooks
   of design §1.3(b); a core that does not call them (Zilion 0.2.0) simply never reaches them.
+- **Bus-write log** (adapters with `write_cap` > 0: the 6502). Every `mem_write` call is appended, in order, as
+  (address, value) to a log after the lane's memory table, in both memory models. The parser takes the reference's
+  writes from the vector's `cycles` (the entries marked `"write"`, through the adapter's `bus_writes`). This is the
+  only way to check a write whose value does not survive, such as a read-modify-write's old-value write. The count
+  is exact; entries beyond `write_cap` are counted, not stored. With `write_cap` = 0 nothing of this is generated,
+  so the Z80 host text is unchanged.
 - **Capacity.** 32 table slots and 8 port slots per lane by default (`--mem-cap`, `--port-cap`). The parser keeps at
-  least 8 slots free for stray writes. Overflowing either is a harness error, never a divergence.
+  least 8 slots free for stray writes (and 4 in the bus-write log). Overflowing either is a harness error, never a
+  divergence.
 
 Default batches are 65,536 lanes per dispatch (`sparse`) and 1,024 (`full`). `--repeat N` runs every dispatch N
 times and fails unless the outputs are byte-identical.
@@ -158,11 +170,13 @@ For every test the ledger forms one divergence row:
 - **`mem`:** 1 = a listed address ends with the wrong value (or the reference wrote a final-only address and the
   core did not); 2 = stray write; 4 = unlisted read;
 - **`ports`:** 1 = the port-write log differs (count, order, port or value); 2 = a listed port read never happened;
-  4 = a read of an unlisted port.
+  4 = a read of an unlisted port;
+- **`bus`** (adapters with a bus-write log): 1 = the core made a different number of memory writes; 2 = at some
+  position of the sequence the address or the value differs.
 
-Fields are grouped into **columns**. Architectural columns: `regs`, `f`, `r`, `iff`, `im`, `mem`, `ports`.
-Internal columns: `wz` (MEMPTR), `q`, `ei/p`. They are reported separately, so "architectural pass" never depends on
-internal latches.
+Fields are grouped into **columns**. Z80 architectural columns: `regs`, `f`, `r`, `iff`, `im`, `mem`, `ports`;
+internal: `wz` (MEMPTR), `q`, `ei/p`. 6502 architectural columns: `regs`, `p`, `halt`, `mem`, `ports`, `bus`;
+internal: `trap`. They are reported separately, so "architectural pass" never depends on internal latches.
 
 **Expected rules** (`test/vectors/<isa>/expected-<version>.json`) are the ignore masks. Each rule has an `id`,
 `files` (fnmatch patterns over opcode keys), `fields`, an optional bit `mask`, an optional `when` predicate, a
@@ -225,6 +239,27 @@ Outputs:
   M1 cycle, R + 1 in the low 7 bits, PC + 1, nothing else changes. The interrupt latches and Q are 0 before and after,
   so the vectors make no claim about them.
 
+### The 6502 adapter
+
+`tools/ztest/vectors/m6502.py` maps SingleStepTests/65x02 `6502/v1` onto the 6502 core (emitted as
+`HOST_CONTRACT_PRELUDE_WGSL + M6502_CORE_WGSL`, every hook off):
+
+- **State.** pc s a x y p load into and store from `m6502_*`. Before the step `m6502_halted` and `m6502_trap` are
+  cleared. `trap` (the contract's trap-cause field) is not in the vectors and is passed through.
+- **One test = one `m6502_step()`**: one instruction. `cycles` timing is not compared.
+- **`halted`** is compared, with an expectation the adapter sets per opcode: 3 (trap) for the 12 JAM opcodes, 0 for
+  every other. A JAM that does not halt and an opcode that halts when it should not are both divergences.
+- **JAM-PC.** Zilion parks PC on a JAM opcode; the vectors leave it one past. When the core reports the trap halt,
+  the adapter reports PC + 1, counted in the ledger (`mapped.jam_pc`: 120,000 tests, the 12 JAM files).
+- **`bus`.** `write_cap = 8`: the reference's writes (at most 3, for BRK) against every `mem_write`. Dummy reads are
+  not compared: the core does not make them, and an extra read would show as an unlisted read.
+- **Hooks.** `on_decode` is stubbed to "never ablate".
+- **Groups.** documented (151 files), undocumented (85), unstable (8: ANE LXA SHA SHA TAS SHY SHX LAS), jam (12).
+- **Test names are not unique** within a file (the name is the instruction bytes): `--test` selects every test of
+  that name.
+- **Source.** The vectors are pinned at SingleStepTests/65x02 commit `2f6980a2d95757486c7bee24355c360e40e2a224`;
+  the ledger records each file's SHA-256.
+
 ### Adding an ISA
 
 An adapter is a class with:
@@ -235,15 +270,17 @@ An adapter is a class with:
 - `state_values(json_state)`: the default is a flat key lookup; override it for nested layouts;
 - `glue(core_text)`: the WGSL `zt_load_state` / `zt_store_state`, plus stubs for any hooks the core calls that the
   host does not provide; it sets `passthrough`;
-- `postprocess(batch, outputs)`: convention mappings, returning counts;
+- `postprocess(batch, outputs)`: convention mappings, returning counts (it may also set an expectation the vectors
+  do not encode, as the 6502 adapter does for `halted`);
+- optionally `write_cap` and `bus_writes(test)`: compare the sequence of memory writes against the vector's cycles;
 - `predicate(name, batch, outputs)`: named conditions for rules;
 - `instruction_bytes(test)` and `compact_state(state)`, for reports.
 
 Register it in `ADAPTERS` (`tools/ztest/vectors/session.py`) and the `vectors` command's `isa` choices, and write
 `test/vectors/<isa>/expected-<version>.json`. For the planned targets:
 
-- **6502 (SingleStepTests/65x02).** Flat state `pc s a x y p` and 16-bit RAM: the default parser fits. JAM opcodes
-  need a halted convention, like HALT-PC.
+- **65C02 (SingleStepTests/65x02 `wdc65c02` and others).** As the 6502 adapter, with the CMOS opcode set; `cb` and
+  `db` (WAI, STP) are empty files.
 - **8086/8088 (hardware-generated).** Registers are nested under `regs`, so override `state_values`. Addresses are
   20-bit (`addr_bits = 20`), so only `sparse` memory applies. The prefetch queue fields are not architectural state
   and are not compared.
@@ -261,6 +298,15 @@ python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analyti
     --md test/baselines/z80-v0.2.0.md --analysis test/baselines/z80-v0.2.0.analysis.md
 ```
 
+The 6502 baseline for 0.3.0-dev (2,560,000 tests, zero divergences, zero rules; ledger SHA-256
+`5ca3f2b4b3726d5bad30f686c840d623f7c9d88db2a5ede759ace5b59d576f84`, reproduced by two runs) was made with:
+
+```sh
+python -I tools/zt.py vectors 6502 ../zilion-vectors/6502 \
+    --json test/baselines/6502-v0.3.0-dev.json --run-json build/test/6502-v0.3.0-dev.run.json \
+    --md test/baselines/6502-v0.3.0-dev.md --analysis test/baselines/6502-v0.3.0-dev.analysis.md
+```
+
 **Workflow for the Z80 fixes (work item 3).**
 
 1. Copy `expected-0.2.0.json` to `expected-<new version>.json`.
@@ -275,10 +321,11 @@ A future CI gate should fail on any unexpected divergence (exit 1) and on any ru
 
 - `python -I -m unittest discover -s test/harness` runs the GPU-free unit tests: parser validation of malformed
   data, rule patterns, the rules files, WGSL symbol detection, the reference file set.
-- `python -I tools/zt.py selftest --vectors <z80 dir>` checks the harness itself:
+- `python -I tools/zt.py selftest --vectors <z80 dir> --vectors-6502 <6502 dir>` checks the harness itself:
   1. **host-probe.** A probe core drives every host path with 15 planted cases (listed, unlisted and final-only
-     memory; stray writes; wrap at 0xFFFF; port reads and writes) in both memory models. The ledger must report
-     exactly the planted divergences.
+     memory; stray writes; wrap at 0xFFFF; port reads and writes) in both memory models, and 8 more cases through the
+     bus-write log (a missing write, an extra one, a wrong value, a swapped order). The ledger must report exactly
+     the planted divergences.
   2. **rule-cases.** Hand-derived hardware results for IN A,(n), IN B,(C), INI and a repeating LDIR run on the
      real core. For each:
      - the case the rule is for must be explained;
@@ -289,8 +336,13 @@ A future CI gate should fail on any unexpected divergence (exit 1) and on any ru
   3. **mutants.** Single-line mutations of the Z80 core: R not incremented, wrong PUSH byte, wrong INC flags, a wrong
      SCF X/Y that is not the Q effect, a wrong BIT n,(HL) X/Y that is not the WZ effect, DJNZ never branching, HALT
      not halting, a NOP that reads or writes memory. Each must produce unexpected divergences in the field it breaks.
-     Mutants whose vector files are absent are skipped and say so.
-  4. **memory-model invariance.** `sparse` and `full` give identical ledgers on real vectors.
+     Mutants whose vector files are absent are skipped and say so. Then 18 mutations of the 6502 core: decimal ADC Z
+     from the BCD result and V from the binary sum, decimal SBC and ARR without their high-nibble adjustment, JMP
+     ($xxFF) carrying into the high byte, zp,X carrying into page 1, a (zp),Y pointer read from page 1, an RMW
+     without its old-value write and one writing the new value twice, ANE and LXA with other magic constants, SHA/SHX
+     without the + 1, PHP pushing B clear, PLP loading B, BRK through 0xFFFC, a JAM that does not halt, a NOP that
+     halts, TXS setting flags.
+  4. **memory-model invariance.** `sparse` and `full` give identical ledgers on real vectors (Z80 and 6502).
   5. **determinism.** Two sessions give the same canonical ledger, and repeated dispatches give identical bytes.
 
 ## Determinism

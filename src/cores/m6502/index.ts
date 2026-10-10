@@ -11,11 +11,33 @@
 //   - read-modify-write instructions that write twice (the old value, then the new one);
 //   - the generic decode hook name `on_decode(page, key)` with one page.
 
-import type { IsaCore, StateField } from "../../contract/isa.js";
-import { m6502CoreText, M6502_CORE_WGSL, M6502_JAM_OPCODES, M6502_UNSTABLE } from "./core.wgsl.js";
+import type { InstructionInfo, IsaCore, StateField } from "../../contract/isa.js";
+import { m6502CoreText, M6502_CORE_WGSL, M6502_DECODE, M6502_JAM_OPCODES, M6502_OPCODES, M6502_UNSTABLE } from "./core.wgsl.js";
 
-export { m6502CoreText, M6502_CORE_WGSL, M6502_JAM_OPCODES, M6502_UNSTABLE };
-export type { M6502Hooks } from "./core.wgsl.js";
+export { m6502CoreText, M6502_CORE_WGSL, M6502_DECODE, M6502_JAM_OPCODES, M6502_OPCODES, M6502_UNSTABLE };
+export type { M6502Hooks, M6502Mode } from "./core.wgsl.js";
+
+/** The 56 mnemonics of the MCS6500 programming manual. */
+const DOCUMENTED_MNEMONICS = new Set(
+  ("ADC AND ASL BCC BCS BEQ BIT BMI BNE BPL BRK BVC BVS CLC CLD CLI CLV CMP CPX CPY DEC DEX DEY EOR INC INX INY JMP " +
+    "JSR LDA LDX LDY LSR NOP ORA PHA PHP PLA PLP ROL ROR RTI RTS SBC SEC SED SEI STA STX STY TAX TAY TSX TXA TXS TYA").split(" "),
+);
+const UNSTABLE_MNEMONICS = new Set(["ANE", "LXA", "SHA", "SHX", "SHY", "TAS", "LAS"]);
+const LENGTH: Record<string, number> = { imp: 1, acc: 1, imm: 2, rel: 2, zp: 2, zpx: 2, zpy: 2, izx: 2, izy: 2, abs: 3, abx: 3, aby: 3, ind: 3 };
+
+/**
+ * One entry per opcode: mnemonic, bytes fetched when it runs to completion (BRK 2: its signature byte; JAM 1) and
+ * its family: `documented` (151; the undocumented duplicates NOP and SBC #EB excluded), `undocumented` (85, stable),
+ * `unstable` (8: ANE LXA SHA ×2 SHX SHY TAS LAS) or `jam` (12).
+ */
+function table(): readonly InstructionInfo[] {
+  return M6502_OPCODES.map(({ mnemonic, mode }, op) => {
+    const documented = DOCUMENTED_MNEMONICS.has(mnemonic) && !(mnemonic === "NOP" && op !== 0xea) && op !== 0xeb;
+    const family =
+      mnemonic === "JAM" ? "jam" : UNSTABLE_MNEMONICS.has(mnemonic) ? "unstable" : documented ? "documented" : "undocumented";
+    return { page: 0, key: op, mnemonic, length: LENGTH[mode], families: [family] };
+  });
+}
 
 const STATE: readonly StateField[] = [
   { name: "a", bits: 8, wgsl: "m6502_a", randomizable: true },
@@ -103,6 +125,7 @@ export const m6502: IsaCore = {
   },
   defaultVariant: "nmos",
   compat: ["0.3"],
+  table,
   wgsl(o) {
     const variant = o.variant ?? this.defaultVariant;
     if (!(variant in this.variants)) throw new Error(`m6502: unknown variant '${variant}'`);

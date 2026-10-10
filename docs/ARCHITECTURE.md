@@ -20,7 +20,7 @@ Algocell's `experiments/planning/ZILION_DESIGN_2026-10-10.md`; the differences a
  L2  engine      src/engine/        createEngine · Machine · Batch · chunking · typed results
  L1  world       src/world/         buildMachine · memory models · init · budgets · halting · outputs
      manifest    src/manifest.ts    the JSON contract for hosts in any language
- L0  cores       src/cores/<isa>/   z80 (stable) · m6502, bff (skeletons)
+ L0  cores       src/cores/<isa>/   z80 (stable) · m6502 (experimental) · bff (skeleton)
      contract    src/contract/      IsaCore descriptor · host contract v2 · ring address math
  ──────────────────────────────────────────────────────────────────────────────────────────────────
      0.2 API     src/legacy/        Zilion · buildComputeShader (byte-identical 0.2 kernel)
@@ -83,12 +83,12 @@ Halt reasons (`haltReason`): 0 running (budget exhausted), 1 `halt-insn` (the IS
 halts on it (as-chip) or a world policy or dial made it halt, and 0 when the lane did not halt on a trap (still
 running, for instance after an ignored trap, or halted by the host). Each core names it with `symbols.trapCause`, a
 u32 expression over its state fields, so it survives a state store and load: the Z80 derives it from `halted`
-(HALT is its only halting trap: `halt-insn` exactly when `halted` = 1), and the skeletons keep a `trap` state field
-that every trap path sets as it halts, reported only while `halted` says trap
+(HALT is its only halting trap: `halt-insn` exactly when `halted` = 1), and the 6502 and the BFF skeleton keep a
+`trap` state field that every trap path sets as it halts, reported only while `halted` says trap
 (`select(0u, m6502_trap, m6502_halted == ZIL_HALT_TRAP)`). A core with a real vector continues after a vectored
-trap and reports 0; the skeletons have none and halt on any decision but `ignore`. A Z80 HALT, a 6502 JAM
-(`illegal`), an unimplemented opcode and a BFF run-off (`bounds`) are therefore told apart in the outputs;
-`haltReason` keeps its four codes.
+trap and reports 0; the 6502 and BFF have none and halt on any decision but `ignore`. A Z80 HALT, a 6502 JAM
+(`illegal`), a BFF run-off (`bounds`) and an opcode a skeleton does not implement (`unimplemented`) are therefore
+told apart in the outputs; `haltReason` keeps its four codes.
 
 ### The Z80 core
 
@@ -110,6 +110,46 @@ insertion point. Order within `z80_step`:
 
 Semantics are 0.2's in every configuration: no MEMPTR (WZ), a wasted DD/FD prefix adds 2 to R, IN reads 0
 and OUT is a no-op unless the io hooks say otherwise. The fixes come in a separate, `compat`-gated step.
+
+### The 6502 core
+
+`src/cores/m6502/` is the NMOS 6502: all 256 opcodes (151 documented, 85 stable undocumented, 8 unstable, 12 JAM),
+with the semantics of SingleStepTests/65x02 `6502/v1`. Every one of its 2,560,000 vectors matches with no
+expected-divergence rules (`test/baselines/6502-v0.3.0-dev.md`). Status `experimental`, core version 0.3.0,
+variant `nmos`, compat `'0.3'`.
+
+- **Structure.** A random program puts a different opcode on nearly every lane, and a switch over opcodes runs
+  its cases one after another for a SIMD group. The step is therefore a fixed sequence of short phases that every
+  lane walks, each driven by a per-opcode decode word generated from an explicit 256-entry opcode table
+  (`M6502_OPCODES`, `M6502_DECODE`): opcode fetch and hooks, operand bytes, effective address, read and
+  read-modify-write, ALU, store, control flow and stack. This made it 2.7 times faster on random code than the
+  first, switch-per-opcode version, with identical results.
+- **Bus order.** The phases are in the order of each instruction's bus accesses, which a small ring makes visible:
+  JSR pushes its return address before it fetches the high byte of its target; BRK fetches its signature byte,
+  pushes PC + 2 and P, then reads its vector at 0xFFFE/0xFFFF (ring positions 65534 and 65535 mod P), so with the
+  stack at the end of a ring of 32 or 64 bytes it jumps to its own pushed return address.
+- **Writes.** A read-modify-write instruction (ASL ROL LSR ROR INC DEC on memory, SLO RLA SRE RRA DCP ISC) writes
+  the old value, then the new one, as the chip does: two `mem_write` calls, so **`writeCounts` counts two writes**
+  per RMW instruction (in the segment of its target). Dummy *reads* are not made: a read has no effect in a world,
+  and only instruction-stream bytes are hooked.
+- **NMOS quirks.** Zero-page indexing and the (zp,X)/(zp),Y pointer bytes wrap inside page 0 before the world maps
+  the address; JMP ($xxFF) reads its high byte from $xx00; the stack is page 1 (S wraps inside it); NMOS decimal
+  mode (ADC: Z from the binary sum, N and V after the low-nibble adjustment; SBC: binary flags); PHP and BRK push
+  B and bit 5 set, PLP and RTI load B clear and bit 5 set. There is no IRQ or NMI line, so I only changes the byte
+  PHP and BRK push.
+- **Unstable opcodes.** The constants the vectors encode: ANE and LXA with magic 0xEE (the unique fit over each
+  file's 10,000 tests); SHA, SHX, SHY and TAS store the value AND (H + 1), H the high byte of the base address, and
+  a page crossing replaces the target's high byte with the value; LAS loads A, X and S with memory AND S.
+- **Halting.** The 12 JAM opcodes raise trap `illegal`: as-chip the lane halts (`halted` = 3, `trap` = 1) with PC
+  parked on the opcode; `ignore` makes JAM a 1-byte no-op. On random code most lanes reach a JAM: 73.5% of random
+  32-byte pairs within 128 steps.
+- **World reset.** P = 0x20 (bit 5 set, every flag clear), A = X = Y = S = PC = 0. Both stack conventions give the
+  S for which `0x0100 | S` aliases t: on the 6502 the stack pointer addresses the byte the next push writes, so
+  `topAliases` and `firstPushAt` coincide.
+- **Throughput** (`node test/bench/bench-cores.mjs`, Apple M4, 1,048,576 random pairs [16,16] on a ring of 32,
+  median of 7 dispatches): at 128 steps the 6502 takes 62 ms with JAM halting (mean 50 steps run) and 84 ms with
+  JAM ignored (every lane runs 128 steps: 1.6 G steps/s), the Z80 125 ms (mean 121 steps: 1.0 G steps/s); at 512
+  steps 187 ms, 294 ms and 452 ms.
 
 ### Anchors
 
@@ -365,7 +405,8 @@ b.encode(encoder, { budget: 64, stepBase: 128, resume: true });   // continue th
 |---|---|
 | `npm run check:bytes` | byte identity of the 0.2 configuration against the v0.2.0 tag (built from source) and the published 0.2.0 package; anchors in all hook combinations |
 | `npm run test:unit` | address math, hash, SHA-256, validation, hook minimality, manifest invariants, chunk planner, packing, ISA neutrality; the required budget and stack and their error messages, presets, `firstPushAt` mappings, the trap-cause plumbing, core-param validation and constants (test-only core), the step base and resumability |
-| `npm run test:world` | the world spec on the GPU through `gpu_runner.py` (Python wgpu): hand-computed cases for odd and padded rings, the seam, stack conventions (`firstPushAt` on the Z80 and the 6502), budgets, halt and trap policies with trap causes, dials, ablation, maps, init, io hooks; ring = mask, hook neutrality, library = kernel, chunk invariance, 0.2 kernel = the `compat:'0.2'` preset; resumable runs (k = 1, 2, 7 dispatches = one, Z80 and BFF, with a negative control; the step base across 2³²; a hand-built record; library `zil_resume`); core params on a test-only core; the 6502 and BFF skeletons and one world on three ISAs. Set `ZILION_PYTHON` to an interpreter with `wgpu` and `numpy`. |
+| `npm run test:world` | the world spec on the GPU through `gpu_runner.py` (Python wgpu): hand-computed cases for odd and padded rings, the seam, stack conventions (`firstPushAt` on the Z80 and the 6502), budgets, halt and trap policies with trap causes, dials, ablation, maps, init, io hooks; ring = mask, hook neutrality, library = kernel, chunk invariance, 0.2 kernel = the `compat:'0.2'` preset; resumable runs (k = 1, 2, 7 dispatches = one, Z80 and BFF, with a negative control; the step base across 2³²; a hand-built record; library `zil_resume`); core params on a test-only core; the 6502 on rings of 32, 33 and 64 bytes (zero page, stack page, the 0xFFFE vector, JSR and BRK bus order, JMP ($xxFF), pointer wraps, the 12 JAMs, RMW write counts, budgets, a self-copier, ring = mask and hook neutrality on random code); the BFF skeleton and one world on three ISAs. Set `ZILION_PYTHON` to an interpreter with `wgpu` and `numpy`. |
+| `npm run test:vectors:6502` | the 6502 against SingleStepTests 6502/v1 (docs/TESTING.md); `npm run test:harness` includes 18 planted 6502 bugs |
 | `npm run test:algocell` | 33 conditions against the executors Algocell exported with 0.2.0 (20,000 random pairs each) |
 | `npm run test:engine` | the engine's ordering and lifecycle on a mock device (no GPU): read snapshots, the 0.2 facade's buffer lifetime and destroy races, staging within `maxBufferSize`, the step base and resume params and the record upload per chunk, `trapCause` decoding |
 | `test/engine.html` | the engine and the facade on browser WebGPU (`node scripts/serve.mjs`), including a run split into k = 1, 2, 7 resumed dispatches and a batch resumed in place |
@@ -429,12 +470,12 @@ manifest (the world as given, `core`, `init`, `budget`, `record`, the options ha
 | `world.outputs.memory` | true | |
 | `world.outputs.state` | true | resumable runs need it |
 | `world.outputs.fetchMap`, `startMap`, `writeCounts` | false | |
-| `world.halting.traps.<cause>` | `'as-chip'` (Z80 HALT halts; 6502 JAM and unimplemented halt; BFF bounds, unmatched and unimplemented halt) | |
+| `world.halting.traps.<cause>` | `'as-chip'` (Z80 HALT halts; 6502 JAM halts; BFF bounds, unmatched and unimplemented halt) | |
 | `world.halting.lethal` | none; when given, `probability` 1 and `salt` 0 | |
 | trap dial `salt` | 0 | |
 | `world.ablation` | none | |
 | `variant` | `isa.defaultVariant`: Z80 `classic`, 6502 `nmos`, BFF `ascii` | recorded in `manifest.core` |
-| `compat` | `isa.compat[0]`: Z80 `'0.2'`, 6502 and BFF `'skeleton'` | recorded in `manifest.core` |
+| `compat` | `isa.compat[0]`: Z80 `'0.2'`, 6502 `'0.3'`, BFF `'skeleton'` | recorded in `manifest.core` |
 | core `params` | each declared parameter's `default` | recorded in `manifest.core.params` |
 | `mode` | `'kernel'` | |
 | `workgroupSize` | 64 | |
@@ -448,15 +489,17 @@ manifest (the world as given, `core`, `init`, `budget`, `record`, the options ha
    let the builder generate all of them, the same way for every ISA.
 3. **`on_reset` is called by the world** (`zil_begin`, after the init conventions), not by the core.
 4. **Names.** The decode hook keeps the Z80's 0.2 name `on_fetch_opcode(prefix, op)`; the descriptor declares
-   each core's decode-hook name and parameters (`on_decode(page, key)` for the skeletons). Port hooks are
+   each core's decode-hook name and parameters (`on_decode(page, key)` for the 6502 and BFF). Port hooks are
    `io_in`/`io_out`. Library functions are `zil_begin`, `zil_run`, `zil_load_memory`, `zil_store_memory`,
    `zil_store_record`, `zil_load_state`.
 5. **Trap causes** gained `halt-insn` (so a world can make HALT a no-op), `bounds` (BFF) and `unimplemented`
    (skeletons); the design's `illegal` policy is the `illegal` trap cause.
 6. **Not yet implemented:** `storage` and `sparse` memory models and packed memory; `lethal.decode`; `storage`
    ablation tables; `cycles` budgets; many worlds per dispatch and a params ring for several encodes per submit;
-   the CPU twin; `table()`, `disassemble()` and vector adapters on the descriptor.
+   the CPU twin; `disassemble()` and vector adapters on the descriptor (the adapters live in the test harness,
+   `tools/ztest/vectors/`). `table()` exists for the 6502 (mnemonic, length, family per opcode).
 7. **Write counts:** one counter per segment plus one for padding; Algocell counts padding writes as B's, which
-   is the sum of the last two.
+   is the sum of the last two. Every `mem_write` counts: a 6502 read-modify-write instruction counts two (old
+   value, then new), as the chip writes twice.
 8. **The dial threshold** is `round(p · 2³²)` (BFF's convention); Algocell's Z80 dial floors it and uses a PCG
    stream, reproduced exactly through raw hooks.

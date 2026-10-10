@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as Z from "../dist/index.js";
 import { m6502 } from "../dist/cores/m6502/index.js";
+import * as M6502 from "../dist/cores/m6502/index.js";
 import { bff } from "../dist/cores/bff/index.js";
 import { fakeCore } from "./world/fake_core.mjs";
 
@@ -463,6 +464,26 @@ test("resumable machines: a steps budget, the state and the memory stored; the p
   eq(lib({ memory: "m", out: "o" }).resumable, true);
   if (!lib({ memory: "m", out: "o" }).functions.includes("zil_resume(lane, seed, step_base: vec2<u32>, o)")) throw new Error("zil_resume not listed");
   eq(lib({ memory: "m" }).resumable, false);
+});
+
+// --- the 6502 opcode table ----------------------------------------------------------------------------------------
+test("6502 table: 151 documented, 85 stable undocumented, 8 unstable, 12 JAM; decode words agree with the table", () => {
+  const t = m6502.table();
+  eq(t.length, 256);
+  const count = {};
+  for (const e of t) count[e.families[0]] = (count[e.families[0]] ?? 0) + 1;
+  eq(Object.entries(count).sort(), [["documented", 151], ["jam", 12], ["undocumented", 85], ["unstable", 8]]);
+  eq(t.filter((e) => e.families[0] === "jam").map((e) => e.key), [0x02, 0x12, 0x22, 0x32, 0x42, 0x52, 0x62, 0x72, 0x92, 0xb2, 0xd2, 0xf2]);
+  eq(t.filter((e) => e.families[0] === "unstable").map((e) => e.key), [0x8b, 0x93, 0x9b, 0x9c, 0x9e, 0x9f, 0xab, 0xbb]);
+  eq([t[0x00], t[0x20], t[0x6c], t[0xea], t[0xeb], t[0x1a]].map((e) => `${e.mnemonic}/${e.length}/${e.families[0]}`),
+    ["BRK/2/documented", "JSR/3/documented", "JMP/3/documented", "NOP/1/documented", "SBC/2/undocumented", "NOP/1/undocumented"]);
+  // the decode word: addressing mode in bits 0-3, a read for every memory-operand load, two writes only for RMW
+  const { M6502_DECODE } = M6502;
+  eq(M6502_DECODE[0xad] & 0x1f, 0x15); // LDA abs: abs (5) + READ
+  eq(M6502_DECODE[0xee] & 0x3f, 0x35); // INC abs: abs + READ + RMW
+  eq(M6502_DECODE[0x9d] & 0xff, 0x86); // STA abs,X: abs,X (6) + STORE, no READ
+  eq(M6502_DECODE[0xea], 0);           // NOP: nothing
+  eq((M6502_DECODE[0x02] >> 20) & 15, 12); // JAM: control class 12
 });
 
 // --- engine chunk planner ---------------------------------------------------------------------------------------
