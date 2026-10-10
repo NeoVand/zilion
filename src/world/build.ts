@@ -131,7 +131,8 @@ function resolvePosition(p: Position, mem: MemPlan, what: string): number {
 
 /** The core and its compile-time choices, from either form of the MachineSpec (never both). */
 function selectCore(spec: MachineSpec): CoreSelection {
-  const s = spec as { core?: CoreSelection; isa?: IsaCore; variant?: string; compat?: string };
+  const s = spec as { core?: CoreSelection; isa?: IsaCore; variant?: string; compat?: string; params?: unknown };
+  if (s.params !== undefined) fail("core parameters go in core: { isa, params }, not beside isa");
   if (s.core !== undefined) {
     if (s.isa !== undefined || s.variant !== undefined || s.compat !== undefined) {
       fail("give the core either as core: { isa, variant?, compat?, params? } or as isa (with variant and compat beside it), not both");
@@ -157,6 +158,14 @@ export function buildMachine(spec: MachineSpec): BuiltMachine {
   const sel = selectCore(spec);
   const isa: IsaCore = sel.isa;
   if (!isa || typeof isa.wgsl !== "function") fail("spec.isa (or spec.core.isa) must be an IsaCore");
+  for (const k of ["step", "haltReason", "pc", "trapCause"] as const) {
+    const v = isa.symbols?.[k];
+    if (typeof v !== "string" || v.trim() === "") fail(`${isa.id}: symbols.${k} must be a WGSL ${k === "step" ? "function name" : "expression"}`);
+  }
+  for (const k of ["stackTop", "firstPushAt"] as const) {
+    const v = isa.conventions?.[k];
+    if (v !== null && typeof v !== "function") fail(`${isa.id}: conventions.${k} must be a function, or null for an ISA without a stack`);
+  }
   const world: WorldSpec = spec.world;
   if (!world) fail("spec.world is required");
   const mode = spec.mode ?? "kernel";
@@ -362,8 +371,10 @@ export function buildMachine(spec: MachineSpec): BuiltMachine {
   const ABL = mode === "kernel" ? "zil_params.ablation" : names.ablation;
 
   // Resumable: a lane can continue from its record and memory. Needs a step budget (fetched-byte budgets would
-  // need the per-lane fetch count and step index carried too), the state in the record, and stored memory.
-  const resumable = unit === "steps" && out.state && (mode === "kernel" ? out.memory : !!MEM && !!OUT);
+  // need the per-lane fetch count and step index carried too), the state in the record, and stored memory; and no
+  // per-lane state of the raw hooks' own (a `var<private>` in hooks.declarations), which no record carries.
+  const hookPrivates = /\bvar\s*<\s*private\s*>/.test(raw.declarations ?? "");
+  const resumable = unit === "steps" && out.state && !hookPrivates && (mode === "kernel" ? out.memory : !!MEM && !!OUT);
   const padBytes = mem.padding ? mem.padding.to - mem.padding.from : 0;
   const padWords = resumable ? Math.ceil(padBytes / 4) : 0;
 

@@ -174,8 +174,9 @@ export interface ShaderManifest {
   readonly trapCauses: Readonly<Record<string, number>>;
   /**
    * Whether a dispatch can continue lanes from their previous record and memory (params role `resume`): the world
-   * counts `steps`, and stores the state and the memory. What a lane carries over: memory (and padding, in the
-   * record), the state record, steps, write counts and maps; the dials continue through `stepBase`.
+   * counts `steps`, stores the state and the memory, and its raw hooks declare no private state. What a lane carries
+   * over: memory (and padding, in the record), the state record, steps, write counts and maps; the dials continue
+   * through `stepBase`.
    */
   readonly resumable: boolean;
   readonly ablation: {

@@ -109,7 +109,8 @@ export interface OutputSpec {
  * hook can use the world privates `zil_lane`, `zil_seed`, `zil_step` and `zil_step_hi` (the low and high words of
  * the 64-bit index of the current step: the dispatch's step base plus the steps run since it began) and
  * `zil_draw(salt) -> u32`, the world's dial draw for the current step. A hook that keeps private state of its own
- * (`declarations`) is not resumable: only the state record, memory and record outputs carry over to a resumed run.
+ * (a `var<private>` in `declarations`) makes the machine non-resumable (`manifest.resumable` false): only the state
+ * record, memory and record outputs carry over to a resumed run.
  */
 export interface RawHooks {
   /** Module-scope declarations (private variables, helper functions) the bodies below use. */

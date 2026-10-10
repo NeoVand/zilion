@@ -80,7 +80,9 @@ export interface MachineRunOptions {
   /**
    * Continue lanes instead of beginning them: their previous records (lanes × manifest.record.wordsPerLane, e.g.
    * the `record` of the previous result), with their previous memory as the input. Needs `manifest.resumable`.
-   * The state, steps, write counts, maps and padding carry over; the raw on_reset hook does not run again.
+   * The state, steps, write counts, maps and padding carry over; the raw on_reset hook does not run again. With
+   * per-lane budgets, give each lane its remaining budget capped at the steps of this dispatch, so that every lane
+   * still running has run exactly `stepBase` steps (the engine cannot check this).
    */
   readonly resume?: Uint32Array;
   /** Cap on lanes per dispatch (default: as many as the device limits allow). */
@@ -307,7 +309,9 @@ export class Batch {
   /**
    * Record a run of the first `lanes` lanes (default: all) into `enc`. `resume: true` continues the lanes from the
    * records and memory resident in the batch (the outputs of the previous encode, or uploaded ones) instead of
-   * beginning them; `stepBase` is the dial index of their first step in this run (the steps already run).
+   * beginning them; `stepBase` is the dial index of their first step in this run (the steps already run). The params
+   * are written when encode is called, so submit each encode before the next: several resumed encodes in one
+   * encoder would all run with the last step base.
    */
   encode(enc: GPUCommandEncoder, o: BatchRunOptions = {}): void {
     const lanes = o.lanes ?? this.capacity;

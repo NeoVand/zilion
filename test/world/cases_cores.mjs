@@ -59,6 +59,9 @@ const CASES = [
       return [
         addJob({ isa: m6502, world: ring(32, { init: { stack: FIRST }, halting: { traps: { illegal: "ignore" } } }) },
           [{ mem: mem(32, { 0: [0x02, 0xa9, 0x07, 0x02] }), expect: { steps: 3, halt: "running", trap: 0, state: { a: 7, pc: 4, trap: 0 } } }], { budget: 3 }),
+        // a trap field set by hand on a lane that never halts on a trap is not reported
+        addJob({ isa: m6502, world: ring(32, { init: { stack: FIRST, set: { trap: 4 } } }) },
+          [{ mem: mem(32, {}, 0xea), expect: { steps: 5, halt: "running", trap: 0, state: { trap: 4 } } }], { budget: 5 }),
         addJob({ isa: m6502, world: ring(32, { init: { stack: FIRST }, halting: { lethal: { firstUnit: 0xea } } }) },
           [{ mem: mem(32, { 0: [0xa9, 0x01, 0xea] }), expect: { steps: 2, halt: "host", trap: 0, state: { a: 1, pc: 2 } } }]),
         addJob({ isa: m6502, world: ring(32, { init: { stack: FIRST }, ablation: { table: "uniform" } }) },

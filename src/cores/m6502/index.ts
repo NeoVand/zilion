@@ -115,7 +115,12 @@ export const m6502: IsaCore = {
   endianness: "little",
   state: STATE,
   internals: [],
-  symbols: { step: "m6502_step", haltReason: "m6502_halted", pc: "m6502_pc", trapCause: "m6502_trap" },
+  symbols: {
+    step: "m6502_step",
+    haltReason: "m6502_halted",
+    pc: "m6502_pc",
+    trapCause: "select(0u, m6502_trap, m6502_halted == ZIL_HALT_TRAP)", // the cause only of a halt on a trap
+  },
   hooks: ["fetch", "instructionStart", "trap"],
   decode: {
     fn: "on_decode",

@@ -37,7 +37,8 @@ first. The two skeletons in `src/cores/m6502/` and `src/cores/bff/` are short, c
 - **The trap cause** that halted the core, as a `ZIL_TRAP_<CAUSE>` code (0 otherwise), recoverable from state
   fields alone. A core whose only halting trap is evident from its halt state can derive it (the Z80:
   `select(0u, ZIL_TRAP_HALT_INSN, cpu_halted == 1u)`); otherwise keep a state field for it (the skeletons'
-  `trap`, set next to `halted` in every trap path).
+  `trap`, set next to `halted` in every trap path) and report it only while the halt reason says trap
+  (`select(0u, m6502_trap, m6502_halted == ZIL_HALT_TRAP)`), so a running lane never reports a cause.
 - **Core parameters**, if the descriptor declares any, are read only through the builder's constants
   `ZIL_PARAM_<NAME>` (and `ZIL_PARAM_<NAME>_<VALUE>` for enum values; see docs/ARCHITECTURE.md, Core parameters).
   They are compile-time constants, so branching on them costs nothing. Never turn one into a uniform.

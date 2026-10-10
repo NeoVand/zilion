@@ -81,11 +81,14 @@ Halt reasons (`haltReason`): 0 running (budget exhausted), 1 `halt-insn` (the IS
 
 **Trap cause.** The lane record carries `trapCause`: the code of the trap that halted the lane, whether the chip
 halts on it (as-chip) or a world policy or dial made it halt, and 0 when the lane did not halt on a trap (still
-running, halted by the host, or the trap was ignored or vectored). Each core names it with `symbols.trapCause`, a
+running, for instance after an ignored trap, or halted by the host). Each core names it with `symbols.trapCause`, a
 u32 expression over its state fields, so it survives a state store and load: the Z80 derives it from `halted`
 (HALT is its only halting trap: `halt-insn` exactly when `halted` = 1), and the skeletons keep a `trap` state field
-that every trap path sets before it halts. A Z80 HALT, a 6502 JAM (`illegal`), an unimplemented opcode and a BFF
-run-off (`bounds`) are therefore told apart in the outputs; `haltReason` keeps its four codes.
+that every trap path sets as it halts, reported only while `halted` says trap
+(`select(0u, m6502_trap, m6502_halted == ZIL_HALT_TRAP)`). A core with a real vector continues after a vectored
+trap and reports 0; the skeletons have none and halt on any decision but `ignore`. A Z80 HALT, a 6502 JAM
+(`illegal`), an unimplemented opcode and a BFF run-off (`bounds`) are therefore told apart in the outputs;
+`haltReason` keeps its four codes.
 
 ### The Z80 core
 
@@ -124,7 +127,8 @@ commitment holds through 0.3.x:
 
 ## L1: the world spec
 
-`buildMachine({ isa, world, mode?, workgroupSize?, variant?, compat?, bindingNames? })` returns
+`buildMachine({ isa, world, mode?, workgroupSize?, variant?, compat?, bindingNames? })`, or with core parameters
+`buildMachine({ core: { isa, variant?, compat?, params? }, world, … })`, returns
 `{ wgsl, manifest }` (`src/world/spec.ts`, `src/world/build.ts`).
 
 ### Memory models and the seam
@@ -227,13 +231,16 @@ A run can be split across dispatches and give exactly what one long dispatch giv
 - the padding bytes, which memory never stores, through the record field `padding`.
 
 Core internals are per-instruction temporaries and carry nothing between steps (an obligation on cores); `on_reset`
-does not run again; private state that a raw hook declares does not carry over. The host passes, per dispatch, the
-steps already run as `stepBase`: with a `steps` budget every lane still running has run exactly that many (a lane
-that halted takes no further steps and draws nothing), so every draw sees the step index of the long run. A machine
-is resumable (`manifest.resumable`) when its budget unit is `steps` and it stores the state and the memory;
-`fetchBytes` budgets are not resumable (the fetch count and the per-lane step index would have to carry over too).
-Per-lane budgets resume when the host gives each lane its remaining budget, capped at the dispatch's step count.
-Library mode offers the same through `zil_begin_at(lane, seed, step_base)` and `zil_resume(lane, seed, step_base, o)`.
+does not run again. The host passes, per dispatch, the steps already run as `stepBase`: with a `steps` budget every
+lane still running has run exactly that many (a lane that halted takes no further steps and draws nothing), so every
+draw sees the step index of the long run. A machine is resumable (`manifest.resumable`) when its budget unit is
+`steps`, it stores the state and the memory, and its raw hooks declare no private state (`var<private>` in
+`hooks.declarations`, such as Algocell's PCG streams: no record carries it). `fetchBytes` budgets are not resumable
+(the fetch count and the per-lane step index would have to carry over too). Per-lane budgets resume when the host
+gives each lane its remaining budget, capped at the dispatch's step count (the engine cannot check this). The
+record's `steps` is a u32 total and wraps after 2³² steps; the dial index is 64-bit. `Batch.encode` writes the
+params when it is called, so each resumed encode must be submitted before the next. Library mode offers the same
+through `zil_begin_at(lane, seed, step_base)` and `zil_resume(lane, seed, step_base, o)`.
 
 ### Raw hooks (escape hatch)
 

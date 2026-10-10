@@ -22,7 +22,7 @@ export const fakeCore = {
     { name: "trap", bits: 8, wgsl: "fake_trap" },
   ],
   internals: [],
-  symbols: { step: "fake_step", haltReason: "fake_halted", pc: "fake_pc", trapCause: "fake_trap" },
+  symbols: { step: "fake_step", haltReason: "fake_halted", pc: "fake_pc", trapCause: "select(0u, fake_trap, fake_halted == ZIL_HALT_TRAP)" },
   hooks: [],
   decode: null,
   conventions: {

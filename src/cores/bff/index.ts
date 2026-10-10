@@ -91,7 +91,12 @@ export const bff: IsaCore = {
   endianness: "little",
   state: STATE,
   internals: [],
-  symbols: { step: "bff_step", haltReason: "bff_halted", pc: "bff_ip", trapCause: "bff_trap" },
+  symbols: {
+    step: "bff_step",
+    haltReason: "bff_halted",
+    pc: "bff_ip",
+    trapCause: "select(0u, bff_trap, bff_halted == ZIL_HALT_TRAP)", // the cause only of a halt on a trap
+  },
   hooks: ["fetch", "instructionStart", "trap"],
   decode: {
     fn: "on_decode",

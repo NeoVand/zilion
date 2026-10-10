@@ -306,6 +306,16 @@ test("trapCause: a record word after haltReason, codes in the manifest, from eac
   }
   eq(Z.legacyMachine(64).manifest.record.fields.map((f) => f.name), ["regs16"]); // the 0.2 record is unchanged
   eq(Z.z80.symbols.trapCause, "select(0u, ZIL_TRAP_HALT_INSN, cpu_halted == 1u)");
+  // the skeletons report their trap field only while halted on a trap (a state load or init.set cannot fake one)
+  eq(m6502.symbols.trapCause, "select(0u, m6502_trap, m6502_halted == ZIL_HALT_TRAP)");
+  eq(bff.symbols.trapCause, "select(0u, bff_trap, bff_halted == ZIL_HALT_TRAP)");
+  // descriptors are checked: every symbol, and both stack conventions functions or both null
+  const { trapCause: _t, ...noCause } = Z.z80.symbols;
+  throws(() => Z.buildMachine({ isa: { ...Z.z80, symbols: noCause }, world: ring(32) }), /symbols\.trapCause must be a WGSL expression/);
+  throws(() => Z.buildMachine({ isa: { ...Z.z80, conventions: { ...Z.z80.conventions, firstPushAt: undefined } }, world: ring(32) }),
+    /conventions\.firstPushAt must be a function, or null/);
+  throws(() => Z.buildMachine({ isa: { ...Z.z80, conventions: { ...Z.z80.conventions, firstPushAt: null } }, world: ring(32) }),
+    /must both be functions or both be null/);
   // every trap cause a skeleton raises sets its state field before halting (both with and without the trap hook)
   for (const [core, causes] of [[m6502, ["ILLEGAL", "UNIMPLEMENTED"]], [bff, ["BOUNDS", "UNIMPLEMENTED"]]]) {
     for (const trap of [false, true]) {
@@ -347,7 +357,8 @@ test("core params (test-only fake core): validation, WGSL constants ahead of the
   throws(() => fb({ mode: 1 }), /param 'mode' must be one of/);
   throws(() => fb([1, 2]), /core\.params must be an object/);
   throws(() => Z.buildMachine({ core: { isa: Z.z80, params: { q: true } }, world: ring(32) }), /z80 has no param 'q' \(it declares none\)/);
-  // the two forms of the core are not mixed
+  // the two forms of the core are not mixed, and params never sit beside isa
+  throws(() => Z.buildMachine({ isa: fakeCore, params: { scale: 2 }, world: w }), /go in core: \{ isa, params \}/);
   throws(() => Z.buildMachine({ core: { isa: fakeCore }, isa: fakeCore, world: w }), /not both/);
   throws(() => Z.buildMachine({ core: { isa: fakeCore }, compat: "test", world: w }), /not both/);
   eq(Z.buildMachine({ core: { isa: Z.z80, compat: "0.2" }, world: ring(32) }).wgsl, build(ring(32), { compat: "0.2" }).wgsl);
@@ -405,6 +416,9 @@ test("resumable machines: a steps budget, the state and the memory stored; the p
   // padding rides in the record only when the machine is resumable
   eq(build({ ...Z.algocellPairWorld({ L: 16, P: 37, steps: 9 }) }).manifest.record.fields.at(-1), { name: "padding", offset: 31, words: 2 });
   eq(build({ ...Z.algocellPairWorld({ L: 16, P: 37, steps: 9 }), outputs: { memory: false } }).manifest.record.fields.some((f) => f.name === "padding"), false);
+  // raw hooks with private state of their own (Algocell's PCG streams) are not resumable; stateless helpers are
+  eq(build(ring(32, { hooks: { declarations: "var<private> pcg: u32;\nfn draw() -> u32 { pcg = pcg * 3u; return pcg; }", onReset: "pcg = zil_lane;" } })).manifest.resumable, false);
+  eq(build(ring(32, { hooks: { declarations: "fn twice(x: u32) -> u32 { return 2u * x; }" } })).manifest.resumable, true);
   // library mode: zil_resume exists when the host names memory and out
   const lib = (names) => build(ring(32), { mode: "library", bindingNames: names }).manifest;
   eq(lib({ memory: "m", out: "o" }).resumable, true);
