@@ -207,6 +207,42 @@ class Z80Adapter:
         val = (fb.mem_init & 0xFF).astype(np.int64)
         return np.where(hit.any(1), val[np.arange(fb.n), hit.argmax(1)], -1)
 
+    def _in_model(self, name: str, fb: FileBatch, out: LaneOutputs) -> np.ndarray:
+        """IN with a non-zero port value: the vector's result follows the value; Zilion 0.2.0 follows a read of 0
+        (its documented behaviour), with its own flag formula; nothing else differs. Tests whose port value is 0
+        are excluded: there the core must match the vector exactly."""
+        s0, s1, act = fb.state_in, fb.state_exp, out.state
+        v = np.where(fb.port_in_n > 0, fb.port_in[:, 0, 1].astype(np.int64), 0)
+        cond = v != 0
+        regs = ("b", "c", "d", "e", "h", "l", None, "a")
+        if name == "in_a_n_model":  # IN A,(n): A <- port; flags unaffected
+            return cond & (s1[:, IDX["a"]] == v) & (act[:, IDX["a"]] == 0)
+        op = int(fb.key.split()[-1], 16)
+        if name == "in_r_c_model":  # IN r,(C): r <- port (IN (C): flags only); F = S Z Y X P from the value, C kept
+            target = regs[(op >> 3) & 7]
+            f0 = (s0[:, IDX["f"]] & 0x01) | 0x44  # flags of a 0 read: Z and P/V (even parity), H = N = 0
+            cond &= act[:, IDX["f"]] == f0
+            for r in ("a", "b", "c", "d", "e", "h", "l"):
+                if r == target:
+                    cond &= (s1[:, IDX[r]] == v) & (act[:, IDX[r]] == 0)
+                else:
+                    cond &= s1[:, IDX[r]] == act[:, IDX[r]]
+            return cond
+        # INI/IND/INIR/INDR: (HL) <- port; B - 1; HL +/- 1; flags from the value, B and C +/- 1 (0.2.0 formula)
+        dec = (op & 0x08) != 0
+        hl = (s0[:, IDX["h"]] << 8) | s0[:, IDX["l"]]
+        b1 = (s0[:, IDX["b"]] - 1) & 0xFF
+        k = (s0[:, IDX["c"]].astype(np.int64) + (-1 if dec else 1)) & 0xFF  # 0 + (C +/- 1)
+        par = np.array([bin(x).count("1") % 2 == 0 for x in range(256)])
+        f0 = (b1 & 0xA8) | np.where(b1 == 0, 0x40, 0) | np.where(par[(k & 7) ^ b1], 0x04, 0)
+        cond &= act[:, IDX["f"]] == f0
+        at = fb.mem_addr == hl[:, None]
+        slot = np.arange(fb.mem_addr.shape[1])[None, :] < fb.mem_n[:, None]
+        val = (out.mem_word[:, : fb.mem_addr.shape[1]] & 0xFF).astype(np.int64)
+        others_ok = ~(slot & ~at & (val != fb.mem_exp)).any(1)
+        hl_ok = (at & slot & (val == 0) & (fb.mem_exp == v[:, None])).any(1)
+        return cond & others_ok & hl_ok
+
     def predicate(self, name: str, fb: FileBatch, out: LaneOutputs) -> np.ndarray:
         """Named conditions for expected rules. The *_model predicates check both sides against the documented
         formulas: the vector must follow the hardware rule and the core its known 0.2.0 rule, so the rule cannot
@@ -227,6 +263,8 @@ class Z80Adapter:
             r = s0[:, IDX["r"]]
             step = lambda k: (r & 0x80) | ((r + k) & 0x7F)  # noqa: E731
             return (s1[:, IDX["r"]] == step(1)) & (act[:, IDX["r"]] == step(2))
+        if name in ("in_a_n_model", "in_r_c_model", "in_block_model"):
+            return self._in_model(name, fb, out)
         if name == "repeats":  # a block instruction that loops: the reference leaves PC on the instruction
             return fb.state_exp[:, pc] == fb.state_in[:, pc]
         if name == "not_repeats":

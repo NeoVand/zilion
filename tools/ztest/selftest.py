@@ -3,11 +3,13 @@
 1. host-probe: a 20-line probe core drives every host path (listed / unlisted / final-only reads, writes, stray
    writes, port reads and writes) through synthetic SingleStepTests-format vectors, in both memory models, and the
    ledger must report exactly the planted divergences. This covers io_read/io_write, which the 0.2.0 Z80 never calls.
-2. mutants: single-line mutations of the Z80 core must each produce unexpected divergences in the field they
+2. io-rules: hand-derived IN A,(n) / IN B,(C) / INI results on the real core: a non-zero port read is explained by
+   its I/O rule, a zero read matches exactly, and a planted extra error stays unexpected.
+3. mutants: single-line mutations of the Z80 core must each produce unexpected divergences in the field they
    break (a harness that cannot fail would report a clean ledger here).
-3. memory-model invariance: sparse and full memory give identical ledgers on real vectors.
-4. determinism: two sessions give byte-identical ledgers, and repeated dispatches give identical outputs.
-Parts 2-4 need a vector directory (--vectors); part 1 does not.
+4. memory-model invariance: sparse and full memory give identical ledgers on real vectors.
+5. determinism: two sessions give byte-identical ledgers, and repeated dispatches give identical outputs.
+Parts 3-5 need a vector directory (--vectors); parts 1-2 do not.
 """
 
 from __future__ import annotations
@@ -181,6 +183,76 @@ class _ArtifactsWithCore:
         return getattr(self._art, name)
 
 
+# ---------------------------------------------------------------------------------------------- 2b. I/O rules
+def _z80(pc, **over):
+    s = {"pc": pc, "sp": 0x8000, "a": 0, "b": 0, "c": 0, "d": 0, "e": 0, "f": 0, "h": 0, "l": 0, "i": 0, "r": 0,
+         "ei": 0, "wz": 0, "ix": 0, "iy": 0, "af_": 0, "bc_": 0, "de_": 0, "hl_": 0, "im": 0, "p": 0, "q": 0,
+         "iff1": 0, "iff2": 0}
+    s.update(over)
+    return s
+
+
+def _io_case(name, ini, fin, ram0, ram1, ports):
+    return {"name": name, "initial": ini | {"ram": ram0}, "final": fin | {"ram": ram1}, "ports": ports}
+
+
+# Hardware results derived by hand from the Z80 documentation (IN A,(n): A <- port (A<<8|n), flags kept;
+# IN r,(C): r <- port BC, S Z Y X P from the value, H = N = 0, C kept; INI: (HL) <- port BC, B - 1, HL + 1,
+# N = bit 7 of the value, H = C = (value + ((C + 1) & 255) > 255), P/V = parity(((value + C + 1) & 7) ^ B), S Z Y X
+# from B). Each file: [non-zero port value (explained), zero port value (must match), planted error (unexpected)].
+IO_FILES = {
+    "db": [
+        _io_case("db 0000", _z80(0x100, a=0x12, f=0x01), _z80(0x102, a=0x56, f=0x01, r=1, wz=0x1235),
+                 [[0x100, 0xDB], [0x101, 0x34]], [[0x100, 0xDB], [0x101, 0x34]], [[0x1234, 0x56, "r"]]),
+        _io_case("db 0001", _z80(0x100, a=0x12, f=0x01), _z80(0x102, a=0x00, f=0x01, r=1, wz=0x1235),
+                 [[0x100, 0xDB], [0x101, 0x34]], [[0x100, 0xDB], [0x101, 0x34]], [[0x1234, 0x00, "r"]]),
+        _io_case("db 0002", _z80(0x100, a=0x12, f=0x01), _z80(0x102, a=0x56, f=0x00, r=1, wz=0x1235),  # F changed
+                 [[0x100, 0xDB], [0x101, 0x34]], [[0x100, 0xDB], [0x101, 0x34]], [[0x1234, 0x56, "r"]]),
+    ],
+    "ed 40": [
+        _io_case("ed 40 0000", _z80(0x200, b=0x12, c=0x34, f=0x01), _z80(0x202, b=0x80, c=0x34, f=0x81, r=2, wz=0x1235),
+                 [[0x200, 0xED], [0x201, 0x40]], [[0x200, 0xED], [0x201, 0x40]], [[0x1234, 0x80, "r"]]),
+        _io_case("ed 40 0001", _z80(0x200, b=0x12, c=0x34, f=0x01), _z80(0x202, b=0x00, c=0x34, f=0x45, r=2, wz=0x1235),
+                 [[0x200, 0xED], [0x201, 0x40]], [[0x200, 0xED], [0x201, 0x40]], [[0x1234, 0x00, "r"]]),
+        _io_case("ed 40 0002", _z80(0x200, b=0x12, c=0x34, f=0x01),  # D changed as well
+                 _z80(0x202, b=0x80, c=0x34, d=0x99, f=0x81, r=2, wz=0x1235),
+                 [[0x200, 0xED], [0x201, 0x40]], [[0x200, 0xED], [0x201, 0x40]], [[0x1234, 0x80, "r"]]),
+    ],
+    "ed a2": [
+        _io_case("ed a2 0000", _z80(0x300, b=0x05, c=0x10, h=0x20, l=0x00),
+                 _z80(0x302, b=0x04, c=0x10, h=0x20, l=0x01, f=0x06, r=2, wz=0x0511),
+                 [[0x300, 0xED], [0x301, 0xA2], [0x2000, 0x77]], [[0x300, 0xED], [0x301, 0xA2], [0x2000, 0x81]],
+                 [[0x0510, 0x81, "r"]]),
+        _io_case("ed a2 0001", _z80(0x300, b=0x05, c=0x10, h=0x20, l=0x00),
+                 _z80(0x302, b=0x04, c=0x10, h=0x20, l=0x01, f=0x04, r=2, wz=0x0511),
+                 [[0x300, 0xED], [0x301, 0xA2], [0x2000, 0x77]], [[0x300, 0xED], [0x301, 0xA2], [0x2000, 0x00]],
+                 [[0x0510, 0x00, "r"]]),
+        _io_case("ed a2 0002", _z80(0x300, b=0x05, c=0x10, h=0x20, l=0x00),  # another address written too
+                 _z80(0x302, b=0x04, c=0x10, h=0x20, l=0x01, f=0x06, r=2, wz=0x0511),
+                 [[0x300, 0xED], [0x301, 0xA2], [0x2000, 0x77], [0x2001, 0x00]],
+                 [[0x300, 0xED], [0x301, 0xA2], [0x2000, 0x81], [0x2001, 0x55]], [[0x0510, 0x81, "r"]]),
+    ],
+}
+IO_RULES = {"db": "IO-IN-A", "ed 40": "IO-IN-C", "ed a2": "IO-IN-BLOCK"}
+
+
+def io_rules(art: Artifacts, log) -> bool:
+    ok = True
+    with tempfile.TemporaryDirectory() as tmp:
+        for key, tests in IO_FILES.items():
+            (Path(tmp) / f"{key}.json").write_text(json.dumps(tests))
+        led, _ = session.run(art, "z80", [Path(tmp)], workers=1, progress=None)
+    for key, rule in IO_RULES.items():
+        rec = led.files[key]
+        hits = sum(e["rules"].get(rule, 0) for e in rec["fields"].values())
+        planted = {ex["name"] for e in rec["fields"].values() for ex in e.get("examples", [])}
+        good = rec["explained"] == 2 and rec["unexpected"] == 1 and hits >= 1 and planted == {f"{key} 0002"}
+        ok &= good
+        log(f"  {'ok  ' if good else 'FAIL'} io-rules {key}: {rule} explains the non-zero read, the zero read "
+            f"matches, only the planted error is unexpected (explained {rec['explained']}/3, unexpected {sorted(planted)})")
+    return ok
+
+
 # ---------------------------------------------------------------------------------------------- 3 + 4
 def _ledger_files(led) -> dict:
     return {k: {kk: vv for kk, vv in rec.items() if kk != "gpu"} for k, rec in led.files.items()}
@@ -208,6 +280,7 @@ def run(art: Artifacts, vectors: Path | None, limit: int, log=print) -> int:
     gpu = G.get_gpu()
     log(f"selftest on {gpu.summary()}")
     ok = host_probe(gpu, log)
+    ok &= io_rules(art, log)
     if vectors is None:
         log("  skip mutants, invariance, determinism (no --vectors)")
     else:

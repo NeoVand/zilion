@@ -159,7 +159,8 @@ predicate holds. Whatever no rule explains is **unexpected**. The rules file als
 passes through (`passthrough`). If that does not match what the adapter detects in the core text, the run stops: the
 rules then describe a different core.
 
-Predicates keep rules honest. The Z80 rules for Q-XY, BIT-HL-XY and R-WASTED use **model-checking predicates**: a
+Predicates keep rules honest. The Z80 rules for Q-XY, BIT-HL-XY, R-WASTED and the I/O reads use **model-checking
+predicates**: a
 divergence is explained only if the vector follows the documented hardware formula *and* Zilion follows its known
 0.2.0 formula. A different error in the same bits stays unexpected; the self-test plants exactly such mutants to
 prove it.
@@ -264,12 +265,15 @@ A future CI gate should fail on any unexpected divergence (exit 1) and on any ru
   1. **host-probe.** A probe core drives every host path with 15 planted cases (listed, unlisted and final-only
      memory; stray writes; wrap at 0xFFFF; port reads and writes) in both memory models. The ledger must report
      exactly the planted divergences.
-  2. **mutants.** Single-line mutations of the Z80 core: R not incremented, wrong PUSH byte, wrong INC flags, a wrong
+  2. **io-rules.** Hand-derived hardware results for IN A,(n), IN B,(C) and INI run on the real core. For each, a
+     non-zero port read must be explained by its I/O rule, a zero read must match exactly, and a planted extra
+     error must stay unexpected. This validates the I/O predicates without depending on SingleStepTests.
+  3. **mutants.** Single-line mutations of the Z80 core: R not incremented, wrong PUSH byte, wrong INC flags, a wrong
      SCF X/Y that is not the Q effect, a wrong BIT n,(HL) X/Y that is not the WZ effect, DJNZ never branching, HALT
      not halting, a NOP that reads or writes memory. Each must produce unexpected divergences in the field it breaks.
      Mutants whose vector files are absent are skipped and say so.
-  3. **memory-model invariance.** `sparse` and `full` give identical ledgers on real vectors.
-  4. **determinism.** Two sessions give the same canonical ledger, and repeated dispatches give identical bytes.
+  4. **memory-model invariance.** `sparse` and `full` give identical ledgers on real vectors.
+  5. **determinism.** Two sessions give the same canonical ledger, and repeated dispatches give identical bytes.
 
 ## Determinism
 

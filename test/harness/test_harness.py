@@ -101,7 +101,7 @@ class RuleTests(unittest.TestCase):
     def test_expected_rules_file(self):
         ad = Z80Adapter()
         names = {f.name for f in FIELDS if f.compare} | {"mem", "ports"}
-        predicates = {"q_xy_model", "bit_hl_model", "r_wasted_model", "repeats", "not_repeats", "port_read_nonzero",
+        predicates = {"q_xy_model", "bit_hl_model", "r_wasted_model", "repeats", "not_repeats", "port_read_nonzero", "in_a_n_model", "in_r_c_model", "in_block_model",
                       "port_read_zero_or_none"}
         for path in sorted((REPO / "test" / "vectors" / "z80").glob("expected-*.json")):
             rules, doc = session.load_rules(path)

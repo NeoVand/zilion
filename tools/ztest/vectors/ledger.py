@@ -120,7 +120,7 @@ class Ledger:
             hit = np.zeros(fb.n, dtype=bool)
             for name in r.fields:
                 j = self.names.index(name)
-                m = np.uint32(self.masks[j] if r.mask is None else r.mask & int(self.masks[j]))
+                m = np.uint32(r.mask_for(name, int(self.masks[j])))
                 bits = np.where(pred, D[:, j] & m, 0).astype(np.uint32)
                 covered[:, j] |= np.where(pred, m, 0).astype(np.uint32)
                 hit |= bits != 0
@@ -172,7 +172,7 @@ class Ledger:
             }
             for r in self.rules:
                 if r.id in rule_bits and name in r.fields:
-                    m = self.masks[j] if r.mask is None else r.mask
+                    m = r.mask_for(name, int(self.masks[j]))
                     c = int((rule_bits[r.id] & ((d & m) != 0)).sum())
                     if c:
                         entry["rules"][r.id] = c
@@ -296,7 +296,8 @@ class Ledger:
                        for n, a, w in zip(self.names, self.arch, self.widths)],
             "rules": [
                 {"id": r.id, "files": list(r.files), "fields": list(r.fields),
-                 "mask": None if r.mask is None else hx(r.mask), "when": r.when, "reason": r.reason,
+                 "mask": (None if r.mask is None else {k: hx(v) for k, v in r.mask.items()} if isinstance(r.mask, dict)
+                          else hx(r.mask)), "when": r.when, "reason": r.reason,
                  "source": r.source, "status": r.status, **self.rule_hits[r.id],
                  "example": self.rule_examples.get(r.id)}
                 for r in self.rules

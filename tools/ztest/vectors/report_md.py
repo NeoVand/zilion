@@ -132,7 +132,10 @@ def render(doc: dict, run: dict, digest: str, analysis: str | None) -> str:
     w("| Rule | Files | Fields (mask) | Condition | Tests | Files hit |")
     w("|---|---|---|---|---:|---:|")
     for r in doc["rules"]:
-        fm = ", ".join(r["fields"]) + (f" ({r['mask']})" if r["mask"] else "")
+        if isinstance(r["mask"], dict):
+            fm = ", ".join(f"{f} ({r['mask'][f]})" if f in r["mask"] else f for f in r["fields"])
+        else:
+            fm = ", ".join(r["fields"]) + (f" ({r['mask']})" if r["mask"] else "")
         w(f"| {r['id']} | {_files(r['files'], 12)} | {fm} | {r['when'] or 'always'} | {r['hit_tests']:,} | {r['hit_files']} |")
     w("")
     for r in doc["rules"]:

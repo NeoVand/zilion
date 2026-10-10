@@ -61,7 +61,7 @@ class Rule:
     id: str
     files: tuple[str, ...]  # fnmatch patterns over the opcode key (the vector file's stem); "*" = every file
     fields: tuple[str, ...]  # state field names, or "mem" / "ports"
-    mask: int | None  # covered bits (None = every bit of the field)
+    mask: int | dict | None  # covered bits: one mask for all fields, {field: mask}, or None (every bit)
     reason: str
     source: str
     when: str | None = None  # named predicate of the adapter (None = always)
@@ -70,11 +70,15 @@ class Rule:
     def matches_file(self, key: str) -> bool:
         return any(fnmatch.fnmatchcase(key, p) for p in self.files)
 
+    def mask_for(self, field: str, full: int) -> int:
+        m = self.mask.get(field) if isinstance(self.mask, dict) else self.mask
+        return full if m is None else m & full
+
     @staticmethod
     def from_json(d: dict) -> "Rule":
+        num = lambda v: int(v, 0) if isinstance(v, str) else v  # noqa: E731
         mask = d.get("mask")
-        if isinstance(mask, str):
-            mask = int(mask, 0)
+        mask = {k: num(v) for k, v in mask.items()} if isinstance(mask, dict) else num(mask)
         return Rule(
             id=d["id"],
             files=tuple(d["files"]),
