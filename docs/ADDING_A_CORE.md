@@ -56,7 +56,10 @@ them, the skip rule); `conventions` (step definition; the two stack conventions,
 state whose stack pointer aliases t, with the ISA's own meaning; `entry(pos, P)`; trap causes with the chip's
 decision; prose on halting and illegal opcodes); `variants` and `compat`; optional `params` (name →
 `{ type: 'u32' | 'bool' | 'enum', default, values? }`, names and enum values lower snake case, checked by
-`checkCoreParamDecls`); `wgsl(options)` (which also receives the resolved `params`). Keep `firstPushAt` a small
+`checkCoreParamDecls`); `wgsl(options)` (which also receives the resolved `params`); optionally
+`stateFor({ variant, compat })` when a variant or compat models different state (the Z80's compat `'0.2'` record has
+no `wz`/`im`, its `zilog-nmos` record adds `q`): append new fields so that older offsets stay, and keep every value
+that must survive a resumed run in the record, not in `internals`. Keep `firstPushAt` a small
 function of its own (`z80FirstPushAt`, `m6502FirstPushAt`): it is the cross-ISA meaning of the stack, and worlds
 compared across ISAs rely on it. Both stack conventions must succeed on a ring of one byte (`P = 1, t = 0`): the
 builder calls them there to learn the stack fields (the keys they assign), so that a world that sets every stack
