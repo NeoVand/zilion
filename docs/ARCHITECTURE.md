@@ -156,9 +156,10 @@ register arithmetic wraps modulo P is not offered: registers are numbers. Helper
 `init.state: 'perLane'` reads the whole state record per lane from a buffer instead. In both cases the raw
 `onReset` hook runs last, so it sees and may change the initial state.
 
-**The stack is never a default.** On an ISA with a stack, a world gives `init.stack` (or loads the state per lane);
-without it the build fails and names the field. Exactly one of two conventions (giving both is an error; BFF has
-no stack, and giving one there is an error):
+**The stack is never a default.** On an ISA with a stack, a world gives `init.stack`, or sets every stack field
+itself with `init.set` or `init.random` (the Z80's `sp`, the 6502's `s`: the fields the stack conventions assign),
+or loads the state per lane; otherwise the build fails and names the field. `init.stack` is exactly one of two
+conventions (giving both is an error on every ISA):
 
 - `{ firstPushAt: t | 'lastByte' }`: the first byte pushed lands at position t, the same bytes on every ISA
   (`conventions.firstPushAt(P, t)`). The Z80 pre-decrements, so SP = `highestAlias(t, P) + 1` (16-bit: SP = 0 when
@@ -169,7 +170,15 @@ no stack, and giving one there is an error):
   Algocell worlds are written in it.
 
 `'lastByte'` is the last byte of the last segment (P − 1 without segments), so padding never moves the stack.
-`init.set` and `init.random` apply after the stack, so a world may still overwrite SP explicitly.
+When a world gives both a convention and the stack fields, the order is the convention, then `init.set`, then
+`init.random`. An ISA without a stack (BFF) accepts `init.stack`, validates it like any other ISA (one convention,
+a position on the ring), and does not apply it, so one world spec serves a stack machine and a stackless one.
+
+Nothing about the stack is dropped silently: `manifest.init.stack` records how it was set, in order of application:
+`{ convention: { kind, position, values }, set: [fields], random: [fields] }` (each part present when it applies),
+or `{ notApplicable: 'no stack', given: <init.stack as given> }` on an ISA without a stack, or
+`{ notApplicable: 'per-lane state' }`. The generated `zil_init_state` carries the same as a comment, and the world as
+given (with its `init.stack`) is in `manifest.world` and its hash.
 
 **Presets** (`src/world/presets.ts`) write the old worlds out with both conventions explicit:
 `compat02World({ memBytes, steps, registers? })` is 0.2's `Zilion.run` world (use it with `compat: '0.2'`: mask
@@ -304,7 +313,7 @@ and may be called again on the same lane: the step index the dials see continues
 (`laneCount`, `laneBase`, `budget`, `seed`, `stepBase` (2 words), `resume`, `ablation`, `constant`, `pad`) and byte
 offsets; the memory layout (ring size, position expression, segments with host and storage offsets, padding); the
 record layout; the state fields; halt reasons; trap causes (`trapCauses`, the codes of the record's `trapCause`);
-`resumable`; the ablation layout; budget and init flags; provenance (`zilion`, `hostContract`, core
+`resumable`; the ablation layout; budget and init flags, with `init.stack` (how the stack was set, or why not); provenance (`zilion`, `hostContract`, core
 id/version/status/variant/compat/hooks/params, SHA-256 of the WGSL, the core text, the world JSON and the options).
 Schema 2 changed the record (`trapCause` at word 2 moved every later field by one word; `padding` on resumable
 padded worlds) and the params (`stepBase` and `resume` at bytes 16..31, so the ablation table moved from 16 to 32).
@@ -385,7 +394,10 @@ The first architecture review left six questions open. Decided as follows; all s
    Algocell presets supply both explicitly. **Implemented**: `budget.unit` and `budget.value` are both required;
    `init.stack` is required on an ISA with a stack unless the state is loaded per lane; presets `compat02World` and
    `algocellPairWorld`; every spec in the tests, docs and scripts states both; `scripts/export-machines.mjs` also
-   requires the ISA to be named.
+   requires the ISA to be named. Follow-up decisions: `init.set` or `init.random` covering every stack field counts
+   as giving the stack (both given: convention first, both recorded in `manifest.init.stack`); a stackless ISA
+   accepts `init.stack`, does not apply it and lists it as `notApplicable: 'no stack'`; the defaults outside this
+   decision are listed under "Defaults that remain".
 4. **Core parameters are a contract feature, not a BFF special case.** A descriptor may declare `params`
    (name → `{ type: 'u32' | 'bool' | 'enum', default, values? }`); a world selects them with
    `core: { isa, params }`; the builder emits them as WGSL constants ahead of the core text and records them in
@@ -402,6 +414,31 @@ The first architecture review left six questions open. Decided as follows; all s
 6. **Anchors stay through 0.3.x** (the commitment under Anchors). Registered Algocell work is pinned to 0.2.0
    output semantics in any case; the anchors keep its shader patchers working until the equivalence proof lets
    them retire. **Holds**: `npm run check:bytes` (decisions 1 to 5 did not touch the Z80 core text).
+
+## Defaults that remain
+
+Decision 3 removed the silent defaults of the stack and the budget. These defaults stay; each is recorded in the
+manifest (the world as given, `core`, `init`, `budget`, `record`, the options hash), so none changes a result unseen.
+
+| Field | When omitted | Notes |
+|---|---|---|
+| `world.entry` | position 0: PC (or BFF's `ip`) at its world-reset value 0, the lowest address that maps to position 0 | `entry: { position }` moves it |
+| `world.init.state` | `'zero'`: the world reset (every state field at its descriptor `reset`, usually 0), then the conventions | `'perLane'` loads the state record |
+| `world.init.random.fields` | the descriptor's `randomizable` fields (Z80: A..L, the alternates, IX, IY; 6502: A, X, Y) | |
+| `world.init.random.salt` | 0 | XOR-ed with `ZIL_SALT_INIT` |
+| `world.outputs.memory` | true | |
+| `world.outputs.state` | true | resumable runs need it |
+| `world.outputs.fetchMap`, `startMap`, `writeCounts` | false | |
+| `world.halting.traps.<cause>` | `'as-chip'` (Z80 HALT halts; 6502 JAM and unimplemented halt; BFF bounds, unmatched and unimplemented halt) | |
+| `world.halting.lethal` | none; when given, `probability` 1 and `salt` 0 | |
+| trap dial `salt` | 0 | |
+| `world.ablation` | none | |
+| `variant` | `isa.defaultVariant`: Z80 `classic`, 6502 `nmos`, BFF `ascii` | recorded in `manifest.core` |
+| `compat` | `isa.compat[0]`: Z80 `'0.2'`, 6502 and BFF `'skeleton'` | recorded in `manifest.core` |
+| core `params` | each declared parameter's `default` | recorded in `manifest.core.params` |
+| `mode` | `'kernel'` | |
+| `workgroupSize` | 64 | |
+| run options | `seed` 0, `laneBase` 0, `stepBase` 0, `resume` off; `budget` = the world's `budget.value` | per dispatch, not compiled in |
 
 ## Differences from the design document
 

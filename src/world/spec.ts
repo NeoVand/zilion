@@ -30,8 +30,9 @@ export type MemoryModel =
 export type Position = number | "lastByte";
 
 /**
- * The initial stack, required on every ISA with a hardware stack (unless the state is loaded per lane). Exactly one
- * of the two conventions:
+ * The initial stack, required on every ISA with a hardware stack unless `init.set` / `init.random` give every stack
+ * field (Z80 `sp`, 6502 `s`) or the state is loaded per lane. An ISA without a stack accepts it, validates it and
+ * does not apply it (`manifest.init.stack.notApplicable`). Exactly one of the two conventions (both is an error):
  *  - `firstPushAt: t`: the first byte pushed lands at position t, the same bytes on every ISA
  *    (`IsaCore.conventions.firstPushAt`; Z80: SP − 1 aliases t; 6502: 0x0100 | S aliases t). Use it for worlds
  *    compared across ISAs.
@@ -48,7 +49,7 @@ export interface InitSpec {
    * conventions below. `perLane`: the whole state record is read per lane from a buffer (excludes the rest).
    */
   readonly state?: "zero" | "perLane";
-  /** The initial stack (see `StackSpec`). Required on an ISA with a stack unless `state` is `perLane`. */
+  /** The initial stack (see `StackSpec`); applied before `set` and `random`. */
   readonly stack?: StackSpec;
   /** Constant state values (by field name), applied after the stack convention. */
   readonly set?: Readonly<Record<string, number>>;
@@ -135,7 +136,7 @@ export interface WorldSpec {
   readonly memory: MemoryModel;
   /** The PC starts at the lowest address that maps to this position (default 0). */
   readonly entry?: { readonly position: Position };
-  /** Required on an ISA with a stack (it must give `init.stack` or `init.state: 'perLane'`). */
+  /** Required on an ISA with a stack: `init.stack`, every stack field in `init.set`/`init.random`, or `init.state: 'perLane'`. */
   readonly init?: InitSpec;
   /** Required. */
   readonly budget: BudgetSpec;

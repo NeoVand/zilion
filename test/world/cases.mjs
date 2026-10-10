@@ -15,7 +15,8 @@ const mem = (n, place = {}, fill = 0) => {
   return m;
 };
 // Every world states its budget and (on a stack ISA) its stack: there are no silent defaults. The helpers give the
-// budget explicitly (100 steps; jobs override it per run); each case gives its own init.stack.
+// budget explicitly (100 steps; jobs override it per run); each case gives its own init.stack, or sets SP itself
+// with init.set or init.random (which counts as giving the stack).
 const steps = (n) => ({ unit: "steps", value: n });
 const LAST = { topAliases: "lastByte" };
 const ring = (P, extra = {}) => ({ memory: { kind: "ring", bytes: P }, budget: steps(100), ...extra });
@@ -95,7 +96,7 @@ export const CASES = [
     // position 65535 mod P. Then HALT at 4.
     setup: ({ Z, addJob }) => {
       const p = q(P, lit);
-      return addJob({ isa: Z.z80, world: ring(P, { init: { stack: LAST, set: { sp: 0x0001 } }, outputs: { writeCounts: true } }) }, [
+      return addJob({ isa: Z.z80, world: ring(P, { init: { set: { sp: 0x0001 } }, outputs: { writeCounts: true } }) }, [
         { mem: mem(P, { 0: [0x01, 0x34, 0x12, 0xc5, 0x76] }),
           expect: { steps: 3, halt: "halt-insn", state: { sp: 0xffff, pc: 4, b: 0x12, c: 0x34 }, mem: { 0: 0x12, [p]: 0x34 }, writes: [2] } },
       ]);
@@ -107,7 +108,7 @@ export const CASES = [
     // opcode itself. DE = 0xD1CD, SP = 0x0001. HALT at 1.
     setup: ({ Z, addJob }) => {
       const p = q(P, lit);
-      return addJob({ isa: Z.z80, world: ring(P, { init: { stack: LAST, set: { sp: 0xffff } } }) }, [
+      return addJob({ isa: Z.z80, world: ring(P, { init: { set: { sp: 0xffff } } }) }, [
         { mem: mem(P, { 0: [0xd1, 0x76], [p]: [0xcd] }),
           expect: { steps: 2, halt: "halt-insn", state: { d: 0xd1, e: 0xcd, sp: 0x0001, pc: 1 } } },
       ]);
@@ -473,13 +474,13 @@ export const CASES = [
       const k = Z.z80.state.findIndex((f) => f.name === "sp");
       const lanes = Array.from({ length: 32 }, (_, l) => ({ mem: mem(32, { 0: [0x76] }),
         expect: { state: { sp: Z.initDraw(4, l, k, 0, 16), a: 0, ix: 0 } } }));
-      return addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST, random: { fields: ["sp"] } } }) }, lanes, { seed: 4 });
+      return addJob({ isa: Z.z80, world: ring(32, { init: { random: { fields: ["sp"] } } }) }, lanes, { seed: 4 });
     },
   },
   {
     name: "init.set and entry: constants, PC at a position, PC at lastByte",
     setup: ({ Z, addJob }) => [
-      addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST, set: { a: 0x12, sp: 0x4000, ix: 0xbeef } } }) },
+      addJob({ isa: Z.z80, world: ring(32, { init: { set: { a: 0x12, sp: 0x4000, ix: 0xbeef } } }) },
         [{ mem: mem(32, { 0: [0x76] }), expect: { state: { a: 0x12, sp: 0x4000, ix: 0xbeef } } }]),
       addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST }, entry: { position: 5 } }) },
         [{ mem: mem(32, { 5: [0x76] }, 0x3c), expect: { steps: 1, halt: "halt-insn", state: { pc: 5, a: 0 } } }]),
