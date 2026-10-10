@@ -1,6 +1,7 @@
 // The lane runner: everything the engine does to a kernel, driven by its manifest (the same contract the Python
-// host uses). Buffers live in slabs (one bind group each, at most one chunk of lanes) that are reused across runs;
-// a read copies memory and records into one staging buffer and maps it once.
+// host uses). Buffers live in slabs (one bind group each, at most one chunk of lanes). A read is a snapshot: the
+// copy of memory and records into a staging buffer is encoded and submitted when the read is called, so it sees
+// exactly the work submitted before it; only the map is asynchronous. Staging buffers come from a per-slab pool.
 
 import type { ShaderManifest } from "../manifest.js";
 import type { ChunkLimits } from "./chunks.js";
@@ -20,8 +21,10 @@ export interface Slab {
   readonly lanes: number;
   readonly buffers: SlabBuffers;
   readonly bindGroup: GPUBindGroup;
-  /** Staging buffer for reads (grow-only, created on first read). */
-  staging: GPUBuffer | null;
+  /** Idle staging buffers (a read in flight holds its own until it is mapped and copied out). */
+  readonly pool: GPUBuffer[];
+  /** Set by destroySlab: staging buffers of reads still in flight are destroyed when they finish. */
+  destroyed: boolean;
 }
 
 export interface DispatchParams {
@@ -129,13 +132,21 @@ export class LaneRunner {
       layout: this.layout,
       entries: this.manifest.bindings.map((b) => ({ binding: b.binding, resource: { buffer: byRole[b.role]! } })),
     });
-    return { laneStart, lanes, buffers, bindGroup, staging: null };
+    return { laneStart, lanes, buffers, bindGroup, pool: [], destroyed: false };
   }
 
+  /** Destroy the slab's buffers and idle staging buffers. Submitted work and reads in flight still complete. */
   destroySlab(s: Slab): void {
+    if (s.destroyed) return;
+    s.destroyed = true;
     for (const b of Object.values(s.buffers)) b?.destroy();
-    s.staging?.destroy();
-    s.staging = null;
+    for (const b of s.pool) b.destroy();
+    s.pool.length = 0;
+  }
+
+  /** Bytes per lane of the staging buffer a full read needs (for chunk planning). */
+  stagingBytesPerLane(): number {
+    return (this.memWords + this.recWords) * 4;
   }
 
   writeParams(s: Slab, p: DispatchParams): void {
@@ -184,25 +195,38 @@ export class LaneRunner {
     pass.dispatchWorkgroups(Math.ceil(laneCount / per));
   }
 
-  /** Copy the first `laneCount` lanes' memory and records out of the slab with one staging buffer and one map. */
-  async read(s: Slab, laneCount: number, wantMemory: boolean): Promise<{ memory: Uint32Array | null; record: Uint32Array }> {
+  /**
+   * Snapshot the first `laneCount` lanes: the copy into a staging buffer is encoded and submitted NOW (before this
+   * returns), so the result reflects exactly the work submitted before the call, whatever the caller submits next.
+   * The returned promise maps the staging buffer once and copies memory and records out.
+   */
+  snapshot(s: Slab, laneCount: number, wantMemory: boolean): Promise<{ memory: Uint32Array | null; record: Uint32Array }> {
+    if (s.destroyed) return Promise.reject(new Error("zilion: read from destroyed buffers"));
     const memBytes = wantMemory ? laneCount * this.memWords * 4 : 0;
     const recBytes = laneCount * this.recWords * 4;
     const total = words((memBytes + recBytes) / 4);
-    if (!s.staging || s.staging.size < total) {
-      s.staging?.destroy();
-      s.staging = this.device.createBuffer({ label: "zilion:staging", size: Math.max(total, words(s.lanes * (this.memWords + this.recWords))), usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
-    }
+    const i = s.pool.findIndex((b) => b.size >= total);
+    const staging = i >= 0 ? s.pool.splice(i, 1)[0] : this.device.createBuffer({ label: "zilion:staging", size: total, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     const enc = this.device.createCommandEncoder({ label: "zilion:read" });
-    if (memBytes) enc.copyBufferToBuffer(s.buffers.memory, 0, s.staging, 0, memBytes);
-    if (recBytes) enc.copyBufferToBuffer(s.buffers.record, 0, s.staging, memBytes, recBytes);
+    if (memBytes) enc.copyBufferToBuffer(s.buffers.memory, 0, staging, 0, memBytes);
+    if (recBytes) enc.copyBufferToBuffer(s.buffers.record, 0, staging, memBytes, recBytes);
     this.device.queue.submit([enc.finish()]);
-    await s.staging.mapAsync(GPUMapMode.READ, 0, total);
-    const all = new Uint32Array(s.staging.getMappedRange(0, total).slice(0));
-    s.staging.unmap();
-    return {
-      memory: memBytes ? all.subarray(0, memBytes / 4) : null,
-      record: all.subarray(memBytes / 4, (memBytes + recBytes) / 4),
+    const finish = async () => {
+      let reusable = false;
+      try {
+        await staging.mapAsync(GPUMapMode.READ, 0, total);
+        const all = new Uint32Array(staging.getMappedRange(0, total).slice(0));
+        staging.unmap();
+        reusable = true;
+        return {
+          memory: memBytes ? all.subarray(0, memBytes / 4) : null,
+          record: all.subarray(memBytes / 4, (memBytes + recBytes) / 4),
+        };
+      } finally {
+        if (reusable && !s.destroyed) s.pool.push(staging);
+        else staging.destroy();
+      }
     };
+    return finish();
   }
 }

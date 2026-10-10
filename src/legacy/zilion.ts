@@ -1,7 +1,6 @@
 import { maxLanesPerChunk, planChunks } from "../engine/chunks.js";
 import { createKernel } from "../engine/gpu.js";
-import { Lock } from "../engine/lock.js";
-import { deviceLimits, LaneRunner, type Slab } from "../engine/runner.js";
+import { deviceLimits, LaneRunner } from "../engine/runner.js";
 import { legacyMachine } from "./manifest.js";
 import { REG_FIELDS, REGS_PER_PROGRAM } from "./shader.js";
 
@@ -66,17 +65,17 @@ const WORKGROUP_SIZE = 64;
  * A batch Z80 executor. Runs many independent Z80 CPUs in parallel on the GPU.
  * Create once, call `run` as many times as you like, then `destroy`.
  *
- * Since 0.3 this is a facade over the engine's lane runner: the kernel is still buildComputeShader's (byte-identical
- * to 0.2), but batches are chunked against the device limits (no more failure above 4,194,240 programs or 128 MiB
- * of memory), GPU buffers are reused between runs, each chunk is read back with one map, and an invalid
- * `fetchHook` makes `create` reject with the compiler's message instead of failing later.
+ * Since 0.3 this is a facade over the engine's lane runner. The kernel is still buildComputeShader's
+ * (byte-identical to 0.2) and the lifecycle is 0.2's: every run owns its GPU buffers and releases them before it
+ * resolves, runs may overlap, and destroy() only marks the instance (and destroys a device Zilion created). What
+ * changed: a batch is chunked against the device limits (0.2 failed above 4,194,240 programs or 128 MiB of
+ * memory), the buffers are reused across the chunks of one run, each chunk is read back with one map, and an
+ * invalid `fetchHook` makes `create` reject with the compiler's message instead of failing later.
  */
 export class Zilion {
   readonly memBytes: number;
   readonly device: GPUDevice;
   private readonly runner: LaneRunner;
-  private slab: Slab | null = null;
-  private readonly lock = new Lock();
   private ownsDevice: boolean;
   private destroyed = false;
 
@@ -118,15 +117,7 @@ export class Zilion {
    * instance's memory (zero-padded / truncated to `memBytes`). Returns the
    * final memory and registers of every program.
    */
-  run(
-    programs: ArrayLike<number>[] | Uint8Array[],
-    opts: RunOptions,
-  ): Promise<RunResult> {
-    // Buffers are reused, so concurrent runs on one instance (safe in 0.2) run one after the other.
-    return this.lock.run(() => this.runNow(programs, opts));
-  }
-
-  private async runNow(
+  async run(
     programs: ArrayLike<number>[] | Uint8Array[],
     opts: RunOptions,
   ): Promise<RunResult> {
@@ -166,32 +157,34 @@ export class Zilion {
       }
     }
 
-    // Run in chunks that respect the device limits, reusing one set of buffers.
+    // Run in chunks that respect the device limits. As in 0.2 the buffers belong to this run (so runs may
+    // overlap and destroy() never pulls buffers from under one); they are reused across its chunks and
+    // released before the run resolves.
     const per = maxLanesPerChunk({
       workgroupSize: WORKGROUP_SIZE,
       bytesPerLane: this.runner.bytesPerLane(),
+      stagingBytesPerLane: this.runner.stagingBytesPerLane(),
       limits: deviceLimits(this.device),
     });
-    const cap = Math.min(count, per);
-    if (!this.slab || this.slab.lanes < cap) {
-      if (this.slab) this.runner.destroySlab(this.slab);
-      this.slab = this.runner.createSlab(0, cap, "zilion-z80");
-    }
-    const slab = this.slab;
+    const slab = this.runner.createSlab(0, Math.min(count, per), "zilion-z80");
     const outRegs = new Uint32Array(count * REGS_PER_PROGRAM);
-    for (const { start, count: n } of planChunks(count, per)) {
-      const memWords = new Uint32Array(memory.buffer, start * memBytes, (n * memBytes) >> 2);
-      this.runner.writeMemory(slab, memWords);
-      this.runner.writeState(slab, regData.subarray(start * REGS_PER_PROGRAM, (start + n) * REGS_PER_PROGRAM));
-      this.runner.writeParams(slab, { laneCount: n, laneBase: 0, budget: opts.steps, seed: 0 });
-      const enc = this.device.createCommandEncoder();
-      const pass = enc.beginComputePass();
-      this.runner.dispatch(pass, slab, n);
-      pass.end();
-      this.device.queue.submit([enc.finish()]);
-      const out = await this.runner.read(slab, n, true);
-      memory.set(new Uint8Array(out.memory!.buffer, out.memory!.byteOffset, n * memBytes), start * memBytes);
-      outRegs.set(out.record, start * REGS_PER_PROGRAM);
+    try {
+      for (const { start, count: n } of planChunks(count, per)) {
+        const memWords = new Uint32Array(memory.buffer, start * memBytes, (n * memBytes) >> 2);
+        this.runner.writeMemory(slab, memWords);
+        this.runner.writeState(slab, regData.subarray(start * REGS_PER_PROGRAM, (start + n) * REGS_PER_PROGRAM));
+        this.runner.writeParams(slab, { laneCount: n, laneBase: 0, budget: opts.steps, seed: 0 });
+        const enc = this.device.createCommandEncoder();
+        const pass = enc.beginComputePass();
+        this.runner.dispatch(pass, slab, n);
+        pass.end();
+        this.device.queue.submit([enc.finish()]);
+        const out = await this.runner.snapshot(slab, n, true);
+        memory.set(new Uint8Array(out.memory!.buffer, out.memory!.byteOffset, n * memBytes), start * memBytes);
+        outRegs.set(out.record, start * REGS_PER_PROGRAM);
+      }
+    } finally {
+      this.runner.destroySlab(slab);
     }
 
     const registers: Z80Registers[] = [];
@@ -227,8 +220,6 @@ export class Zilion {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    if (this.slab) this.runner.destroySlab(this.slab);
-    this.slab = null;
     if (this.ownsDevice) this.device.destroy();
   }
 }

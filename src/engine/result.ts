@@ -54,6 +54,9 @@ function positions(words: Uint32Array, from: number, count: number): number[] {
 }
 
 export function decodeResult(manifest: ShaderManifest, lanes: number, memory: Uint8Array | null, record: Uint32Array): MachineResult {
+  if (manifest.mode === "legacy-0.2") {
+    throw new Error("zilion: a 0.2-kernel record (regs16) has no steps, halt reason or state record; decode it with REG_FIELDS");
+  }
   const R = manifest.record.wordsPerLane;
   const f = (n: string) => manifest.record.fields.find((x) => x.name === n);
   const take = (n: string) => {

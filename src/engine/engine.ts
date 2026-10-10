@@ -48,6 +48,9 @@ export class Engine {
   /** Build (if given a spec) and compile a machine. Compile errors are thrown with the offending source lines. */
   async machine(spec: MachineSpec | BuiltMachine, o: { label?: string } = {}): Promise<Machine> {
     const built = "wgsl" in spec ? spec : buildMachine(spec);
+    if (built.manifest.mode === "legacy-0.2") {
+      throw new Error("zilion: the 0.2 kernel (legacyMachine) has no typed results; run it through Zilion, or build a world");
+    }
     const label = o.label ?? `zilion:${built.manifest.core.id}`;
     const { pipeline, layout } = await createKernel(this.device, built.wgsl, built.manifest, label);
     return new Machine(this.device, built, new LaneRunner(this.device, pipeline, layout, built.manifest), label);
@@ -142,6 +145,7 @@ export class Machine {
       workgroupSize: this.manifest.workgroupSize,
       lanesPerInvocation: this.manifest.lanesPerInvocation,
       bytesPerLane: this.runner.bytesPerLane(),
+      stagingBytesPerLane: this.runner.stagingBytesPerLane(),
       limits: deviceLimits(this.device),
       maxLanes: cap,
     });
@@ -149,14 +153,14 @@ export class Machine {
 
   /**
    * Upload, run and read back any number of lanes (processed in chunks; buffers are reused between calls, and
-   * concurrent calls on one machine run one after the other).
+   * concurrent calls on one machine run one after the other). A run called before destroy() completes.
    */
   run(input: LaneInput, o: MachineRunOptions = {}): Promise<MachineResult> {
+    if (this.destroyed) return Promise.reject(new Error("zilion: machine destroyed"));
     return this.lock.run(() => this.runNow(input, o));
   }
 
   private async runNow(input: LaneInput, o: MachineRunOptions): Promise<MachineResult> {
-    if (this.destroyed) throw new Error("zilion: machine destroyed");
     const m = this.manifest;
     const { bytes, lanes } = hostBytes(m, input);
     const r = resolveOptions(this.runner, lanes, o);
@@ -182,7 +186,7 @@ export class Machine {
       this.runner.dispatch(pass, slab, count);
       pass.end();
       this.device.queue.submit([enc.finish()]);
-      const out = await this.runner.read(slab, count, !!memory);
+      const out = await this.runner.snapshot(slab, count, !!memory);
       if (memory && out.memory) memory.set(unpackMemory(m, out.memory, count), start * H);
       record.set(out.record, start * R);
     }
@@ -195,10 +199,14 @@ export class Machine {
     return new Batch(this.device, this.runner, capacity, this.lanesPerChunk(o.maxLanesPerSlab), this.label);
   }
 
+  /** Later runs reject at once; runs already called complete, then the buffers are released. */
   destroy(): void {
-    if (this.slab) this.runner.destroySlab(this.slab);
-    this.slab = null;
+    if (this.destroyed) return;
     this.destroyed = true;
+    void this.lock.run(async () => {
+      if (this.slab) this.runner.destroySlab(this.slab);
+      this.slab = null;
+    });
   }
 }
 
@@ -209,7 +217,7 @@ export class Machine {
  */
 export class Batch {
   readonly slabs: readonly Slab[];
-  private readonly lock = new Lock();
+  private destroyed = false;
 
   constructor(
     readonly device: GPUDevice,
@@ -227,6 +235,7 @@ export class Batch {
   }
 
   private each(lane: number, lanes: number, fn: (s: Slab, at: number, from: number, n: number) => void): void {
+    if (this.destroyed) throw new Error("zilion: batch destroyed");
     if (lane < 0 || lane + lanes > this.capacity) throw new Error(`zilion: lanes ${lane}..${lane + lanes} exceed the batch capacity ${this.capacity}`);
     for (const s of this.slabs) {
       const a = Math.max(lane, s.laneStart);
@@ -267,12 +276,12 @@ export class Batch {
     pass.end();
   }
 
-  /** Read the first `lanes` lanes (default: all). Concurrent reads of one batch run one after the other. */
+  /**
+   * Read the first `lanes` lanes (default: all) as they are after the work submitted so far: the copy is submitted
+   * when read() is called, so uploads, encodes and submits that follow do not affect the result.
+   */
   read(o: { lanes?: number } = {}): Promise<MachineResult> {
-    return this.lock.run(() => this.readNow(o));
-  }
-
-  private async readNow(o: { lanes?: number }): Promise<MachineResult> {
+    if (this.destroyed) return Promise.reject(new Error("zilion: batch destroyed"));
     const m = this.manifest;
     const lanes = o.lanes ?? this.capacity;
     const H = m.memory.hostBytesPerLane;
@@ -281,24 +290,26 @@ export class Batch {
     const record = new Uint32Array(lanes * R);
     const reads: Promise<void>[] = [];
     this.each(0, lanes, (s, _at, from, n) => {
-      reads.push(this.runner.read(s, n, !!memory).then((out) => {
+      reads.push(this.runner.snapshot(s, n, !!memory).then((out) => {
         if (memory && out.memory) memory.set(unpackMemory(m, out.memory, n), from * H);
         record.set(out.record, from * R);
       }));
     });
-    await Promise.all(reads);
-    return decodeResult(m, lanes, memory, record);
+    return Promise.all(reads).then(() => decodeResult(m, lanes, memory, record));
   }
 
-  /** encode + submit + read. */
-  async run(o: { seed?: number; budget?: number; ablation?: Uint32Array; lanes?: number; laneBase?: number } = {}): Promise<MachineResult> {
+  /** encode + submit + read (all submitted before this returns). */
+  run(o: { seed?: number; budget?: number; ablation?: Uint32Array; lanes?: number; laneBase?: number } = {}): Promise<MachineResult> {
+    if (this.destroyed) return Promise.reject(new Error("zilion: batch destroyed"));
     const enc = this.device.createCommandEncoder({ label: "zilion:batch" });
     this.encode(enc, o);
     this.device.queue.submit([enc.finish()]);
     return this.read({ lanes: o.lanes });
   }
 
+  /** Release the buffers. Work and reads already submitted complete. */
   destroy(): void {
+    this.destroyed = true;
     for (const s of this.slabs) this.runner.destroySlab(s);
   }
 }

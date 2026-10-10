@@ -140,6 +140,18 @@ test("buildMachine rejects inconsistent worlds with a clear message", () => {
   throws(() => build(ring(32, { ablation: { table: "uniform" } }), { mode: "library" }), /bindingNames.ablation/);
 });
 
+test("user strings that reach WGSL are validated (review nit 8)", () => {
+  throws(() => build({ memory: { kind: "segments", segments: [{ bytes: 4, name: "A\nfn x() {}" }] } }), /must be an identifier/);
+  throws(() => build({ memory: { kind: "segments", segments: [{ bytes: 4, name: "a b" }] } }), /must be an identifier/);
+  throws(() => build(ring(32), { mode: "library", bindingNames: { memory: "mem // x" } }), /must be an identifier/);
+  throws(() => build(ring(32), { mode: "library", bindingNames: { out: "a.b" } }), /must be an identifier/);
+  throws(() => build(ring(32, { ablation: { table: "uniform" } }), { mode: "library", bindingNames: { ablation: "params[0]" } }), /member access/);
+  build(ring(32, { ablation: { table: "uniform" } }), { mode: "library", bindingNames: { ablation: "params.suppress", memory: "pair_data" } });
+  const w = build(ring(32, { ablation: { expr: "op == 1u // one" } })).wgsl;
+  if (!/\(\n\s+op == 1u \/\/ one\n\s+\)/.test(w)) throw new Error("the expression is not on its own line");
+  if (!build(ring(32, { hooks: { ioIn: "  " } })).wgsl.includes("return 0u;")) throw new Error("an empty ioIn must default to return 0u");
+});
+
 // --- manifest ------------------------------------------------------------------------------------------------
 test("manifest: record layout is contiguous and matches the outputs; hashes are reproducible", () => {
   const w = { memory: { kind: "segments", segments: [{ bytes: 19 }, { bytes: 19 }], ring: 41 },

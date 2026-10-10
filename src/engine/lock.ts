@@ -1,6 +1,6 @@
 /**
- * Serialises async sections on one object: buffers are reused between runs, so two runs in flight on the same
- * instance (e.g. Promise.all([z.run(a), z.run(b)]), which was safe in 0.2) must not interleave.
+ * Serialises async sections on one object. A Machine reuses its buffers between runs, so two of its runs in flight
+ * (e.g. Promise.all([m.run(a), m.run(b)])) must not interleave; they queue instead.
  */
 export class Lock {
   private tail: Promise<void> = Promise.resolve();

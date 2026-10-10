@@ -71,7 +71,7 @@ The constants are emitted once per shader (`HOST_CONTRACT_PRELUDE_WGSL`, `src/co
 | decode hook, `-> bool` | core, always | once per executed instruction after full decode; `true` skips it (what a skip consumes is per ISA) |
 | `zil_trap(cause) -> u32` | core, if enabled | on a trap cause the core lists; returns `ZIL_TRAP_HALT`, `_IGNORE` or `_VECTOR`; without the hook the core does what the chip does |
 | `io_in(port) -> u32`, `io_out(port, val)` | core, if enabled | port I/O (Z80 IN/OUT, block I/O) |
-| `on_reset()` | world (`zil_begin`) | once per lane, after the reset and the init conventions |
+| `on_reset()` | world | once per lane, last: after the reset and the init conventions, or after the per-lane state load |
 
 Halt reasons (`haltReason`): 0 running (budget exhausted), 1 `halt-insn` (the ISA's halt instruction), 2
 `host` (from `on_instruction_start`), 3 `trap`. Trap causes: `illegal`, `halt-insn`, `unmatched`, `bounds`,
@@ -140,9 +140,10 @@ register arithmetic wraps modulo P is not offered: registers are numbers. Helper
 realised by `conventions.stackTop(P, t)`; the Z80's SP = `highestAlias(t, P)`, the 6502's S such that
 `0x0100 | S` aliases t), `entry` (`{ position }`, the PC), `init.set` (constants by field name) and
 `init.random` (`{ fields?, salt? }`: field k of lane l = `zil_hash(seed, l, k, salt ^ ZIL_SALT_INIT)` masked to
-its width; default fields = the randomizable ones). Then the raw `onReset` hook. `'lastByte'` is the last byte
-of the last segment (P − 1 without segments), so padding never moves the stack. `init.state: 'perLane'` reads
-the whole state record per lane from a buffer instead.
+its width; default fields = the randomizable ones). `'lastByte'` is the last byte of the last segment (P − 1
+without segments), so padding never moves the stack. `init.state: 'perLane'` reads the whole state record per
+lane from a buffer instead. In both cases the raw `onReset` hook runs last, so it sees and may change the
+initial state.
 
 ### Budgets
 
@@ -194,14 +195,18 @@ host-contract prelude · zil_hash · world constants (ZIL_MEM_P, ZIL_MEM_WORDS, 
 world privates (zil_lane, zil_seed, zil_step, counters, maps) · lane memory zil_m: array<u32, P>
 mem_read / mem_write · the hooks the world needs · raw declarations
 the core text
-zil_reset · zil_init_state · zil_begin(lane, seed) · zil_run(budget) -> steps · memory, state and record I/O
-[kernel] main: load memory, zil_begin(lane_base + i, seed), [load state], zil_run, store memory, store record
+zil_reset · zil_init_state · zil_reset_lane(lane, seed) · zil_begin = zil_reset_lane + on_reset · zil_run(budget)
+memory, state and record I/O
+[kernel] main: load memory, zil_begin(lane_base + i, seed) (perLane: zil_reset_lane, load state, on_reset),
+         zil_run, store memory, store record
 ```
 
 `mode: 'library'` emits only the functions, using `bindingNames` for host-owned buffers (`memory`, `out`,
 `stateIn`, and an `ablation` expression such as `params.suppress`), so a soup shader with several entry points
 can call `zil_load_memory`, `zil_begin`, `zil_run`, `zil_store_memory`. `zil_begin` resets everything a lane
-owns, so a host may run several lanes in one invocation (tested).
+owns, so a host may run several lanes in one invocation (tested); a host that sets the state itself calls
+`zil_reset_lane`, sets it, then `on_reset()`. `zil_run(budget)` runs up to `budget` more steps (or fetched bytes)
+and may be called again on the same lane: the step index the dials see continues from `zil_begin` (tested).
 
 ## The manifest (L1/L2 boundary)
 
@@ -228,16 +233,24 @@ b.upload(lanes); b.encode(encoder, { budget: 128 }); /* … */ const r2 = await 
 ```
 
 - **Chunking.** A chunk is the largest lane count within `maxComputeWorkgroupsPerDimension × workgroupSize`,
-  `maxStorageBufferBindingSize` and `maxBufferSize` for every per-lane binding (`maxLanesPerChunk`). 0.2's
+  `maxStorageBufferBindingSize` and `maxBufferSize` for every per-lane binding, and `maxBufferSize` for the
+  staging buffer that reads a chunk back (`maxLanesPerChunk`). 0.2's
   `run()` failed above 4,194,240 programs and at 128 MiB of memory; both are now chunked. Each chunk passes
   `lane_base`, so hashes see global lane indices and results are chunk-invariant (tested with a dial).
-- **Buffers.** Slabs (one bind group, at most one chunk) are reused between runs and grow only; a read copies
-  memory and records into one staging buffer and maps it once.
+- **Buffers.** A machine's slab (one bind group, at most one chunk) is reused between its runs and grows only;
+  runs of one machine queue behind each other. A read is a **snapshot**: the copy of memory and records into a
+  staging buffer (from a per-slab pool) is encoded and submitted when the read is called, and only the map is
+  asynchronous, so later uploads, encodes and submits never leak into it.
 - **Batches.** `Machine.batch(capacity)` keeps lanes resident across runs (several slabs when needed), exposes
   the buffers for chaining with other kernels, and encodes into the caller's encoder. Params are written with
   `queue.writeBuffer` at encode time, so submit before encoding again with different options.
-- **The 0.2 facade.** `Zilion.create/run/destroy` keeps its API and runs the byte-identical 0.2 kernel through
-  the same runner, so it is chunked and reuses its buffers; an invalid `fetchHook` now rejects at `create`.
+- **Lifecycle.** `Machine.destroy()` makes later runs reject at once; runs already called complete, then the
+  buffers are released. `Batch.destroy()` releases at once (submitted work and reads in flight complete).
+- **The 0.2 facade.** `Zilion.create/run/destroy` keeps its API **and its lifecycle**: every run owns its buffers
+  and releases them before it resolves, runs may overlap, the destroyed check is synchronous, and `destroy()`
+  only marks the instance (and destroys a device Zilion created). It runs the byte-identical 0.2 kernel through
+  the same runner, so it is chunked (its buffers are reused across the chunks of one run) and reads each chunk
+  back with one map; an invalid `fetchHook` now rejects at `create`.
 
 ## Testing
 
@@ -247,6 +260,7 @@ b.upload(lanes); b.encode(encoder, { budget: 128 }); /* … */ const r2 = await 
 | `npm run test:unit` | address math, hash, SHA-256, validation, hook minimality, manifest invariants, chunk planner, packing, ISA neutrality |
 | `npm run test:world` | the world spec on the GPU through `gpu_runner.py` (Python wgpu): hand-computed cases for odd and padded rings, the seam, stack conventions, budgets, halt and trap policies, dials, ablation, maps, init, io hooks; ring = mask, hook neutrality, library = kernel, chunk invariance, 0.2 kernel = mask world; the 6502 and BFF skeletons and one world on three ISAs. Set `ZILION_PYTHON` to an interpreter with `wgpu` and `numpy`. |
 | `npm run test:algocell` | 33 conditions against the executors Algocell exported with 0.2.0 (20,000 random pairs each) |
+| `npm run test:engine` | the engine's ordering and lifecycle on a mock device (no GPU): read snapshots, the 0.2 facade's buffer lifetime and destroy races, staging within `maxBufferSize` |
 | `test/engine.html` | the engine and the facade on browser WebGPU (`node scripts/serve.mjs`) |
 
 ## Differences from the design document

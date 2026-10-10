@@ -49,7 +49,8 @@ function limitedDevice(device, limits) {
   });
 }
 
-const adapter = await navigator.gpu.requestAdapter();
+/** A new device on a new adapter (a Dawn adapter creates one device). */
+const freshDevice = async () => (await navigator.gpu.requestAdapter()).requestDevice();
 const engine = await Z.createEngine();
 
 await test("0.2 facade: the 17 conformance vectors + the parallel batch (test/conformance.js)", async () => {
@@ -60,7 +61,7 @@ await test("0.2 facade: the 17 conformance vectors + the parallel batch (test/co
 });
 
 await test("0.2 facade: chunked runs equal one dispatch (dispatch-bound: 3 workgroups; binding-bound: 16 KiB)", async () => {
-  const dev = await adapter.requestDevice();
+  const dev = await freshDevice();
   const programs = Array.from({ length: 1000 }, (_, i) => randomBytes(256, i));
   const init = programs.map((_, i) => ({ af: i * 7, bc: i * 13, sp: 0xfff0 - i }));
   const a = await Z.Zilion.create({ device: dev });
@@ -98,6 +99,84 @@ await test("concurrent runs on one instance (Promise.all), as 0.2 allowed: facad
   const b = await Promise.all(ins.map((x) => m.run(x, { budget: 100, seed: 3 })));
   b.forEach((r, k) => equalArrays(r.record, a[k].record, `machine set ${k}`));
   m.destroy();
+});
+
+/** A device proxy that counts live GPU buffers (created and not yet destroyed). */
+function countingDevice(device) {
+  const stats = { live: 0 };
+  const proxy = new Proxy(device, {
+    get: (t, k) => {
+      if (k === "createBuffer") {
+        return (desc) => {
+          const b = t.createBuffer(desc);
+          stats.live++;
+          const d = b.destroy.bind(b);
+          let gone = false;
+          b.destroy = () => { if (!gone) { gone = true; stats.live--; } d(); };
+          return b;
+        };
+      }
+      const v = t[k];
+      return typeof v === "function" ? v.bind(t) : v;
+    },
+  });
+  return { proxy, stats };
+}
+
+await test("0.2 lifecycle: no buffer outlives a run; destroy() racing run() resolves; run after destroy rejects", async () => {
+  const dev = await freshDevice();
+  const { proxy, stats } = countingDevice(dev);
+  const z = await Z.Zilion.create({ memBytes: 64, device: proxy });
+  const progs = Array.from({ length: 3000 }, (_, i) => randomBytes(64, 500 + i));
+  const ref = await z.run(progs, { steps: 64 });
+  assert(stats.live === 0, `${stats.live} GPU buffers still live after run() resolved`);
+  const p = z.run(progs, { steps: 64 });
+  z.destroy();
+  const raced = await p;
+  equalArrays(raced.memory, ref.memory, "run racing destroy");
+  let rejected = false;
+  await z.run(progs.slice(0, 1), { steps: 1 }).catch(() => (rejected = true));
+  assert(rejected, "run after destroy did not reject");
+  assert(stats.live === 0, `${stats.live} GPU buffers live at the end`);
+  dev.destroy();
+});
+
+await test("Batch.read() is a snapshot at call time: read, run, read; run then upload", async () => {
+  const m = await engine.machine({ isa: Z.z80, world: { memory: { kind: "ring", bytes: 64 }, init: { stack: { topAliases: "lastByte" } }, outputs: { writeCounts: true } } });
+  const input = randomBytes(500 * 64, 99);
+  const once = await m.run(input, { budget: 50 });
+  const twice = await m.run(once.memory, { budget: 50 });
+  const b = m.batch(500, { maxLanesPerSlab: 128 });
+  b.upload(input);
+  const go = () => { const e = engine.device.createCommandEncoder(); b.encode(e, { budget: 50 }); engine.device.queue.submit([e.finish()]); };
+  go();
+  const r1 = b.read();
+  go();
+  const r2 = b.read();
+  const [a, c] = await Promise.all([r1, r2]);
+  equalArrays(a.memory, once.memory, "first read = state after run 1");
+  equalArrays(a.record, once.record, "first read records");
+  equalArrays(c.memory, twice.memory, "second read = state after run 2");
+  b.upload(input);
+  const p = b.run({ budget: 50 });
+  b.upload(new Uint8Array(500 * 64).fill(0x76));
+  equalArrays((await p).memory, once.memory, "run() unaffected by a later upload");
+  equalArrays((await b.read()).memory, new Uint8Array(500 * 64).fill(0x76), "the upload landed after");
+  b.destroy();
+  m.destroy();
+});
+
+await test("Machine: destroy() racing run() lets queued runs finish; later runs reject", async () => {
+  const m = await engine.machine({ isa: Z.z80, world: { memory: { kind: "ring", bytes: 40 }, budget: { value: 80 } } });
+  const ins = [randomBytes(700 * 40, 1), randomBytes(300 * 40, 2)];
+  const ref = [await m.run(ins[0]), await m.run(ins[1])];
+  const ps = ins.map((x) => m.run(x));
+  m.destroy();
+  const got = await Promise.all(ps);
+  got.forEach((r, k) => equalArrays(r.record, ref[k].record, `queued run ${k}`));
+  let rejected = false;
+  await m.run(ins[1]).catch(() => (rejected = true));
+  assert(rejected, "run after destroy did not reject");
 });
 
 await test("0.2 facade: an invalid fetchHook rejects at create with the compiler's line", async () => {

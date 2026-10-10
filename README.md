@@ -127,7 +127,7 @@ interface RunResult {
 
 Each program is copied into its instance's memory (zero-padded or truncated to `memBytes`). Registers reset to zero except **SP = 0xFFFF** (a real Z80 reset), unless overridden via `init`.
 
-Any number of programs can be passed: since 0.3 a batch is split into chunks that respect the device limits (0.2 failed above 4,194,240 programs or 128 MiB of memory), GPU buffers are reused between runs, and an invalid `fetchHook` makes `create` reject with the compiler's message.
+Any number of programs can be passed: since 0.3 a batch is split into chunks that respect the device limits (0.2 failed above 4,194,240 programs or 128 MiB of memory), and an invalid `fetchHook` makes `create` reject with the compiler's message. As in 0.2, each run owns its GPU buffers and releases them before it resolves.
 
 ### `zilion.destroy()`
 
@@ -254,6 +254,7 @@ One dispatch scales with your GPU, not your program count. As a rough sense of s
 npm run build
 npm run check:bytes    # the 0.2 configuration is byte-identical to the v0.2.0 tag and the published 0.2.0 package
 npm run test:unit      # no GPU needed
+npm run test:engine    # engine ordering and lifecycle on a mock device (no GPU needed)
 ZILION_PYTHON=/path/to/python npm run test:world      # GPU, via wgpu-py + numpy (headless)
 ZILION_PYTHON=/path/to/python npm run test:algocell   # against Algocell's exported shaders (needs a checkout)
 node scripts/serve.mjs # then open http://127.0.0.1:8937/test/engine.html (engine on browser WebGPU)

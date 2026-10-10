@@ -90,9 +90,8 @@ including the shared pair world. The contract needed **no change** for it. To be
 
 1. **Brackets**: `[` with a zero under head 0 scans forward for the matching `]` by op id (depth counting),
    `]` with a non-zero byte scans backward; both scans stay inside [0, P) and do not wrap, as bff.py does. The
-   scan reads bytes with `mem_read` and does **not** call `on_fetch`, so the fetch map stays "positions
-   executed" (bff.py's `max_pc` and `entered` are then the maximum fetched position and "any fetched position
-   in B"). An unmatched bracket calls `zil_trap(ZIL_TRAP_UNMATCHED)`; one step includes the whole scan.
+   scan reads bytes with `mem_read` and does **not** call `on_fetch` (it inspects code, it does not execute
+   it). An unmatched bracket calls `zil_trap(ZIL_TRAP_UNMATCHED)`; one step includes the whole scan.
 2. **The halting dial maps exactly**: bff.py's `bracket_halts(p, s)` is
    `hash32(p·0x9E3779B1 ^ (s+1)·0x85EBCA77 ^ roll_seed) < halt_q` with `halt_q = round(p · 2³²)`. The world's
    trap dial with salt 0, `seed = roll_seed`, lane = pair index and step = loop index is the same formula and
@@ -104,6 +103,8 @@ including the shared pair world. The contract needed **no change** for it. To be
    `CoreGenOptions` (compile-time tables) or a core-owned uniform table. This is the one contract extension BFF
    forces; it is not made here.
 5. **Records**: bff.py's `writesB` counts writes at positions ≥ 64; on the pair world [64, 64] on ring 128 that
-   is the world's write counter for segment B. Its `entered` and `max_pc` derive from the fetch map.
+   is the world's write counter for segment B. Its `entered` ("an op executed in B") and `max_pc` are over the
+   positions of executed ops, which is the **start map**, not the fetch map: the literal-push op reads its two
+   operand bytes as instruction stream (fetched) but never executes them.
 6. **Open points** (for review): the halt cause (bounds vs unmatched; see the 6502 note); resumable runs need a
    step base in the params so that `zil_step` (and the dial) continue across runs.

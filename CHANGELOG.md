@@ -32,7 +32,9 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
 
 - `Zilion.run` no longer fails above 4,194,240 programs (the dispatch limit) or 128 MiB of lane memory: batches
   are chunked against the device limits.
-- `Zilion.run` reuses its GPU buffers across runs and reads each chunk back with a single map.
+- `Zilion.run` reads each chunk back with a single map (0.2 mapped twice). Its lifecycle is unchanged: each run
+  owns its buffers and releases them before it resolves, runs may overlap, and `destroy()` does not affect a run
+  already called.
 - `Zilion.create` rejects with the compiler's message (and the offending line) when `fetchHook` does not compile,
   instead of failing later.
 
@@ -40,7 +42,8 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
 
 - `npm run test:world` (GPU via wgpu-py): world semantics with hand-computed expectations, metamorphic and
   invariance checks, the skeleton cores. `npm run test:algocell`: 33 conditions against Algocell's exported 0.2.0
-  executors. `npm run test:unit`. `test/engine.html` (browser WebGPU).
+  executors. `npm run test:unit`. `npm run test:engine` (mock device: read snapshots, lifecycle, limits).
+  `test/engine.html` (browser WebGPU).
 
 **Internal**
 

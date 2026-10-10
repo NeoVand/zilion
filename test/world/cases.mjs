@@ -493,6 +493,27 @@ export const CASES = [
       ]),
   },
 
+  {
+    name: "on_reset runs last: after a per-lane state load it sees and keeps the loaded state (review bug 2)",
+    // Raw hook A <- A + 1. perLane state A = 0x11 → 0x12; with init.set A = 0x11 the same → 0x12. HALT at 0.
+    setup: ({ Z, addJob }) => [
+      addJob({ isa: Z.z80, world: ring(32, { init: { state: "perLane" }, hooks: { onReset: "cpu_a = cpu_a + 1u;" } }) },
+        [{ state: { a: 0x11 }, mem: mem(32, { 0: [0x76] }), expect: { steps: 1, state: { a: 0x12 } } }]),
+      addJob({ isa: Z.z80, world: ring(32, { init: { set: { a: 0x11 } }, hooks: { onReset: "cpu_a = cpu_a + 1u;" } }) },
+        [{ mem: mem(32, { 0: [0x76] }), expect: { steps: 1, state: { a: 0x12 } } }]),
+    ],
+  },
+  {
+    name: "user expressions on their own lines: trailing // comments in ablation.expr and hooks.decode; ioIn '' (review nit 8)",
+    setup: ({ Z, addJob }) => [
+      addJob({ isa: Z.z80, world: ring(32, { ablation: { expr: "prefix == 0u && op == 0x3cu // INC A" }, hooks: { decode: "false // nothing else" } }) },
+        [{ mem: mem(32, { 0: [0x3c, 0x3c, 0x3e, 0x05, 0x76] }), expect: { steps: 4, state: { a: 5 } } }]),
+      // an empty ioIn enables the io hooks with the default (ports read 0): LD A,0x12; IN A,(0x34) → 0
+      addJob({ isa: Z.z80, world: ring(32, { hooks: { ioIn: "" } }) },
+        [{ mem: mem(32, { 0: [0x3e, 0x12, 0xdb, 0x34, 0x76] }), expect: { steps: 3, state: { a: 0 } } }]),
+    ],
+  },
+
   // ---------------------------------------------------------------------------------------------------------
   // Metamorphic and invariance checks on random programs
   // ---------------------------------------------------------------------------------------------------------
@@ -602,6 +623,40 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       });
       return errs;
     },
+  },
+  {
+    name: "library zil_run may be called again on a lane: zil_run(3) + zil_run(4) = one zil_run(7), dial included (review nit 6)",
+    setup: ({ Z, addJob }) => {
+      const world = pair(16, 32, { init: { stack: { topAliases: "lastByte" } }, halting: { lethal: { firstUnit: 0, probability: 0.2 } }, outputs: { writeCounts: true, ...maps } });
+      const lib = Z.buildMachine({ isa: Z.z80, world, mode: "library", bindingNames: { memory: "lane_mem", out: "lane_out" } });
+      const host = `struct Params { lanes: u32, lane_base: u32, budget: u32, seed: u32 };
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read_write> lane_mem: array<u32>;
+@group(0) @binding(2) var<storage, read_write> lane_out: array<u32>;
+${lib.wgsl}
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3u) {
+    let l = gid.x;
+    if (l >= params.lanes) { return; }
+    zil_load_memory(l * ZIL_MEM_WORDS);
+    zil_begin(params.lane_base + l, params.seed);
+    let steps = zil_run(3u) + zil_run(params.budget - 3u);
+    zil_store_memory(l * ZIL_MEM_WORDS);
+    zil_store_record(l * ZIL_RECORD_WORDS, steps);
+}
+`;
+      const manifest = { ...lib.manifest, mode: "kernel", entryPoint: "main",
+        params: { bytes: 16, fields: [
+          { name: "lanes", role: "laneCount", offset: 0, words: 1 }, { name: "lane_base", role: "laneBase", offset: 4, words: 1 },
+          { name: "budget", role: "budget", offset: 8, words: 1 }, { name: "seed", role: "seed", offset: 12, words: 1 }] },
+        bindings: [
+          { group: 0, binding: 0, name: "params", role: "params", type: "uniform" },
+          { group: 0, binding: 1, name: "lane_mem", role: "memory", type: "storage", wordsPerLane: lib.manifest.memory.storageWordsPerLane },
+          { group: 0, binding: 2, name: "lane_out", role: "record", type: "storage", wordsPerLane: lib.manifest.record.wordsPerLane }] };
+      const lanes = lanesOf(randomBytes(4096 * 32, 77), 32);
+      return [addJob(Z.buildMachine({ isa: Z.z80, world }), lanes, { seed: 5, budget: 7 }), addJob({ wgsl: host, manifest }, lanes, { seed: 5, budget: 7 })];
+    },
+    check: ([a, b]) => compareJobs(a, b),
   },
   {
     name: "chunk invariance: 5000 lanes with a dial in 1, 5 and 16 dispatches, and a lane_base slice",

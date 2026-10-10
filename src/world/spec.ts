@@ -109,7 +109,7 @@ export interface RawHooks {
   readonly ioIn?: string;
   /** Body of `io_out(port: u32, val: u32)`. Enables the io hooks. Default: nothing. */
   readonly ioOut?: string;
-  /** Statements run once per lane after the reset and the init conventions (`on_reset()`). */
+  /** Statements run once per lane, last: after the reset and the init conventions, or after a per-lane state load (`on_reset()`). */
   readonly onReset?: string;
 }
 
