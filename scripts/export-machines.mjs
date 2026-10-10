@@ -7,7 +7,8 @@
 // worlds.json: { "<name>": { "isa": "z80", "world": { …WorldSpec… }, "mode"?: "kernel" | "library",
 //                            "workgroupSize"?: 64, "variant"?: …, "compat"?: …, "bindingNames"?: {…} }, … }
 //   or, with core parameters: { "core": { "isa": "z80", "variant"?, "compat"?, "params"?: {…} }, "world": {…}, … }
-// The ISA is named explicitly, and every world states its budget and stack (buildMachine refuses silent defaults).
+// The ISA is named explicitly, and every world states its budget and stack (buildMachine refuses silent defaults);
+// a Z80 machine also names its compat ('0.3' or '0.2'), or runs a world that states it (world.compat.z80).
 // --check writes nothing and exits 1 unless every file on disk equals what would be written (for CI).
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

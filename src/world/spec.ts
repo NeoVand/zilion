@@ -144,6 +144,12 @@ export interface WorldSpec {
   readonly ablation?: AblationSpec;
   readonly outputs?: OutputSpec;
   readonly hooks?: RawHooks;
+  /**
+   * The semantics the world was written for, per ISA id (`{ z80: '0.2' }`): the `compat` a machine runs when its
+   * core selection names none. A selection that names one takes precedence (so a study can rerun a preset world
+   * under another semantics, explicitly). Entries for other ISAs are ignored. The presets state theirs.
+   */
+  readonly compat?: Readonly<Record<string, string>>;
 }
 
 /** Names the library mode uses for host-owned resources. */
@@ -163,7 +169,10 @@ export interface CoreSelection {
   readonly isa: IsaCore;
   /** One of `isa.variants` (default `isa.defaultVariant`). */
   readonly variant?: string;
-  /** One of `isa.compat` (default: its first entry). */
+  /**
+   * One of `isa.compat`. When omitted: the world's `compat[isa.id]`, else `isa.compat[0]`, except for a core with
+   * `compatRequired` (the Z80 through 0.3.x), whose build then fails.
+   */
   readonly compat?: string;
   /** Values of the parameters the core declares (`isa.params`); undeclared names are errors, omitted ones take the declared default. */
   readonly params?: Readonly<Record<string, CoreParamValue>>;

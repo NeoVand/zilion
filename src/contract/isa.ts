@@ -159,8 +159,19 @@ export interface IsaCore {
   /** Variant name → description. */
   readonly variants: Readonly<Record<string, string>>;
   readonly defaultVariant: string;
-  /** Accepted `compat` values; the first is the default. */
+  /** Accepted `compat` values; the first is the default (unless `compatRequired`). */
   readonly compat: readonly string[];
+  /**
+   * True when a machine must name its `compat` (in the core selection, or through a world that states it): the
+   * builder refuses a build that names none, instead of taking `compat[0]`. The Z80 requires it through 0.3.x, as
+   * worlds require their stack and budget (no silent default).
+   */
+  readonly compatRequired?: boolean;
+  /**
+   * The version of the semantics a selection runs, when it differs from `coreVersion` (a historical `compat`
+   * reproduces an older version's outputs). The builder records it as `manifest.core.coreVersion`.
+   */
+  coreVersionFor?(o: { variant: string; compat: string }): string;
   /**
    * Compile-time parameters (name → declaration). A machine selects values with `core: { isa, params }`; the
    * builder validates them, emits `const ZIL_PARAM_<NAME>` ahead of the core text and records them in the

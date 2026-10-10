@@ -110,7 +110,7 @@ const CASES = [
       const b = Z.buildMachine({ isa: bff, world });
       if (b.manifest.init.stack.notApplicable !== "no stack") throw new Error(`bff init.stack: ${JSON.stringify(b.manifest.init.stack)}`);
       return [
-        addJob({ isa: Z.z80, world }, [{ mem: mem(32, { 0: [0x3e, 0x07, 0x32, 0x14, 0x00, 0x76] }),
+        addJob({ isa: Z.z80, compat: "0.3", world }, [{ mem: mem(32, { 0: [0x3e, 0x07, 0x32, 0x14, 0x00, 0x76] }),
           expect: { steps: 3, halt: "halt-insn", trap: "halt-insn", mem: { 20: 7 }, writes: [0, 1, 0], fetched: [0, 1, 2, 3, 4, 5] } }], { budget: 40 }),
         addJob({ isa: m6502, world }, [{ mem: mem(32, { 0: [0xa9, 0x07, 0x8d, 0x14, 0x00, 0x02] }),
           expect: { steps: 3, halt: "trap", trap: "illegal", mem: { 20: 7 }, writes: [0, 1, 0], fetched: [0, 1, 2, 3, 4, 5] } }], { budget: 40 }),
@@ -130,10 +130,10 @@ const CASES = [
     name: `init.stack.firstPushAt ${JSON.stringify(at)}, ${label}: the first byte pushed lands on position ${t} on the Z80 and the 6502`,
     setup: ({ Z, addJob }) => {
       const w = { ...world, init: { stack: { firstPushAt: at } } };
-      const n = Z.buildMachine({ isa: Z.z80, world: w }).manifest.memory.hostBytesPerLane;
+      const n = Z.buildMachine({ isa: Z.z80, compat: "0.3", world: w }).manifest.memory.hostBytesPerLane;
       return [
         // Z80: LD BC,0x1234; PUSH BC; HALT. PUSH writes B (0x12) first, at SP0 - 1, then C (0x34) below it.
-        addJob({ isa: Z.z80, world: w }, [{ mem: mem(n, { 0: [0x01, 0x34, 0x12, 0xc5, 0x76] }),
+        addJob({ isa: Z.z80, compat: "0.3", world: w }, [{ mem: mem(n, { 0: [0x01, 0x34, 0x12, 0xc5, 0x76] }),
           expect: { steps: 3, halt: "halt-insn", state: { sp: (sp0 - 2) & 0xffff }, mem: { [t]: 0x12, [t - 1]: 0x34 } } }]),
         // 6502: LDA #$12; PHA; LDA #$34; PHA; JAM: 0x12 at 0x0100|S0, then 0x34 below it.
         addJob({ isa: m6502, world: w }, [{ mem: mem(n, { 0: [0xa9, 0x12, 0x48, 0xa9, 0x34, 0x48, 0x02] }),

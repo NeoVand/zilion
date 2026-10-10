@@ -52,7 +52,9 @@ descriptor, so a new core writes only its state variables and its step function.
 | `hooks` | which optional hooks the core can call: `fetch`, `instructionStart`, `trap`, `io` |
 | `decode` | the decode (ablation) hook: its WGSL name and parameters, page layouts, what a skip consumes |
 | `conventions` | step definition; `firstPushAt(P, t)` and `stackTop(P, t)` (both null without a stack); `entry(pos, P)`; trap causes with as-chip decisions; prose on halting and illegal opcodes |
-| `variants`, `compat` | named semantics; `compat` selects historical semantics (the Z80: `'0.3'`, the default, and `'0.2'`) |
+| `variants`, `compat` | named semantics; `compat` selects historical semantics (the Z80: `'0.3'` and `'0.2'`) |
+| `compatRequired` (optional) | a machine must name its compat (no default; the Z80 through 0.3.x, see Core selection) |
+| `coreVersionFor({ variant, compat })` (optional) | the version of the semantics a selection runs, when it is not `coreVersion` (the Z80's compat `'0.2'`: `0.2.0`); recorded as `manifest.core.coreVersion` |
 | `stateFor({ variant, compat })` (optional) | the state record and internals for that selection, when they differ from `state` and `internals` (the Z80's 0.2 record has no `wz`/`im`, its `zilog-nmos` record adds `q`) |
 | `params` (optional) | compile-time parameters: name → `{ type: 'u32' \| 'bool' \| 'enum', default, values? }` (see Core parameters) |
 | `wgsl({ variant, compat, hooks, params? })` | the core text; a disabled hook is never called (WGSL has no default functions) |
@@ -98,8 +100,13 @@ descriptor's `wgsl` calls it). Two semantics:
 
 | `compat` | Text | State record | Use |
 |---|---|---|---|
-| `'0.3'` (default) | the current core (`core.wgsl.ts`) | the 25 fields of 0.2, then `wz` (16 bits) and `im` (2); `zilog-nmos` adds `q` (8) | new work |
-| `'0.2'` | the frozen 0.2 generator (`core-0.2.wgsl.ts`); with every hook off the 0.2.0 core **byte for byte** (`Z80_CORE_WGSL`) | the 25 fields of 0.2.0 | registered work, Algocell's executors |
+| `'0.3'` (`coreVersion` 0.3.0) | the current core (`core.wgsl.ts`) | the 25 fields of 0.2, then `wz` (16 bits) and `im` (2); `zilog-nmos` adds `q` (8) | new work |
+| `'0.2'` (`coreVersion` 0.2.0) | the frozen 0.2 generator (`core-0.2.wgsl.ts`); with every hook off the 0.2.0 core **byte for byte** (`Z80_CORE_WGSL`) | the 25 fields of 0.2.0 | registered work, Algocell's executors, the presets |
+
+A Z80 machine **names its compat**: through 0.3.x the descriptor has no default (`compatRequired`), so a build that
+names none fails, as a world without a stack or a budget does; the presets state `'0.2'` (see Core selection). The
+manifest reports the semantics that ran: `core.compat`, and `core.coreVersion` 0.2.0 under `'0.2'` (the package that
+generated the shader stays in `zilion`).
 
 The record differs by semantics, so the descriptor gives it per selection (`stateFor({ variant, compat })`, an
 optional descriptor method the builder uses when present); new fields are appended, so 0.2 offsets are unchanged.
@@ -141,10 +148,11 @@ wasted-prefix vectors and 86 hand-derived R and WZ probes (docs/TESTING.md); wha
   zero-initialisation (design Appendix C.5).
 
 **Variant `zilog-nmos`** (compat `'0.3'` only): the Q latch of the Zilog NMOS Z80. Q = F after an instruction that
-writes F, else 0 (POP AF and EX AF,AF' do not write it; a wasted prefix, a HALT step, a skipped or ablated
-instruction and a step the host halts leave Q = 0, and a DD/FD prefix clears it before the instruction it prefixes);
-SCF and CCF take X/Y from ((Q ⊕ F) | A), Q being the latch as the step began (`z80_qprev`). A lane already halted by
-the host is frozen, Q included. The variant adds statements inside the same functions, so `z80_step` holds the
+writes F, else 0 (POP AF and EX AF,AF' do not write it; a wasted prefix, a HALT step and a skipped or ablated
+instruction leave Q = 0, and a DD/FD prefix clears it before the instruction it prefixes); SCF and CCF take X/Y from
+((Q ⊕ F) | A), Q being the latch as the instruction began (`z80_qprev`). A host halt executes no instruction: from the
+halting step itself on, Q is frozen with the rest of the state (the halting step changes only R, which counted the
+fetched byte's M1 before the host decided, PC, backed onto the byte, and `halted`). The variant adds statements inside the same functions, so `z80_step` holds the
 anchors here too. With it, every SingleStepTests field except the interrupt latches matches
 (`expected-0.3.0-zilog-nmos.json`). It is a variant and not a core parameter (decision 4) because it changes the state
 record (`q`), which the record-per-selection mechanism keys on variant and compat; the default `classic` takes
@@ -187,6 +195,14 @@ that the prefix-resolution anchor is unchanged:
 `buildMachine({ isa, world, mode?, workgroupSize?, variant?, compat?, bindingNames? })`, or with core parameters
 `buildMachine({ core: { isa, variant?, compat?, params? }, world, … })`, returns
 `{ wgsl, manifest }` (`src/world/spec.ts`, `src/world/build.ts`).
+
+**Core selection.** `variant` defaults to the descriptor's; `compat` is taken from the core selection, else from the
+world (`world.compat`, the semantics the world was written for, per ISA id: `{ z80: '0.2' }`; entries for other ISAs
+are ignored), else the descriptor's first entry, except for a core with `compatRequired` (the Z80 through 0.3.x),
+whose build then fails with a message naming the field and its choices. A selection that names a compat takes
+precedence over the world's, so a study can rerun a preset world under the fixes by naming `'0.3'`. The manifest
+records the world as given (with its `compat`), the resolved `core.compat` and the `core.coreVersion` of that
+semantics (`coreVersionFor`).
 
 ### Memory models and the seam
 
@@ -237,11 +253,11 @@ or `{ notApplicable: 'no stack', given: <init.stack as given> }` on an ISA witho
 `{ notApplicable: 'per-lane state' }`. The generated `zil_init_state` carries the same as a comment, and the world as
 given (with its `init.stack`) is in `manifest.world` and its hash.
 
-**Presets** (`src/world/presets.ts`) write the old worlds out with both conventions explicit:
-`compat02World({ memBytes, steps, registers? })` is 0.2's `Zilion.run` world (use it with `compat: '0.2'`: mask
-memory, `topAliases: 'lastByte'`, which is 0.2's SP = 0xFFFF, or per-lane registers), and
-`algocellPairWorld({ L, P, steps })` is Algocell's pair (tapes A and B on a ring of P, `topAliases: 'lastByte'`,
-a steps budget, writes counted).
+**Presets** (`src/world/presets.ts`) write the old worlds out with both conventions explicit, and the Z80 semantics
+they were written for (`compat: { z80: '0.2' }`, see Core selection below): `compat02World({ memBytes, steps,
+registers? })` is 0.2's `Zilion.run` world (mask memory, `topAliases: 'lastByte'`, which is 0.2's SP = 0xFFFF, or
+per-lane registers), and `algocellPairWorld({ L, P, steps })` is Algocell's pair (tapes A and B on a ring of P,
+`topAliases: 'lastByte'`, a steps budget, writes counted).
 
 ### Budgets
 
@@ -383,7 +399,7 @@ for each named spec, and `--check` verifies files already on disk (for CI).
 
 ```ts
 const engine = await createEngine();                 // or { gpu } in Node, or { device }
-const m = await engine.machine({ isa: z80, world });  // compile errors → ZilionShaderError with source lines
+const m = await engine.machine({ isa: z80, compat: "0.3", world }); // compile errors → ZilionShaderError with source lines
 const r = await m.run(lanes, { budget: 128, seed: 1, ablation }); // any number of lanes
 r.steps; r.haltReason; r.trapCause; r.stateOf(i); r.memoryOf(i); r.writesOf(i); r.fetchedOf(i); r.startsOf(i);
 const r2 = await m.run(r.memory, { budget: 64, seed: 1, stepBase: 128, resume: r.record }); // = one 192-step run
@@ -455,7 +471,9 @@ The first architecture review left six questions open. Decided as follows; all s
    requires the ISA to be named. Follow-up decisions: `init.set` or `init.random` covering every stack field counts
    as giving the stack (both given: convention first, both recorded in `manifest.init.stack`); a stackless ISA
    accepts `init.stack`, does not apply it and lists it as `notApplicable: 'no stack'`; the defaults outside this
-   decision are listed under "Defaults that remain".
+   decision are listed under "Defaults that remain". Extended to the Z80's semantics (2026-10-10, with the Z80 fixes):
+   a Z80 machine names its compat, or runs a world that states it (the presets state `'0.2'`), through 0.3.x; the
+   manifest reports the version of the semantics that ran (see Core selection and The Z80 core).
 4. **Core parameters are a contract feature, not a BFF special case.** A descriptor may declare `params`
    (name → `{ type: 'u32' | 'bool' | 'enum', default, values? }`); a world selects them with
    `core: { isa, params }`; the builder emits them as WGSL constants ahead of the core text and records them in
@@ -495,7 +513,7 @@ manifest (the world as given, `core`, `init`, `budget`, `record`, the options ha
 | trap dial `salt` | 0 | |
 | `world.ablation` | none | |
 | `variant` | `isa.defaultVariant`: Z80 `classic`, 6502 `nmos`, BFF `ascii` | recorded in `manifest.core` |
-| `compat` | `isa.compat[0]`: Z80 `'0.3'` (the current semantics; `'0.2'` must be asked for), 6502 and BFF `'skeleton'` | recorded in `manifest.core` |
+| `compat` | the world's `compat[isa.id]` if it states one, else `isa.compat[0]` (6502 and BFF `'skeleton'`). **Exception: the Z80 has no default through 0.3.x** (`compatRequired`): a Z80 machine that names none, directly or through its world, fails to build | recorded in `manifest.core`, with the version of the semantics that ran (`coreVersion`) |
 | core `params` | each declared parameter's `default` | recorded in `manifest.core.params` |
 | `mode` | `'kernel'` | |
 | `workgroupSize` | 64 | |

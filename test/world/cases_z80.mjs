@@ -49,7 +49,7 @@ export const Z80_SEMANTICS_CASES = [
           expect: { steps: 5, halt: "halt-insn", state: { a: a2, pc: 6 } } },
       ];
       return [
-        addJob({ isa: Z.z80, world: ring(32) }, lanes(5, 6)),
+        addJob({ isa: Z.z80, compat: "0.3", world: ring(32) }, lanes(5, 6)),
         addJob({ isa: Z.z80, compat: "0.2", world: ring(32) }, lanes(6, 8)),
       ];
     },
@@ -60,7 +60,7 @@ export const Z80_SEMANTICS_CASES = [
     // X/Y: WZ high byte 0x00 → none (F = 0x54); compat '0.2': operand 0x3A & 0x28 = 0x28 (F = 0x7C).
     // LD A,(0x2800) then BIT 0,(HL): WZ = 0x2801 → X/Y set.
     setup: ({ Z, addJob }) => [
-      addJob({ isa: Z.z80, world: ring(32) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32) }, [
         { mem: mem(32, { 0: [0x3a, 0x00, 0x00, 0xcb, 0x46, 0x76] }), expect: { steps: 3, state: { a: 0x3a, f: 0x54, wz: 0x0001 } } },
         { mem: mem(32, { 0: [0x3a, 0x00, 0x28, 0xcb, 0x46, 0x76] }), expect: { steps: 3, state: { f: 0x7c, wz: 0x2801 } } },
       ]),
@@ -74,9 +74,9 @@ export const Z80_SEMANTICS_CASES = [
     // JP 0x0005 → WZ = 5; at 5: IM 2 (ED 5E); HALT. The 0.2 record has no wz/im fields.
     setup: ({ Z, addJob }) => {
       const prog = mem(32, { 0: [0xc3, 0x05, 0x00], 5: [0xed, 0x5e, 0x76] });
-      const a = Z.buildMachine({ isa: Z.z80, world: ring(32) });
+      const a = Z.buildMachine({ isa: Z.z80, compat: "0.3", world: ring(32) });
       const b = Z.buildMachine({ isa: Z.z80, compat: "0.2", world: ring(32) });
-      const c = Z.buildMachine({ isa: Z.z80, variant: "zilog-nmos", world: ring(32) });
+      const c = Z.buildMachine({ isa: Z.z80, compat: "0.3", variant: "zilog-nmos", world: ring(32) });
       const names = (m) => m.manifest.state.map((f) => f.name);
       const errs = [];
       if (names(b).length !== 25 || names(b).includes("wz")) errs.push(`compat 0.2 record: ${names(b)}`);
@@ -101,8 +101,25 @@ export const Z80_SEMANTICS_CASES = [
         { mem: mem(32, { 0: [0x3e, 0x28, 0xb7, 0x37, 0x76] }), expect: { steps: 4, state: { f: 0x2d } } },
       ];
       return [
-        addJob({ isa: Z.z80, variant: "zilog-nmos", world: ring(32) }, lanes(0x2d)),
-        addJob({ isa: Z.z80, world: ring(32) }, lanes(0x05)),
+        addJob({ isa: Z.z80, compat: "0.3", variant: "zilog-nmos", world: ring(32) }, lanes(0x2d)),
+        addJob({ isa: Z.z80, compat: "0.3", world: ring(32) }, lanes(0x05)),
+      ];
+    },
+  },
+  {
+    name: "zilog-nmos: a host halt executes no instruction, so the halting step keeps Q; a skipped unit clears it",
+    // LD A,0; CP 0x28 (F = 0xBB, X/Y from the operand; Q = 0xBB); then 00. Lethal first unit 0: the 00 halts the lane
+    // and Q stays 0xBB (R counts the 00's M1, PC backs onto it). Skipped instead (on_instruction_start ZIL_SKIP): the
+    // unit is a no-op instruction, Q = 0, so the SCF that follows takes X/Y from (F | A) & 0x28 = 0x28 → F = 0xA9
+    // (with Q kept it would be 0x81).
+    setup: ({ Z, addJob }) => {
+      const nmos = (extra) => ({ isa: Z.z80, compat: "0.3", variant: "zilog-nmos", world: ring(32, extra) });
+      const prog = mem(32, { 0: [0x3e, 0x00, 0xfe, 0x28, 0x00, 0x37, 0x76] });
+      return [
+        addJob(nmos({ halting: { lethal: { firstUnit: 0 } } }), [{ mem: prog,
+          expect: { steps: 3, halt: "host", state: { q: 0xbb, f: 0xbb, a: 0, pc: 4, r: 3, halted: 2 } } }]),
+        addJob(nmos({ hooks: { onInstructionStart: "if (unit == 0x00u) { return ZIL_SKIP; }" } }), [{ mem: prog,
+          expect: { steps: 5, halt: "halt-insn", state: { f: 0xa9, q: 0 } } }]),
       ];
     },
   },
@@ -114,7 +131,7 @@ export const Z80_SEMANTICS_CASES = [
     setup: ({ Z, addJob }) => {
       const prog = mem(32, { 0: [0x01, 0x02, 0x00, 0x21, 0x10, 0x00, 0x11, 0x18, 0x00, 0xed, 0xb0, 0x76], 0x10: [0x0a, 0x0b] });
       return [
-        addJob({ isa: Z.z80, world: ring(32, { budget: { unit: "steps", value: 4 } }) }, [{ mem: prog, expect: { steps: 4, state: { pc: 9, f: 0x04, wz: 10, c: 1 } } }]),
+        addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { budget: { unit: "steps", value: 4 } }) }, [{ mem: prog, expect: { steps: 4, state: { pc: 9, f: 0x04, wz: 10, c: 1 } } }]),
         addJob({ isa: Z.z80, compat: "0.2", world: ring(32, { budget: { unit: "steps", value: 4 } }) }, [{ mem: prog, expect: { steps: 4, state: { pc: 9, f: 0x2c, c: 1 } } }]),
       ];
     },
@@ -153,17 +170,17 @@ ${body}
       const names = { memory: "lane_mem", out: "lane_out" };
       const lethal = ring(32, { halting: { lethal: { firstUnit: 0 } } });
       const frozen = (compat, variant) => {
-        const lib = Z.buildMachine({ isa: Z.z80, compat, variant, world: lethal, mode: "library", bindingNames: names });
+        const lib = Z.buildMachine({ isa: Z.z80, compat: compat ?? "0.3", variant, world: lethal, mode: "library", bindingNames: names });
         // zilog-nmos: Q set by hand after the halt must survive the further steps too
         const q = variant ? "\n    cpu_q = 0x55u;" : "";
         return asKernel(lib, host(lib, `    var steps = zil_run(params.budget);${q}\n    for (var k = 0u; k < 5u; k++) { z80_step(); }`));
       };
       // z80_reset: run 3 steps of LD A,0x55 ..., reset, then run the program again from PC 0 with A = 0.
-      const libReset = Z.buildMachine({ isa: Z.z80, world: ring(32), mode: "library", bindingNames: names });
+      const libReset = Z.buildMachine({ isa: Z.z80, compat: "0.3", world: ring(32), mode: "library", bindingNames: names });
       const resetHost = asKernel(libReset, host(libReset,
         "    var steps = z80_run(2u);\n    z80_reset();\n    cpu_sp = 0x00ffu;\n    steps = steps + z80_run(1u);"));
       const plain = ring(32, { outputs: { writeCounts: true, fetchMap: true } });
-      const lib = Z.buildMachine({ isa: Z.z80, world: plain, mode: "library", bindingNames: names });
+      const lib = Z.buildMachine({ isa: Z.z80, compat: "0.3", world: plain, mode: "library", bindingNames: names });
       const random = lanesOf(randomBytes(512 * 32, 99), 32);
       return [
         addJob(frozen(undefined), [{ mem: mem(32, { 0: [0x3c, 0x00] }), expect: { steps: 2, halt: "host", state: { a: 1, r: 2, pc: 1, halted: 2 } } }], { budget: 10 }),
@@ -171,7 +188,7 @@ ${body}
         addJob(frozen(undefined, "zilog-nmos"), [{ mem: mem(32, { 0: [0x3c, 0x00] }), expect: { steps: 2, halt: "host", state: { a: 1, r: 2, pc: 1, halted: 2, q: 0x55 } } }], { budget: 10 }),
         // LD A,0x55; LD B,0x66 (2 steps), reset (all 0, PC 0), SP = 0xFF, one more step (LD A,0x55): A = 0x55, B = 0, R = 1.
         addJob(resetHost, [{ mem: mem(32, { 0: [0x3e, 0x55, 0x06, 0x66] }), expect: { steps: 3, state: { a: 0x55, b: 0, r: 1, pc: 2, sp: 0xff, wz: 0 } } }], { budget: 0 }),
-        addJob(Z.buildMachine({ isa: Z.z80, world: plain }), random, { budget: 50 }),
+        addJob(Z.buildMachine({ isa: Z.z80, compat: "0.3", world: plain }), random, { budget: 50 }),
         addJob(asKernel(lib, host(lib, "    let steps = z80_run(params.budget);")), random, { budget: 50 }),
       ];
     },
@@ -185,7 +202,7 @@ ${body}
     // are on (A = 7), else IN reads 0 (A = 0). HALT ignored: the lane runs to the budget.
     setup: ({ Z, addJob }) => {
       const jobs = [];
-      for (const sem of [{ compat: "0.2" }, {}, { variant: "zilog-nmos" }]) {
+      for (const sem of [{ compat: "0.2" }, { compat: "0.3" }, { compat: "0.3", variant: "zilog-nmos" }]) {
         for (let mask = 0; mask < 16; mask++) {
           const io = !!(mask & 8);
           const world = ring(32, {
@@ -210,12 +227,12 @@ ${body}
     // LD A,0; CP 0x28 (F = 0xBB: X/Y from the operand; Q = F) | SCF; HALT: X/Y = ((Q ^ F) | A) & 0x28 = 0 → F = 0x81;
     // with Q lost (0) it would be (F | A) & 0x28 → 0xA9.
     setup: ({ Z, addJob }) => {
-      const nmos = { isa: Z.z80, variant: "zilog-nmos", world: ring(32, { budget: { unit: "steps", value: 128 } }) };
+      const nmos = { isa: Z.z80, compat: "0.3", variant: "zilog-nmos", world: ring(32, { budget: { unit: "steps", value: 128 } }) };
       const c02 = { isa: Z.z80, compat: "0.2", world: ring(32, { budget: { unit: "steps", value: 128 } }) };
       const random = lanesOf(randomBytes(4096 * 32, 123), 32);
       const chunks = [1, 5, 17, 30, 25, 40, 10];
       return [
-        addJob({ isa: Z.z80, world: ring(32) }, [{ mem: mem(32, { 0: [0x3a, 0x00, 0x00, 0xcb, 0x46, 0x76] }), expect: { steps: 3, state: { f: 0x54, wz: 1 } } }], { stepChunks: [1, 2] }),
+        addJob({ isa: Z.z80, compat: "0.3", world: ring(32) }, [{ mem: mem(32, { 0: [0x3a, 0x00, 0x00, 0xcb, 0x46, 0x76] }), expect: { steps: 3, state: { f: 0x54, wz: 1 } } }], { stepChunks: [1, 2] }),
         addJob(nmos, [{ mem: mem(32, { 0: [0x3e, 0x00, 0xfe, 0x28, 0x37, 0x76] }), expect: { steps: 4, state: { f: 0x81, q: 0 } } }], { stepChunks: [2, 2] }),
         addJob(nmos, random, { budget: 128 }),
         addJob(nmos, random, { stepChunks: chunks }),

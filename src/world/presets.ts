@@ -1,5 +1,7 @@
 // World presets: the worlds earlier code ran in, written out with every convention explicit (decision 3: a world
 // states its stack and its budget). Each returns a plain WorldSpec; spread it to add halting, ablation or outputs.
+// Both were written for the Z80's 0.2 semantics and say so (`compat: { z80: '0.2' }`): a Z80 machine on them runs
+// compat '0.2' unless its core selection names another (the Z80 has no default compat through 0.3.x).
 
 import type { WorldSpec } from "./spec.js";
 
@@ -14,7 +16,7 @@ function u32(what: string, v: number): number {
 }
 
 /**
- * The world of 0.2's `Zilion.run` (use it with `{ isa: z80, compat: '0.2' }`): `memBytes` of power-of-two memory,
+ * The world of 0.2's `Zilion.run` (it states `compat: { z80: '0.2' }`): `memBytes` of power-of-two memory,
  * `steps` per run. Registers: `'default'` is 0.2's default (all zero, SP = 0xFFFF: the stack pointer aliases the
  * last byte, and memBytes divides 65,536), `'perLane'` loads the whole state record per lane, as 0.2's `init` did.
  */
@@ -27,13 +29,15 @@ export function compat02World(o: { memBytes: number; steps: number; registers?: 
     memory: { kind: "mask", bytes },
     init: registers === "perLane" ? { state: "perLane" } : { stack: { topAliases: "lastByte" } },
     budget: { unit: "steps", value: u32("steps", o.steps) },
+    compat: { z80: "0.2" },
   };
 }
 
 /**
  * Algocell's pair world: tapes A and B of L bytes back to back on a ring of P ≥ 2L bytes (padding after B), the stack
  * pointer aliasing the last byte of B (Algocell's registered convention: on the Z80 the first push lands one byte
- * below it), `steps` per run, writes counted per tape and padding. Add the condition's halting, ablation or maps
+ * below it), `steps` per run, writes counted per tape and padding; the Z80's 0.2 semantics, as registered
+ * (`compat: { z80: '0.2' }`; name compat '0.3' in the core selection to rerun it under the fixes). Add the condition's halting, ablation or maps
  * by spreading: `{ ...algocellPairWorld({ L: 16, P: 32, steps: 128 }), halting: { lethal: { firstUnit: 0 } } }`.
  */
 export function algocellPairWorld(o: { L: number; P: number; steps: number }): WorldSpec {
@@ -45,6 +49,7 @@ export function algocellPairWorld(o: { L: number; P: number; steps: number }): W
     init: { stack: { topAliases: "lastByte" } },
     budget: { unit: "steps", value: u32("steps", o.steps) },
     outputs: { writeCounts: true },
+    compat: { z80: "0.2" },
   };
 }
 
