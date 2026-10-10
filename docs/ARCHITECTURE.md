@@ -263,6 +263,37 @@ b.upload(lanes); b.encode(encoder, { budget: 128 }); /* … */ const r2 = await 
 | `npm run test:engine` | the engine's ordering and lifecycle on a mock device (no GPU): read snapshots, the 0.2 facade's buffer lifetime and destroy races, staging within `maxBufferSize` |
 | `test/engine.html` | the engine and the facade on browser WebGPU (`node scripts/serve.mjs`) |
 
+## Decisions on the open questions (2026-10-10)
+
+The first architecture review left six questions open. Decided as follows; the ones marked *to implement* are not
+in the code yet.
+
+1. **Stack convention: name the meaning, not the register.** Add `init.stack: { firstPushAt: t | 'lastByte' }`:
+   the first byte pushed lands at position t, on every ISA (Z80: SP aliases t + 1; 6502: `0x0100 | S` aliases t).
+   Cross-ISA worlds use this, since "the stack starts at the end of the partner" must mean the same bytes on both
+   machines. `topAliases` stays, with its current per-ISA meaning, because the `compat:'0.2'` and Algocell worlds
+   are written in it. A spec that gives both is an error. *To implement.*
+2. **The lane record carries the trap cause.** A 6502 JAM, a BFF run-off and a Z80 `illegal` must be told apart
+   in the outputs, not only in the policy. The record gains `trapCause` (0 when the lane did not trap), with the
+   codes listed in the manifest; `haltReason` keeps its codes. The legacy 0.2 kernel's outputs stay
+   byte-identical. *To implement.*
+3. **No implicit defaults for the stack and the budget.** A world spec without `init.stack` (on an ISA with a
+   stack) or without `budget` fails to build, naming the missing field. Silent defaults are how two worlds that
+   look the same come to differ (SP = 0 against Algocell's end-of-ring stack). The `compat:'0.2'` preset and the
+   Algocell presets supply both explicitly. *To implement.*
+4. **Core parameters are a contract feature, not a BFF special case.** A descriptor may declare `params`
+   (name → `{ type: 'u32' | 'bool' | 'enum', default, values? }`); a world selects them with
+   `core: { isa, params }`; the builder emits them as WGSL constants ahead of the core text and records them in
+   the manifest's provenance. A param is a compile-time constant (a recompile), never a uniform. BFF's variant
+   parameters (alphabet density, literal push) are the first use; the 6502's decimal mode and the Z80's
+   `zilog-nmos` Q latch are the next. *To implement with the BFF core (M2).*
+5. **Resumable runs: a step base.** The params struct gains `stepBase` (64-bit, as two u32), added to the step
+   counter in every dial draw, so a run split across dispatches draws exactly what one long dispatch draws.
+   Test: k chunked dispatches equal one dispatch, byte for byte, for k = 1, 2, 7. *To implement.*
+6. **Anchors stay through 0.3.x** (the commitment under Anchors). Registered Algocell work is pinned to 0.2.0
+   output semantics in any case; the anchors keep its shader patchers working until the equivalence proof lets
+   them retire.
+
 ## Differences from the design document
 
 1. **No monorepo yet** (see Packaging).
