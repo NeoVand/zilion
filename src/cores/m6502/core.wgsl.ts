@@ -26,6 +26,13 @@
 // Dummy reads (the extra bus reads of indexed modes, implied opcodes, RMW and stack operations) are not
 // performed: a read has no side effect in a Zilion world and only instruction-stream fetches are hooked, so they
 // cannot be observed. Dummy *writes* (the RMW old-value write) are performed, because writes are observable.
+//
+// Structure. A random program puts a different opcode on nearly every GPU lane, and a switch over opcodes runs
+// one case after another for the lanes of a SIMD group. So the step is a fixed sequence of short phases that every
+// lane walks: operand bytes, effective address, read (and read-modify-write), ALU, store, control flow and stack.
+// A per-opcode decode word (M6502_DECODE, generated below from the opcode table M6502_OPCODES) says what each
+// phase does. The order of the phases is the order of each instruction's bus accesses, so every instruction makes
+// its reads, writes and fetches in the chip's order.
 
 /** Host-contract-v2 hooks the generated 6502 core calls. */
 export interface M6502Hooks {
@@ -40,8 +47,39 @@ export interface M6502Hooks {
   trap?: boolean;
 }
 
+/** Addressing modes. `imm` covers BRK (its signature byte) and `rel` the branches; `ind` is JMP (abs). */
+export type M6502Mode = "imp" | "acc" | "imm" | "rel" | "zp" | "zpx" | "zpy" | "abs" | "abx" | "aby" | "ind" | "izx" | "izy";
+
+// The opcode matrix, row by row (high nibble), 16 entries per row (low nibble): "mnemonic mode".
+const ROWS = [
+  "BRK imm|ORA izx|JAM imp|SLO izx|NOP zp|ORA zp|ASL zp|SLO zp|PHP imp|ORA imm|ASL acc|ANC imm|NOP abs|ORA abs|ASL abs|SLO abs",
+  "BPL rel|ORA izy|JAM imp|SLO izy|NOP zpx|ORA zpx|ASL zpx|SLO zpx|CLC imp|ORA aby|NOP imp|SLO aby|NOP abx|ORA abx|ASL abx|SLO abx",
+  "JSR abs|AND izx|JAM imp|RLA izx|BIT zp|AND zp|ROL zp|RLA zp|PLP imp|AND imm|ROL acc|ANC imm|BIT abs|AND abs|ROL abs|RLA abs",
+  "BMI rel|AND izy|JAM imp|RLA izy|NOP zpx|AND zpx|ROL zpx|RLA zpx|SEC imp|AND aby|NOP imp|RLA aby|NOP abx|AND abx|ROL abx|RLA abx",
+  "RTI imp|EOR izx|JAM imp|SRE izx|NOP zp|EOR zp|LSR zp|SRE zp|PHA imp|EOR imm|LSR acc|ALR imm|JMP abs|EOR abs|LSR abs|SRE abs",
+  "BVC rel|EOR izy|JAM imp|SRE izy|NOP zpx|EOR zpx|LSR zpx|SRE zpx|CLI imp|EOR aby|NOP imp|SRE aby|NOP abx|EOR abx|LSR abx|SRE abx",
+  "RTS imp|ADC izx|JAM imp|RRA izx|NOP zp|ADC zp|ROR zp|RRA zp|PLA imp|ADC imm|ROR acc|ARR imm|JMP ind|ADC abs|ROR abs|RRA abs",
+  "BVS rel|ADC izy|JAM imp|RRA izy|NOP zpx|ADC zpx|ROR zpx|RRA zpx|SEI imp|ADC aby|NOP imp|RRA aby|NOP abx|ADC abx|ROR abx|RRA abx",
+  "NOP imm|STA izx|NOP imm|SAX izx|STY zp|STA zp|STX zp|SAX zp|DEY imp|NOP imm|TXA imp|ANE imm|STY abs|STA abs|STX abs|SAX abs",
+  "BCC rel|STA izy|JAM imp|SHA izy|STY zpx|STA zpx|STX zpy|SAX zpy|TYA imp|STA aby|TXS imp|TAS aby|SHY abx|STA abx|SHX aby|SHA aby",
+  "LDY imm|LDA izx|LDX imm|LAX izx|LDY zp|LDA zp|LDX zp|LAX zp|TAY imp|LDA imm|TAX imp|LXA imm|LDY abs|LDA abs|LDX abs|LAX abs",
+  "BCS rel|LDA izy|JAM imp|LAX izy|LDY zpx|LDA zpx|LDX zpy|LAX zpy|CLV imp|LDA aby|TSX imp|LAS aby|LDY abx|LDA abx|LDX aby|LAX aby",
+  "CPY imm|CMP izx|NOP imm|DCP izx|CPY zp|CMP zp|DEC zp|DCP zp|INY imp|CMP imm|DEX imp|SBX imm|CPY abs|CMP abs|DEC abs|DCP abs",
+  "BNE rel|CMP izy|JAM imp|DCP izy|NOP zpx|CMP zpx|DEC zpx|DCP zpx|CLD imp|CMP aby|NOP imp|DCP aby|NOP abx|CMP abx|DEC abx|DCP abx",
+  "CPX imm|SBC izx|NOP imm|ISC izx|CPX zp|SBC zp|INC zp|ISC zp|INX imp|SBC imm|NOP imp|SBC imm|CPX abs|SBC abs|INC abs|ISC abs",
+  "BEQ rel|SBC izy|JAM imp|ISC izy|NOP zpx|SBC zpx|INC zpx|ISC zpx|SED imp|SBC aby|NOP imp|ISC aby|NOP abx|SBC abx|INC abx|ISC abx",
+];
+
+/** The 256 opcodes: mnemonic and addressing mode (NMOS names; JAM is also called KIL or HLT). */
+export const M6502_OPCODES: readonly { readonly mnemonic: string; readonly mode: M6502Mode }[] = ROWS.flatMap((r) =>
+  r.split("|").map((e) => {
+    const [mnemonic, mode] = e.split(" ");
+    return { mnemonic, mode: mode as M6502Mode };
+  }),
+);
+
 /** The 12 NMOS opcodes that lock the chip. */
-export const M6502_JAM_OPCODES: readonly number[] = [0x02, 0x12, 0x22, 0x32, 0x42, 0x52, 0x62, 0x72, 0x92, 0xb2, 0xd2, 0xf2];
+export const M6502_JAM_OPCODES: readonly number[] = M6502_OPCODES.flatMap((o, i) => (o.mnemonic === "JAM" ? [i] : []));
 
 /** Constants of the unstable opcodes, pinned to the SingleStepTests 6502/v1 vectors (unique fit over 10,000 tests). */
 export const M6502_UNSTABLE = {
@@ -51,7 +89,72 @@ export const M6502_UNSTABLE = {
   lxaMagic: 0xee,
 } as const;
 
+// --- the decode word ------------------------------------------------------------------------------------------
+//   bits 0-3   addressing mode (AM below): which operand bytes are fetched and how the address is formed
+//   bit 4      READ: v = mem_read(ea)
+//   bit 5      RMW: write v back, v = shift(sop, v), write v (the shift group; SLO RLA SRE RRA DCP ISC)
+//   bit 6      SHIFT_A: A = shift(sop, A)
+//   bit 7      STORE: mem_write of the store source
+//   bits 8-10  sop: shift op (0 ASL, 1 ROL, 2 LSR, 3 ROR, 6 DEC, 7 INC); for XFER, the step (0, 1 = +1, 2 = -1)
+//   bits 11-15 ALU op (ALU below; 0 = none)
+//   bits 16-18 store source (STORE_SRC below)
+//   bits 20-23 control class (CLS below; 0 = none)
+//   bits 24-27 XFER source and destination registers (A 0, X 1, Y 2, S 3)
+const AM: Record<M6502Mode, number> = { imp: 0, acc: 0, imm: 1, rel: 1, zp: 2, zpx: 3, zpy: 4, abs: 5, ind: 5, abx: 6, aby: 7, izx: 8, izy: 9 };
+const READ = 1 << 4;
+const RMW = 1 << 5;
+const SHIFT_A = 1 << 6;
+const STORE = 1 << 7;
+const SOP: Record<string, number> = { ASL: 0, ROL: 1, LSR: 2, ROR: 3, DEC: 6, INC: 7, SLO: 0, RLA: 1, SRE: 2, RRA: 3, DCP: 6, ISC: 7 };
+const ALU: Record<string, number> = {
+  ORA: 1, AND: 2, EOR: 3, ADC: 4, LDA: 5, CMP: 6, SBC: 7, LDX: 8, LDY: 9, LAX: 10, CPX: 11, CPY: 12, BIT: 13,
+  ANC: 14, ALR: 15, ARR: 16, ANE: 17, LXA: 18, SBX: 19, LAS: 20,
+  // the combined read-modify-write opcodes: the shift group, then this ALU op on the new value
+  SLO: 1, RLA: 2, SRE: 3, RRA: 4, DCP: 6, ISC: 7,
+};
+const STORE_SRC: Record<string, number> = { STA: 0, STX: 1, STY: 2, SAX: 3, SHA: 4, SHX: 5, SHY: 6, TAS: 7 };
+const CLS: Record<string, number> = {
+  BRK: 1, JSR: 2, RTI: 3, RTS: 4, JMP: 5, BPL: 7, BMI: 7, BVC: 7, BVS: 7, BCC: 7, BCS: 7, BNE: 7, BEQ: 7,
+  PHA: 8, PHP: 8, PLA: 9, PLP: 9, CLC: 10, SEC: 10, CLI: 10, SEI: 10, CLV: 10, CLD: 10, SED: 10,
+  TXA: 11, TYA: 11, TAX: 11, TAY: 11, TSX: 11, TXS: 11, INX: 11, DEX: 11, INY: 11, DEY: 11, JAM: 12,
+};
+const CLS_JMP_IND = 6;
+const REG = { A: 0, X: 1, Y: 2, S: 3 } as const;
+const XFER: Record<string, [number, number, number]> = {
+  TXA: [REG.X, REG.A, 0], TYA: [REG.Y, REG.A, 0], TAX: [REG.A, REG.X, 0], TAY: [REG.A, REG.Y, 0], TSX: [REG.S, REG.X, 0],
+  TXS: [REG.X, REG.S, 0], INX: [REG.X, REG.X, 1], DEX: [REG.X, REG.X, 2], INY: [REG.Y, REG.Y, 1], DEY: [REG.Y, REG.Y, 2],
+};
+
+function decodeWord({ mnemonic: m, mode }: { mnemonic: string; mode: M6502Mode }): number {
+  const mem = mode !== "imp" && mode !== "acc" && mode !== "imm" && mode !== "rel";
+  let d = AM[mode];
+  if (m in SOP) d |= mode === "acc" ? SHIFT_A : RMW | READ;
+  if (m in SOP) d |= SOP[m] << 8;
+  if (m in ALU && !(m in SOP && !(m in { SLO: 1, RLA: 1, SRE: 1, RRA: 1, DCP: 1, ISC: 1 }))) {
+    d |= ALU[m] << 11;
+    if (mem) d |= READ;
+  }
+  if (m === "NOP" && mem) d |= READ; // the NOPs with an operand address read it
+  if (m in STORE_SRC) d |= STORE | (STORE_SRC[m] << 16);
+  if (m === "JMP") d |= (mode === "ind" ? CLS_JMP_IND : CLS.JMP) << 20;
+  else if (m in CLS) d |= CLS[m] << 20;
+  if (m in XFER) {
+    const [src, dst, step] = XFER[m];
+    d |= (step << 8) | (src << 24) | (dst << 26);
+  }
+  return d >>> 0;
+}
+
+/** The decode word of each opcode (see the bit layout above). */
+export const M6502_DECODE: readonly number[] = M6502_OPCODES.map(decodeWord);
+
 const hex2 = (n: number) => `0x${n.toString(16).padStart(2, "0")}u`;
+const decodeTable = () => {
+  const words = M6502_DECODE.map((w) => `0x${w.toString(16).padStart(8, "0")}u`);
+  const lines: string[] = [];
+  for (let i = 0; i < 256; i += 8) lines.push(`    ${words.slice(i, i + 8).join(", ")},   // ${i.toString(16).padStart(2, "0")}`);
+  return lines.join("\n");
+};
 
 /** The 6502 core text with the given hooks. Needs the host-contract prelude (`HOST_CONTRACT_PRELUDE_WGSL`). */
 export function m6502CoreText(h: M6502Hooks = {}): string {
@@ -80,35 +183,25 @@ const M6502_ADDR_MASK: u32 = 0xffffu;
 const M6502_ANE_MAGIC: u32 = ${hex2(M6502_UNSTABLE.aneMagic)};   // ANE (8B): A = (A | magic) & X & imm
 const M6502_LXA_MAGIC: u32 = ${hex2(M6502_UNSTABLE.lxaMagic)};   // LXA (AB): A = X = (A | magic) & imm
 
+// Per opcode: addressing mode (bits 0-3), READ (4), RMW (5), SHIFT_A (6), STORE (7), shift op (8-10), ALU op
+// (11-15), store source (16-18), control class (20-23), transfer registers (24-27). Generated from the opcode
+// table in src/cores/m6502/core.wgsl.ts.
+const M6502_DECODE = array<u32, 256>(
+${decodeTable()}
+);
+
 fn m6502_fetch() -> u32 {
 ${fetchHook}    let v = mem_read(m6502_pc);
     m6502_pc = (m6502_pc + 1u) & 0xffffu;
     return v;
 }
-fn m6502_fetch16() -> u32 { let lo = m6502_fetch(); let hi = m6502_fetch(); return (hi << 8u) | lo; }
 // A pointer in page 0: its high byte is read from (z + 1) & 0xFF, never from page 1.
 fn m6502_zp16(z: u32) -> u32 { return mem_read(z) | (mem_read((z + 1u) & 0xffu) << 8u); }
 fn m6502_push(v: u32) { mem_write(0x100u | m6502_s, v & 0xffu); m6502_s = (m6502_s - 1u) & 0xffu; }
 fn m6502_pull() -> u32 { m6502_s = (m6502_s + 1u) & 0xffu; return mem_read(0x100u | m6502_s); }
 fn m6502_nz(v: u32) { m6502_p = (m6502_p & 0x7du) | (v & 0x80u) | select(0u, 0x02u, v == 0u); }
 fn m6502_sx(v: u32) -> i32 { return i32(v) - select(0i, 256i, v >= 0x80u); }   // a byte as a signed number
-
-// Effective address of a regular addressing mode, by the bbb field (bits 4..2) of the opcode. Zero-page indexing
-// wraps within page 0; absolute indexing wraps at 16 bits. yIndex: zp,X and abs,X index by Y (STX LDX SAX LAX SHX).
-fn m6502_ea(bbb: u32, yIndex: bool) -> u32 {
-    let ix = select(m6502_x, m6502_y, yIndex);
-    var ea = 0u;
-    switch (bbb) {
-        case 0u: { ea = m6502_zp16((m6502_fetch() + m6502_x) & 0xffu); }       // (zp,X)
-        case 1u: { ea = m6502_fetch(); }                                         // zp
-        case 3u: { ea = m6502_fetch16(); }                                       // abs
-        case 4u: { ea = (m6502_zp16(m6502_fetch()) + m6502_y) & 0xffffu; }      // (zp),Y
-        case 5u: { ea = (m6502_fetch() + ix) & 0xffu; }                          // zp,X (zp,Y)
-        case 6u: { ea = (m6502_fetch16() + m6502_y) & 0xffffu; }                // abs,Y
-        default: { ea = (m6502_fetch16() + ix) & 0xffffu; }                     // abs,X (abs,Y)
-    }
-    return ea;
-}
+fn m6502_reg(r: u32) -> u32 { return select(select(select(m6502_a, m6502_x, r == 1u), m6502_y, r == 2u), m6502_s, r == 3u); }
 
 // ADC. Binary: the usual flags. Decimal (NMOS; Clark, "Decimal Mode", appendix A, sequences 1 and 2): Z from the
 // binary sum; N and V from the sum after the low-nibble adjustment; C and A after the high-nibble adjustment.
@@ -152,52 +245,6 @@ fn m6502_sbc(v: u32) {
     m6502_a = u32(t) & 0xffu;
 }
 
-// CMP, CPX, CPY and DCP: N Z from r - v, C = no borrow.
-fn m6502_compare(r: u32, v: u32) {
-    let t = (r - v) & 0xffu;
-    m6502_p = (m6502_p & 0x7cu) | (t & 0x80u) | select(0u, 0x02u, t == 0u) | select(0u, 1u, r >= v);
-}
-
-// The ALU column (cc = 01), by aaa: 0 ORA, 1 AND, 2 EOR, 3 ADC, 5 LDA, 6 CMP, 7 SBC (4 is STA, never here).
-fn m6502_alu(f: u32, v: u32) {
-    switch (f) {
-        case 3u: { m6502_adc(v); }
-        case 6u: { m6502_compare(m6502_a, v); }
-        case 7u: { m6502_sbc(v); }
-        default: {
-            let a = m6502_a;
-            m6502_a = select(select(select(a | v, a & v, f == 1u), a ^ v, f == 2u), v, f == 5u);
-            m6502_nz(m6502_a);
-        }
-    }
-}
-
-// The read-modify-write operations, by aaa: 0 ASL, 1 ROL, 2 LSR, 3 ROR, 6 DEC, 7 INC. N Z, and C for the shifts.
-fn m6502_shift(f: u32, v: u32) -> u32 {
-    let cin = m6502_p & 1u;
-    var r = 0u;
-    var c = cin;
-    switch (f) {
-        case 0u: { r = (v << 1u) & 0xffu; c = v >> 7u; }
-        case 1u: { r = ((v << 1u) | cin) & 0xffu; c = v >> 7u; }
-        case 2u: { r = v >> 1u; c = v & 1u; }
-        case 3u: { r = (v >> 1u) | (cin << 7u); c = v & 1u; }
-        case 6u: { r = (v + 0xffu) & 0xffu; }
-        default: { r = (v + 1u) & 0xffu; }
-    }
-    m6502_p = (m6502_p & 0x7cu) | (r & 0x80u) | select(0u, 0x02u, r == 0u) | c;
-    return r;
-}
-
-// A read-modify-write on memory: the chip writes the old value back, then the new one.
-fn m6502_rmw(ea: u32, f: u32) -> u32 {
-    let v = mem_read(ea);
-    mem_write(ea, v);
-    let r = m6502_shift(f, v);
-    mem_write(ea, r);
-    return r;
-}
-
 // ARR (6B): A = ((A & imm) >> 1) | C << 7. Binary: N Z from the result, C = bit 6, V = bit 6 ^ bit 5. Decimal
 // (NMOS): N Z V from the unadjusted result, then each nibble is BCD-adjusted; C comes from the high nibble.
 fn m6502_arr(v: u32) {
@@ -219,61 +266,125 @@ fn m6502_arr(v: u32) {
     m6502_a = r;
 }
 
-// SHA, SHX, SHY, TAS (unstable): store val & (H + 1), H the high byte of the base address; when the index crosses
-// a page, the stored value also replaces the high byte of the target address.
-fn m6502_sh(base: u32, idx: u32, val: u32) {
-    let v = val & (((base >> 8u) + 1u) & 0xffu);
-    var ea = (base + idx) & 0xffffu;
-    if ((base & 0xffu) + idx > 0xffu) { ea = (v << 8u) | (ea & 0xffu); }
-    mem_write(ea, v);
+// The shift group, by shift op: 0 ASL, 1 ROL, 2 LSR, 3 ROR, 6 DEC, 7 INC. N Z, and C for the shifts.
+fn m6502_shift(f: u32, v: u32) -> u32 {
+    let cin = m6502_p & 1u;
+    let right = f == 2u || f == 3u;
+    let shl = ((v << 1u) | select(0u, cin, f == 1u)) & 0xffu;
+    let shr = (v >> 1u) | select(0u, cin << 7u, f == 3u);
+    let incdec = (v + select(1u, 0xffu, f == 6u)) & 0xffu;
+    let r = select(select(shl, shr, right), incdec, f >= 6u);
+    let c = select(select(v >> 7u, v & 1u, right), cin, f >= 6u);
+    m6502_p = (m6502_p & 0x7cu) | (r & 0x80u) | select(0u, 0x02u, r == 0u) | c;
+    return r;
 }
 
-// The opcodes with a regular addressing mode (bbb) and operation (aaa, cc); every other opcode is in m6502_step.
-fn m6502_regular(op: u32) {
-    let aaa = op >> 5u;
-    let bbb = (op >> 2u) & 7u;
-    let cc = op & 3u;
-    let imm = select(bbb == 0u, bbb == 2u, (cc & 1u) == 1u);   // the immediate row: bbb 2 (cc odd), 0 (cc even)
-    var ea = 0u;
-    var v = 0u;
-    if (imm) { v = m6502_fetch(); } else { ea = m6502_ea(bbb, cc >= 2u && (aaa == 4u || aaa == 5u)); }
-    switch (cc) {
-        case 1u: {                                       // ORA AND EOR ADC STA LDA CMP SBC
-            if (aaa == 4u) {
-                if (!imm) { mem_write(ea, m6502_a); }    // STA (89: NOP #)
-            } else {
-                if (!imm) { v = mem_read(ea); }
-                m6502_alu(aaa, v);
+// The ALU, by ALU op (decode bits 11-15) on the operand v.
+fn m6502_alu(f: u32, v: u32) {
+    if (f == 4u) { m6502_adc(v); return; }                                    // ADC (RRA)
+    if (f == 7u) { m6502_sbc(v); return; }                                    // SBC (ISC)
+    if (f == 6u || f == 11u || f == 12u || f == 19u) {                        // CMP (DCP) CPX CPY SBX: C = no borrow
+        let r = select(select(select(m6502_a, m6502_x, f == 11u), m6502_y, f == 12u), m6502_a & m6502_x, f == 19u);
+        let t = (r - v) & 0xffu;
+        m6502_p = (m6502_p & 0x7cu) | (t & 0x80u) | select(0u, 0x02u, t == 0u) | select(0u, 1u, r >= v);
+        if (f == 19u) { m6502_x = t; }                                        // SBX: X = (A & X) - imm
+        return;
+    }
+    if (f == 13u) {                                                           // BIT: N V from v, Z from A & v
+        m6502_p = (m6502_p & 0x3du) | (v & 0xc0u) | select(0u, 0x02u, (m6502_a & v) == 0u);
+        return;
+    }
+    if (f == 16u) { m6502_arr(v); return; }                                   // ARR
+    if (f == 15u) {                                                           // ALR: AND, then LSR A
+        let t = m6502_a & v;
+        m6502_a = t >> 1u;
+        m6502_p = (m6502_p & 0x7cu) | select(0u, 0x02u, m6502_a == 0u) | (t & 1u);
+        return;
+    }
+    // ORA AND EOR LDA LDX LDY LAX ANC ANE LXA LAS: one result, written to one or more registers, N Z from it
+    let a = m6502_a;
+    var r = v;                                                                // LDA LDX LDY LAX
+    r = select(r, a | v, f == 1u);
+    r = select(r, a & v, f == 2u || f == 14u);                                // AND, ANC
+    r = select(r, a ^ v, f == 3u);
+    r = select(r, (a | M6502_ANE_MAGIC) & m6502_x & v, f == 17u);             // ANE (unstable)
+    r = select(r, (a | M6502_LXA_MAGIC) & v, f == 18u);                       // LXA (unstable)
+    r = select(r, v & m6502_s, f == 20u);                                     // LAS: A = X = S = mem & S
+    if (f != 8u && f != 9u) { m6502_a = r; }
+    if (f == 8u || f == 10u || f == 18u || f == 20u) { m6502_x = r; }
+    if (f == 9u) { m6502_y = r; }
+    if (f == 20u) { m6502_s = r; }
+    m6502_nz(r);
+    if (f == 14u) { m6502_p = (m6502_p & 0xfeu) | (r >> 7u); }                // ANC: C = N
+}
+
+// STA STX STY SAX, and the unstable SHA SHX SHY TAS: store val & (H + 1), H the high byte of the base address;
+// when the index crosses a page, the stored value also replaces the high byte of the target address.
+fn m6502_store(src: u32, base: u32, idx: u32, ea: u32) {
+    var w = select(select(select(m6502_a, m6502_x, src == 1u), m6502_y, src == 2u), m6502_a & m6502_x, src == 3u);
+    var addr = ea;
+    if (src >= 4u) {
+        if (src == 7u) { m6502_s = m6502_a & m6502_x; }                       // TAS: S = A & X
+        let r = select(select(select(m6502_a & m6502_x, m6502_x, src == 5u), m6502_y, src == 6u), m6502_s, src == 7u);
+        w = r & (((base >> 8u) + 1u) & 0xffu);
+        if ((base & 0xffu) + idx > 0xffu) { addr = (w << 8u) | (ea & 0xffu); }
+    }
+    mem_write(addr, w);
+}
+
+// Control flow, the stack, flags, register transfers and JAM, by control class (decode bits 20-23).
+fn m6502_control(cls: u32, op: u32, d: u32, base: u32, b1: u32, pc0: u32) {
+    switch (cls) {
+        case 1u: {                                                           // BRK
+            m6502_push(m6502_pc >> 8u);                                      // PC + 2 (the signature byte was fetched)
+            m6502_push(m6502_pc & 0xffu);
+            m6502_push(m6502_p | 0x30u);                                     // B and bit 5 set
+            m6502_p = m6502_p | 0x04u;                                       // I set; D unchanged (NMOS)
+            m6502_pc = mem_read(0xfffeu) | (mem_read(0xffffu) << 8u);        // the vector, read after the pushes
+        }
+        case 2u, 5u: { m6502_pc = base; }                                    // JSR (pushed before its high byte), JMP abs
+        case 3u: {                                                           // RTI
+            m6502_p = (m6502_pull() & 0xcfu) | 0x20u;
+            let lo = m6502_pull();
+            m6502_pc = (m6502_pull() << 8u) | lo;
+        }
+        case 4u: {                                                           // RTS
+            let lo = m6502_pull();
+            m6502_pc = (((m6502_pull() << 8u) | lo) + 1u) & 0xffffu;
+        }
+        case 6u: {                                                           // JMP (ind): NMOS, $xxFF -> $xx00
+            let lo = mem_read(base);
+            m6502_pc = (mem_read((base & 0xff00u) | ((base + 1u) & 0xffu)) << 8u) | lo;
+        }
+        case 7u: {                                                           // BPL BMI BVC BVS BCC BCS BNE BEQ
+            let k = op >> 6u;                                                // 0 N, 1 V, 2 C, 3 Z
+            let sh = select(select(select(7u, 6u, k == 1u), 0u, k == 2u), 1u, k == 3u);
+            if (((m6502_p >> sh) & 1u) == ((op >> 5u) & 1u)) {
+                m6502_pc = (m6502_pc + b1 + select(0u, 0xff00u, b1 >= 0x80u)) & 0xffffu;
             }
         }
-        case 3u: {                                       // SLO RLA SRE RRA SAX LAX DCP ISC (#: in m6502_step)
-            if (aaa == 4u) { mem_write(ea, m6502_a & m6502_x); }                                  // SAX
-            else if (aaa == 5u) { v = mem_read(ea); m6502_a = v; m6502_x = v; m6502_nz(v); }      // LAX
-            else { m6502_alu(aaa, m6502_rmw(ea, aaa)); }                                          // RMW, then ALU
+        case 8u: { m6502_push(select(m6502_a, m6502_p | 0x30u, op == 0x08u)); }     // PHA, PHP (B and bit 5 set)
+        case 9u: {                                                           // PLA, PLP (B clear, bit 5 set)
+            let v = m6502_pull();
+            if (op == 0x28u) { m6502_p = (v & 0xcfu) | 0x20u; } else { m6502_a = v; m6502_nz(v); }
         }
-        case 2u: {                                       // ASL ROL LSR ROR STX LDX DEC INC
-            if (aaa == 4u) {
-                if (!imm) { mem_write(ea, m6502_x); }    // STX (82: NOP #)
-            } else if (aaa == 5u) {
-                if (!imm) { v = mem_read(ea); }
-                m6502_x = v;                             // LDX
-                m6502_nz(v);
-            } else if (!imm) {
-                _ = m6502_rmw(ea, aaa);                  // ASL ROL LSR ROR DEC INC (C2 E2: NOP #)
-            }
+        case 10u: {                                                          // CLC SEC CLI SEI CLV CLD SED
+            let k = op >> 6u;                                                // 0 C, 1 I, 2 V, 3 D
+            let bit = select(select(select(0x01u, 0x04u, k == 1u), 0x40u, k == 2u), 0x08u, k == 3u);
+            m6502_p = select(m6502_p & ~bit, m6502_p | bit, (op & 0x20u) != 0u && k != 2u);
         }
-        default: {                                       // cc 00: NOP BIT STY LDY CPY CPX (JMP: in m6502_step)
-            if (aaa == 4u) {
-                if (!imm) { mem_write(ea, m6502_y); }    // STY (80: NOP #)
-            } else {
-                if (!imm) { v = mem_read(ea); }          // NOP zp/abs/zp,X/abs,X read their operand too
-                if (aaa == 5u) { m6502_y = v; m6502_nz(v); }                                       // LDY
-                else if (aaa == 1u && (bbb == 1u || bbb == 3u)) {                                  // BIT zp, abs
-                    m6502_p = (m6502_p & 0x3du) | (v & 0xc0u) | select(0u, 0x02u, (m6502_a & v) == 0u);
-                } else if (aaa >= 6u && bbb <= 3u) {                                               // CPY CPX
-                    m6502_compare(select(m6502_y, m6502_x, aaa == 7u), v);
-                }
-            }
+        case 11u: {                                                          // TXA TYA TAX TAY TSX TXS INX DEX INY DEY
+            let step = (d >> 8u) & 3u;
+            let dst = (d >> 26u) & 3u;
+            let r = (m6502_reg((d >> 24u) & 3u) + select(select(0u, 1u, step == 1u), 0xffu, step == 2u)) & 0xffu;
+            m6502_a = select(m6502_a, r, dst == 0u);
+            m6502_x = select(m6502_x, r, dst == 1u);
+            m6502_y = select(m6502_y, r, dst == 2u);
+            m6502_s = select(m6502_s, r, dst == 3u);
+            if (dst != 3u) { m6502_nz(r); }                                  // TXS sets no flags
+        }
+        default: {                                                           // JAM
+            ${jam}
         }
     }
 }
@@ -283,105 +394,34 @@ fn m6502_step() {
     let pc0 = m6502_pc;
     let op = m6502_fetch();
 ${start}    if (on_decode(0u, op)) { return; }   // ablated: a 1-byte no-op; operand bytes run as code
-    switch (op) {
-        case 0x00u: {                                                        // BRK
-            _ = m6502_fetch();                                               // signature byte: PC + 2 is pushed
-            m6502_push(m6502_pc >> 8u);
-            m6502_push(m6502_pc & 0xffu);
-            m6502_push(m6502_p | 0x30u);                                     // B and bit 5 set
-            m6502_p = m6502_p | 0x04u;                                       // I set; D unchanged (NMOS)
-            m6502_pc = mem_read(0xfffeu) | (mem_read(0xffffu) << 8u);        // the vector, read after the pushes
-        }
-        case 0x20u: {                                                        // JSR abs
-            let lo = m6502_fetch();
-            m6502_push(m6502_pc >> 8u);                                      // PC is on the high operand byte
-            m6502_push(m6502_pc & 0xffu);
-            let hi = m6502_fetch();                                          // fetched after the pushes
-            m6502_pc = (hi << 8u) | lo;
-        }
-        case 0x40u: {                                                        // RTI
-            m6502_p = (m6502_pull() & 0xcfu) | 0x20u;
-            let lo = m6502_pull();
-            m6502_pc = (m6502_pull() << 8u) | lo;
-        }
-        case 0x60u: {                                                        // RTS
-            let lo = m6502_pull();
-            m6502_pc = (((m6502_pull() << 8u) | lo) + 1u) & 0xffffu;
-        }
-        case 0x4cu: { m6502_pc = m6502_fetch16(); }                         // JMP abs
-        case 0x6cu: {                                                        // JMP (ind)
-            let ptr = m6502_fetch16();
-            let lo = mem_read(ptr);
-            m6502_pc = (mem_read((ptr & 0xff00u) | ((ptr + 1u) & 0xffu)) << 8u) | lo;   // NMOS: $xxFF -> $xx00
-        }
-        case 0x08u: { m6502_push(m6502_p | 0x30u); }                        // PHP: B and bit 5 set
-        case 0x28u: { m6502_p = (m6502_pull() & 0xcfu) | 0x20u; }          // PLP: B clear, bit 5 set
-        case 0x48u: { m6502_push(m6502_a); }                                // PHA
-        case 0x68u: { m6502_a = m6502_pull(); m6502_nz(m6502_a); }         // PLA
-        case 0x10u, 0x30u, 0x50u, 0x70u, 0x90u, 0xb0u, 0xd0u, 0xf0u: {     // BPL BMI BVC BVS BCC BCS BNE BEQ
-            let d = m6502_fetch();
-            let k = op >> 6u;                                                // 0 N, 1 V, 2 C, 3 Z
-            let sh = select(select(select(7u, 6u, k == 1u), 0u, k == 2u), 1u, k == 3u);
-            if (((m6502_p >> sh) & 1u) == ((op >> 5u) & 1u)) {
-                m6502_pc = (m6502_pc + d + select(0u, 0xff00u, d >= 0x80u)) & 0xffffu;
-            }
-        }
-        case 0x18u, 0x38u, 0x58u, 0x78u, 0xb8u, 0xd8u, 0xf8u: {            // CLC SEC CLI SEI CLV CLD SED
-            let k = op >> 6u;                                                // 0 C, 1 I, 2 V, 3 D
-            let bit = select(select(select(0x01u, 0x04u, k == 1u), 0x40u, k == 2u), 0x08u, k == 3u);
-            m6502_p = select(m6502_p & ~bit, m6502_p | bit, (op & 0x20u) != 0u && k != 2u);
-        }
-        case 0x8au: { m6502_a = m6502_x; m6502_nz(m6502_a); }              // TXA
-        case 0x98u: { m6502_a = m6502_y; m6502_nz(m6502_a); }              // TYA
-        case 0xaau: { m6502_x = m6502_a; m6502_nz(m6502_x); }              // TAX
-        case 0xa8u: { m6502_y = m6502_a; m6502_nz(m6502_y); }              // TAY
-        case 0xbau: { m6502_x = m6502_s; m6502_nz(m6502_x); }              // TSX
-        case 0x9au: { m6502_s = m6502_x; }                                  // TXS (no flags)
-        case 0xe8u: { m6502_x = (m6502_x + 1u) & 0xffu; m6502_nz(m6502_x); }     // INX
-        case 0xcau: { m6502_x = (m6502_x + 0xffu) & 0xffu; m6502_nz(m6502_x); }  // DEX
-        case 0xc8u: { m6502_y = (m6502_y + 1u) & 0xffu; m6502_nz(m6502_y); }     // INY
-        case 0x88u: { m6502_y = (m6502_y + 0xffu) & 0xffu; m6502_nz(m6502_y); }  // DEY
-        case 0x0au, 0x2au, 0x4au, 0x6au: { m6502_a = m6502_shift(op >> 5u, m6502_a); }   // ASL ROL LSR ROR A
-        case 0xeau, 0x1au, 0x3au, 0x5au, 0x7au, 0xdau, 0xfau: {}           // NOP (EA) and the implied NOPs
-        case ${M6502_JAM_OPCODES.map(hex2).join(", ")}: {   // JAM
-            ${jam}
-        }
-        case 0x0bu, 0x2bu: {                                                 // ANC #: AND, then C = N
-            m6502_a = m6502_a & m6502_fetch();
-            m6502_nz(m6502_a);
-            m6502_p = (m6502_p & 0xfeu) | (m6502_a >> 7u);
-        }
-        case 0x4bu: {                                                        // ALR #: AND, then LSR A
-            let t = m6502_a & m6502_fetch();
-            m6502_p = (m6502_p & 0xfeu) | (t & 1u);
-            m6502_a = t >> 1u;
-            m6502_nz(m6502_a);
-        }
-        case 0x6bu: { m6502_arr(m6502_fetch()); }                            // ARR #
-        case 0x8bu: { m6502_a = (m6502_a | M6502_ANE_MAGIC) & m6502_x & m6502_fetch(); m6502_nz(m6502_a); }   // ANE #
-        case 0xabu: { m6502_a = (m6502_a | M6502_LXA_MAGIC) & m6502_fetch(); m6502_x = m6502_a; m6502_nz(m6502_a); } // LXA #
-        case 0xcbu: {                                                        // SBX #: X = (A & X) - imm, C = no borrow
-            let ax = m6502_a & m6502_x;
-            let v = m6502_fetch();
-            m6502_x = (ax - v) & 0xffu;
-            m6502_p = (m6502_p & 0xfeu) | select(0u, 1u, ax >= v);
-            m6502_nz(m6502_x);
-        }
-        case 0xebu: { m6502_sbc(m6502_fetch()); }                            // SBC # (duplicate of E9)
-        case 0x93u: { m6502_sh(m6502_zp16(m6502_fetch()), m6502_y, m6502_a & m6502_x); }   // SHA (zp),Y
-        case 0x9fu: { m6502_sh(m6502_fetch16(), m6502_y, m6502_a & m6502_x); }              // SHA abs,Y
-        case 0x9eu: { m6502_sh(m6502_fetch16(), m6502_y, m6502_x); }                        // SHX abs,Y
-        case 0x9cu: { m6502_sh(m6502_fetch16(), m6502_x, m6502_y); }                        // SHY abs,X
-        case 0x9bu: { m6502_s = m6502_a & m6502_x; m6502_sh(m6502_fetch16(), m6502_y, m6502_s); }   // TAS abs,Y
-        case 0xbbu: {                                                        // LAS abs,Y: A = X = S = mem & S
-            let v = mem_read((m6502_fetch16() + m6502_y) & 0xffffu) & m6502_s;
-            m6502_a = v;
-            m6502_x = v;
-            m6502_s = v;
-            m6502_nz(v);
-        }
-        default: { m6502_regular(op); }
+    let d = M6502_DECODE[op];
+    let am = d & 0xfu;            // 0 none, 1 imm/rel, 2 zp, 3 zp,X, 4 zp,Y, 5 abs, 6 abs,X, 7 abs,Y, 8 (zp,X), 9 (zp),Y
+    let cls = (d >> 20u) & 0xfu;
+    // Operand bytes. JSR pushes its return address (PC on its high operand byte) before fetching that byte.
+    var b1 = 0u;
+    var b2 = 0u;
+    if (am != 0u) { b1 = m6502_fetch(); }
+    if (cls == 2u) { m6502_push(m6502_pc >> 8u); m6502_push(m6502_pc & 0xffu); }
+    if (am >= 5u && am <= 7u) { b2 = m6502_fetch(); }
+    // Effective address. Zero-page modes wrap at 8 bits, the others at 16; pointers are read in page 0.
+    var base = (b2 << 8u) | b1;
+    if (am >= 8u) { base = m6502_zp16((b1 + select(0u, m6502_x, am == 8u)) & 0xffu); }
+    let idx = select(select(0u, m6502_x, am == 3u || am == 6u), m6502_y, am == 4u || am == 7u || am == 9u);
+    let ea = (base + idx) & select(0xffffu, 0xffu, am >= 2u && am <= 4u);
+    // Read; read-modify-write writes the old value back, then the new one.
+    var v = b1;
+    if ((d & 0x10u) != 0u) { v = mem_read(ea); }
+    let sop = (d >> 8u) & 7u;
+    if ((d & 0x20u) != 0u) {
+        mem_write(ea, v);
+        v = m6502_shift(sop, v);
+        mem_write(ea, v);
     }
+    if ((d & 0x40u) != 0u) { m6502_a = m6502_shift(sop, m6502_a); }
+    let alu = (d >> 11u) & 0x1fu;
+    if (alu != 0u) { m6502_alu(alu, v); }
+    if ((d & 0x80u) != 0u) { m6502_store((d >> 16u) & 7u, base, idx, ea); }
+    if (cls != 0u) { m6502_control(cls, op, d, base, b1, pc0); }
 }
 `;
 }

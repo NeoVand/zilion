@@ -323,39 +323,40 @@ MUTANTS_6502 = [
     # ARR in decimal mode without the high-nibble fix-up (and its carry).
     ("decimal-arr-no-high-fixup", "if (hi + (hi & 1u) > 5u) { c = 1u; r = (r + 0x60u) & 0xffu; }", "", ["6b"], "a"),
     # JMP ($xxFF) carrying into the high byte (the 65C02 fix) instead of wrapping within the page.
-    ("jmp-indirect-no-page-wrap", "mem_read((ptr & 0xff00u) | ((ptr + 1u) & 0xffu))", "mem_read((ptr + 1u) & 0xffffu)",
+    ("jmp-indirect-no-page-wrap", "mem_read((base & 0xff00u) | ((base + 1u) & 0xffu))", "mem_read((base + 1u) & 0xffffu)",
      ["6c"], "pc"),
     # zp,X indexing carrying into page 1 instead of wrapping within page 0.
-    ("zp-index-no-wrap", "case 5u: { ea = (m6502_fetch() + ix) & 0xffu; }", "case 5u: { ea = (m6502_fetch() + ix) & 0xffffu; }",
-     ["b5", "95"], "mem"),
+    ("zp-index-no-wrap", "let ea = (base + idx) & select(0xffffu, 0xffu, am >= 2u && am <= 4u);",
+     "let ea = (base + idx) & 0xffffu;", ["b5", "95"], "mem"),
     # (zp),Y pointer high byte read from page 1 when the pointer is at $FF.
     ("zp-pointer-no-wrap", "fn m6502_zp16(z: u32) -> u32 { return mem_read(z) | (mem_read((z + 1u) & 0xffu) << 8u); }",
      "fn m6502_zp16(z: u32) -> u32 { return mem_read(z) | (mem_read(z + 1u) << 8u); }", ["b1"], "mem"),
     # A read-modify-write without the old-value write: the final memory is right, only the bus sequence shows it.
-    ("rmw-no-dummy-write", "    mem_write(ea, v);\n    let r = m6502_shift(f, v);", "    let r = m6502_shift(f, v);",
+    ("rmw-no-dummy-write", "        mem_write(ea, v);\n        v = m6502_shift(sop, v);", "        v = m6502_shift(sop, v);",
      ["0e", "e6", "07"], "bus"),
     # The old-value write with a wrong value.
-    ("rmw-dummy-write-new-value", "    mem_write(ea, v);\n    let r = m6502_shift(f, v);",
-     "    let r = m6502_shift(f, v);\n    mem_write(ea, r);", ["ee"], "bus"),
+    ("rmw-dummy-write-new-value", "        mem_write(ea, v);\n        v = m6502_shift(sop, v);",
+     "        v = m6502_shift(sop, v);\n        mem_write(ea, v);", ["ee"], "bus"),
     # The unstable constants.
     ("ane-magic-ff", "M6502_ANE_MAGIC: u32 = 0xeeu;", "M6502_ANE_MAGIC: u32 = 0xffu;", ["8b"], "a"),
     ("lxa-magic-00", "M6502_LXA_MAGIC: u32 = 0xeeu;", "M6502_LXA_MAGIC: u32 = 0x00u;", ["ab"], "a"),
-    ("sh-without-h-plus-1", "let v = val & (((base >> 8u) + 1u) & 0xffu);", "let v = val & ((base >> 8u) & 0xffu);",
+    ("sh-without-h-plus-1", "w = r & (((base >> 8u) + 1u) & 0xffu);", "w = r & ((base >> 8u) & 0xffu);",
      ["9f", "9e"], "mem"),
     # The B flag: PHP must push it set; PLP must not load it.
-    ("php-b-clear", "case 0x08u: { m6502_push(m6502_p | 0x30u); }", "case 0x08u: { m6502_push(m6502_p | 0x20u); }",
-     ["08"], "mem"),
-    ("plp-loads-b", "case 0x28u: { m6502_p = (m6502_pull() & 0xcfu) | 0x20u; }",
-     "case 0x28u: { m6502_p = m6502_pull() | 0x20u; }", ["28"], "p"),
+    ("php-b-clear", "m6502_push(select(m6502_a, m6502_p | 0x30u, op == 0x08u));",
+     "m6502_push(select(m6502_a, m6502_p | 0x20u, op == 0x08u));", ["08"], "mem"),
+    ("plp-loads-b", "if (op == 0x28u) { m6502_p = (v & 0xcfu) | 0x20u; }", "if (op == 0x28u) { m6502_p = v | 0x20u; }",
+     ["28"], "p"),
     # BRK through the reset vector instead of 0xFFFE.
     ("brk-wrong-vector", "m6502_pc = mem_read(0xfffeu) | (mem_read(0xffffu) << 8u);",
      "m6502_pc = mem_read(0xfffcu) | (mem_read(0xfffdu) << 8u);", ["00"], "pc"),
     # JAM that does not halt (the JAM-PC mapping must not hide it).
     ("jam-not-halting", "m6502_halted = ZIL_HALT_TRAP; m6502_pc = pc0;", "", ["02", "f2"], "halted"),
-    # An opcode that halts when it should not.
-    ("nop-halts", "case 0xeau, 0x1au, 0x3au, 0x5au, 0x7au, 0xdau, 0xfau: {}",
-     "case 0xeau, 0x1au, 0x3au, 0x5au, 0x7au, 0xdau, 0xfau: { m6502_halted = ZIL_HALT_TRAP; m6502_pc = pc0; }",
-     ["ea"], "halted"),
+    # An opcode that halts when it should not (NOP sent to the control phase, whose default is JAM).
+    ("nop-halts", "    if (cls != 0u) { m6502_control(cls, op, d, base, b1, pc0); }",
+     "    if (cls != 0u || op == 0xeau) { m6502_control(cls, op, d, base, b1, pc0); }", ["ea"], "halted"),
+    # TXS setting N and Z (only TSX, the other transfer, does).
+    ("txs-sets-flags", "if (dst != 3u) { m6502_nz(r); }", "m6502_nz(r);", ["9a"], "p"),
 ]
 
 
