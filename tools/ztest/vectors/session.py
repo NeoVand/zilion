@@ -79,7 +79,7 @@ def run(art: Artifacts, isa: str, dirs: list[Path], *, patterns=None, limit_per_
     if not files:
         raise G.HarnessError("no vector files matched")
 
-    t_parse = t_gpu = t_ledger = 0.0
+    t_gpu = t_ledger = 0.0
     jobs = [(k, p, isa, mem_cap, port_cap, limit_per_file, set(only_tests or ())) for k, p in files]
     workers = workers if workers is not None else max(1, min(8, (os.cpu_count() or 2) - 1))
     pending = []
@@ -100,12 +100,13 @@ def run(art: Artifacts, isa: str, dirs: list[Path], *, patterns=None, limit_per_
         pending.clear()
 
     tests = 0
-    t0 = time.perf_counter()
     pool = ProcessPoolExecutor(max_workers=workers) if workers > 1 else None
     try:
         it = pool.map(_parse, jobs, chunksize=4) if pool else map(_parse, jobs)
         queued = 0
         for k, fb in enumerate(it):
+            if fb.n == 0:  # every test filtered out (--test)
+                continue
             if pending and queued + fb.n > runner.lanes:
                 flush()
                 queued = 0
@@ -127,12 +128,12 @@ def run(art: Artifacts, isa: str, dirs: list[Path], *, patterns=None, limit_per_
         "provenance": art.provenance(isa),
         "vectors": {
             "dirs": [str(d) for d in dirs],
-            "files": len(files),
+            "files": len(ledger.files),
             "tests": tests,
             "files_sha256": _files_digest(ledger),
             "filters": {"patterns": patterns or [], "limit_per_file": limit_per_file, "tests": sorted(only_tests or [])},
         },
-        "coverage": _coverage(adapter, [k for k, _ in files]),
+        "coverage": _coverage(adapter, list(ledger.files)),
         "expected_rules": {"file": str(rules_path.relative_to(REPO)) if rules_path.is_relative_to(REPO) else str(rules_path)},
     }
     run_info = {
