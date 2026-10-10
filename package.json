@@ -23,7 +23,8 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
 		"prepublishOnly": "npm run build",
-		"typecheck": "tsc -p tsconfig.json --noEmit"
+		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"test:conformance": "${ZILION_PYTHON:-python3} -I tools/zt.py conformance"
 	},
 	"keywords": [
 		"z80",
