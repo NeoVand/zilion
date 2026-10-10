@@ -43,6 +43,7 @@ def main(argv: list[str]) -> int:
     v.add_argument("--md", type=Path, help="write the Markdown report here")
     v.add_argument("--analysis", type=Path, help="Markdown included verbatim in the report (hand-written analysis)")
     v.add_argument("--show", type=int, default=20, help="unexpected classes to print")
+    v.add_argument("--dump-wgsl", type=Path, help="write the composed test shader (host + glue + core) here")
 
     t = sub.add_parser("selftest", help="harness self-tests on the GPU")
     _common(t)
@@ -79,6 +80,9 @@ def _vectors(a) -> int:
         mem_cap=a.mem_cap, port_cap=a.port_cap, lanes=a.lanes, repeat=a.repeat, rules_path=a.expected,
         workers=a.workers,
     )
+    if a.dump_wgsl:
+        a.dump_wgsl.parent.mkdir(parents=True, exist_ok=True)
+        a.dump_wgsl.write_text(info["wgsl"], encoding="utf-8")
     doc = ledger.to_json(info["meta"])
     text = canonical_json(doc)
     digest = report.sha256(text)

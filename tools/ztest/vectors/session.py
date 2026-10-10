@@ -144,7 +144,7 @@ def run(art: Artifacts, isa: str, dirs: list[Path], *, patterns=None, limit_per_
         "seconds": {"total": round(t_total, 2), "parse+other": round(t_parse, 2), "gpu": round(t_gpu, 2),
                     "ledger": round(t_ledger, 2)},
     }
-    return ledger, {"meta": meta, "run": run_info}
+    return ledger, {"meta": meta, "run": run_info, "wgsl": runner.wgsl}
 
 
 def _files_digest(ledger: Ledger) -> str:

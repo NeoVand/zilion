@@ -174,16 +174,16 @@ class Z80Adapter:
             st(IDX[n], f"cpu_{n}")
         for n, var in OPTIONAL_VARS.items():
             if n in self.passthrough:
-                st(IDX[n], w(n), "not modelled by this core: passed through")
+                st(IDX[n], w(n), f"{n}: not modelled by this core, passed through")
             else:
                 ld(f"{var} = {w(n)};")
                 st(IDX[n], var)
         for n in ALWAYS_PASSTHROUGH:
-            st(IDX[n], w(n), "interrupt-acceptance latch: not modelled, passed through")
+            st(IDX[n], w(n), f"{n}: interrupt-acceptance latch, not modelled, passed through")
         for var in ("cpu_halted", "idx_mode", "idx_disp", "idx_uses_mem"):
             if declares(core, var):
                 ld(f"{var} = 0u;")
-        st(IDX["halted"], "cpu_halted")
+        st(IDX["halted"], "cpu_halted", "host-only: drives the HALT-PC mapping")
         hooks = []
         if calls_fn(core, "on_fetch_opcode") and not defines_fn(core, "on_fetch_opcode"):
             hooks.append("fn on_fetch_opcode(prefix: u32, op: u32) -> bool { return false; } // no ablation")
