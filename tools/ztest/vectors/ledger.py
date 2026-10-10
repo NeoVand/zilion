@@ -3,7 +3,9 @@
 For every test the runner produces a divergence row D over the compared fields plus two pseudo-fields:
   * state fields: D = (expected ^ actual) & field mask (so for F the set bits name the flags that differ);
   * `mem`:   bits MEM_VALUE | MEM_STRAY | MEM_READ;
-  * `ports`: bits PORT_WRITE | PORT_READ_MISSING | PORT_UNLISTED.
+  * `ports`: bits PORT_WRITE | PORT_READ_MISSING | PORT_UNLISTED;
+  * `bus` (adapters with a bus-write log only): BUS_COUNT | BUS_ORDER, the core's sequence of memory writes against
+    the reference's (every write, in order, including the old-value write of a read-modify-write).
 Expected rules (ignore masks, Rule) cover bits of D, per file pattern and optional predicate; what they do not
 cover is *unexpected*. The ledger keeps, per opcode file and field: divergence counts, the OR of the differing
 bits, the rules that explained them, and minimal examples of anything unexpected. Everything is aggregated in
@@ -20,6 +22,8 @@ import numpy as np
 
 from ..gpu import HarnessError
 from .model import (
+    BUS_COUNT,
+    BUS_ORDER,
     CONSUMED,
     HARNESS_ERRORS,
     MEM_READ,
@@ -56,12 +60,14 @@ class Ledger:
         self.mem_cap = mem_cap
         self.port_cap = port_cap
         self.cmp = [j for j, f in enumerate(adapter.fields) if f.compare]
-        self.names = [adapter.fields[j].name for j in self.cmp] + ["mem", "ports"]
-        self.widths = [adapter.fields[j].bits for j in self.cmp] + [3, 3]
-        self.masks = np.array([adapter.fields[j].mask for j in self.cmp] + [7, 7], dtype=np.uint32)
-        self.column = {adapter.fields[j].name: adapter.fields[j].column for j in self.cmp} | {"mem": "mem", "ports": "ports"}
+        self.write_cap = getattr(adapter, "write_cap", 0)
+        pseudo = [("mem", 3, 7), ("ports", 3, 7)] + ([("bus", 2, 3)] if self.write_cap else [])
+        self.names = [adapter.fields[j].name for j in self.cmp] + [n for n, _, _ in pseudo]
+        self.widths = [adapter.fields[j].bits for j in self.cmp] + [w for _, w, _ in pseudo]
+        self.masks = np.array([adapter.fields[j].mask for j in self.cmp] + [m for _, _, m in pseudo], dtype=np.uint32)
+        self.column = {adapter.fields[j].name: adapter.fields[j].column for j in self.cmp} | {n: n for n, _, _ in pseudo}
         self.arch = np.array(
-            [adapter.fields[j].architectural for j in self.cmp] + [True, True], dtype=bool
+            [adapter.fields[j].architectural for j in self.cmp] + [True] * len(pseudo), dtype=bool
         )
         unknown = {f for r in rules for f in r.fields} - set(self.names)
         if unknown:
@@ -100,8 +106,15 @@ class Ledger:
         rmiss = (rslot & ((out.port_in_word & CONSUMED) == 0)).any(1)
         ports = (np.where(wbad, PORT_WRITE, 0) | np.where(rmiss, PORT_READ_MISSING, 0)
                  | np.where(status & ST_UNLISTED_PORT, PORT_UNLISTED, 0))
-        D[:, -2] = mem
-        D[:, -1] = ports
+        D[:, self.names.index("mem")] = mem
+        D[:, self.names.index("ports")] = ports
+        if self.write_cap:  # the sequence of memory writes, against the reference's (cycles marked "write")
+            W = self.write_cap
+            en, an = fb.bus_n.astype(np.int64), out.bus_n.astype(np.int64)
+            common = np.minimum(np.minimum(en, an), W)
+            kslot = np.arange(W)[None, :] < common[:, None]
+            seq = (kslot & (fb.bus != out.bus).any(2)).any(1)
+            D[:, self.names.index("bus")] = np.where(en != an, BUS_COUNT, 0) | np.where(seq, BUS_ORDER, 0)
         return D
 
     # ------------------------------------------------------------------ classification
@@ -193,6 +206,8 @@ class Ledger:
                 diff[name] = self._mem_detail(fb, out, i)
             elif name == "ports":
                 diff[name] = self._port_detail(fb, out, i)
+            elif name == "bus":
+                diff[name] = self._bus_detail(fb, out, i)
             else:
                 k = self.cmp[j]
                 w = self.adapter.fields[k].bits
@@ -226,6 +241,12 @@ class Ledger:
         if st[0] & ST_UNLISTED_READ:
             d["first_unlisted_read"] = hx(int(st[1]), 16)
         return d
+
+    def _bus_detail(self, fb, out, i) -> dict:
+        stored = min(int(out.bus_n[i]), self.write_cap)
+        return {"expected_writes": [[hx(int(a), 16), hx(int(v))] for a, v in fb.bus[i, : fb.bus_n[i]]],
+                "actual_writes": [[hx(int(a), 16), hx(int(v))] for a, v in out.bus[i, :stored]],
+                "actual_count": int(out.bus_n[i])}
 
     def _port_detail(self, fb, out, i) -> dict:
         exp_w = [[hx(int(p), 16), hx(int(v))] for p, v in fb.port_out[i, : fb.port_out_n[i]]]

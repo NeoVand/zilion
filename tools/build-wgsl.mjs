@@ -6,6 +6,7 @@
 //   2. import the built package and write, into the output directory (default build/wgsl/):
 //        manifest.json              provenance: package version, git commit, core SHA-256, toolchain
 //        z80-core.wgsl              Z80_CORE_WGSL exactly as exported
+//        m6502-core.wgsl            HOST_CONTRACT_PRELUDE_WGSL + M6502_CORE_WGSL (the 6502 core, every hook off)
 //        conformance/plan.json      the vectors of test/conformance.js (programs, steps, hook index)
 //        conformance/shader-N.wgsl  buildComputeShader(memBytes, { fetchHook }) for each distinct hook
 //
@@ -49,8 +50,17 @@ const write = (rel, text) => {
 };
 
 // --- cores -------------------------------------------------------------------
+// Keyed by the harness's ISA name (tools/zt.py vectors <isa>). The 6502 core's text uses the host-contract
+// constants (ZIL_HALT_TRAP, ...), so its file is the prelude followed by the core with every hook off.
+const m6502 = await import(pathToFileURL(join(root, "dist", "cores", "m6502", "index.js")).href);
 const cores = {
   z80: { export: "Z80_CORE_WGSL", ...write("z80-core.wgsl", zilion.Z80_CORE_WGSL) },
+  6502: {
+    export: "HOST_CONTRACT_PRELUDE_WGSL + M6502_CORE_WGSL",
+    core: "m6502",
+    coreVersion: m6502.m6502.coreVersion,
+    ...write("m6502-core.wgsl", zilion.HOST_CONTRACT_PRELUDE_WGSL + m6502.M6502_CORE_WGSL),
+  },
 };
 
 // --- conformance plan (test/conformance.js, run headlessly) ------------------
@@ -110,6 +120,6 @@ const manifest = {
 };
 write("manifest.json", JSON.stringify(manifest, null, 2) + "\n");
 console.error(
-  `[build-wgsl] ${pkg.name}@${pkg.version} z80 core ${cores.z80.sha256.slice(0, 12)} ` +
-    `-> ${relative(process.cwd(), outDir) || "."}`,
+  `[build-wgsl] ${pkg.name}@${pkg.version} z80 core ${cores.z80.sha256.slice(0, 12)}, ` +
+    `6502 core ${cores[6502].sha256.slice(0, 12)} -> ${relative(process.cwd(), outDir) || "."}`,
 );

@@ -17,6 +17,8 @@ sys.path.insert(0, str(REPO / "tools"))
 
 from ztest.gpu import HarnessError  # noqa: E402
 from ztest.vectors import session, sst  # noqa: E402
+from ztest.vectors.m6502 import FIELDS as M6502_FIELDS  # noqa: E402
+from ztest.vectors.m6502 import M6502Adapter  # noqa: E402
 from ztest.vectors.model import READABLE, Rule  # noqa: E402
 from ztest.vectors.z80 import FIELDS, Z80Adapter, calls_fn, declares, defines_fn  # noqa: E402
 
@@ -115,16 +117,30 @@ class RuleTests(unittest.TestCase):
 
     def test_rules_resolved_by_core_sha(self):
         from ztest.artifacts import Artifacts
-        files = sorted((REPO / "test" / "vectors" / "z80").glob("expected-*.json"))
-        shas = [json.loads(p.read_text(encoding="utf-8")).get("core_sha256") for p in files]
-        self.assertTrue(all(isinstance(h, str) and len(h) == 64 and int(h, 16) >= 0 for h in shas), shas)
-        self.assertEqual(len(set(shas)), len(shas))
-        for path, sha in zip(files, shas):  # a version bump that leaves the core text alone keeps its rules
-            art = Artifacts(Path("."), {"package": {"version": "9.9.9-test"}, "cores": {"z80": {"sha256": sha}}})
-            self.assertEqual(session.default_rules_path("z80", art), path)
-        art = Artifacts(Path("."), {"package": {"version": "9.9.9-test"}, "cores": {"z80": {"sha256": "0" * 64}}})
-        with self.assertRaises(HarnessError):
-            session.default_rules_path("z80", art)
+        for isa in ("z80", "6502"):
+            files = sorted((REPO / "test" / "vectors" / isa).glob("expected-*.json"))
+            self.assertTrue(files, isa)
+            shas = [json.loads(p.read_text(encoding="utf-8")).get("core_sha256") for p in files]
+            self.assertTrue(all(isinstance(h, str) and len(h) == 64 and int(h, 16) >= 0 for h in shas), shas)
+            self.assertEqual(len(set(shas)), len(shas))
+            for path, sha in zip(files, shas):  # a version bump that leaves the core text alone keeps its rules
+                art = Artifacts(Path("."), {"package": {"version": "9.9.9-test"}, "cores": {isa: {"sha256": sha}}})
+                self.assertEqual(session.default_rules_path(isa, art), path)
+            art = Artifacts(Path("."), {"package": {"version": "9.9.9-test"}, "cores": {isa: {"sha256": "0" * 64}}})
+            with self.assertRaises(HarnessError):
+                session.default_rules_path(isa, art)
+
+    def test_6502_rules_file(self):
+        # the goal is zero rules; any rule must name real fields and files, and give a reason and a source
+        names = {f.name for f in M6502_FIELDS if f.compare} | {"mem", "ports", "bus"}
+        for path in sorted((REPO / "test" / "vectors" / "6502").glob("expected-*.json")):
+            rules, doc = session.load_rules(path)
+            self.assertEqual(doc["isa"], "6502")
+            self.assertEqual(doc["passthrough"], [])
+            for r in rules:
+                self.assertTrue(set(r.fields) <= names, (path.name, r.id))
+                self.assertTrue(r.reason and r.source, (path.name, r.id))
+                self.assertTrue(any(r.matches_file(k) for k in M6502Adapter.reference_keys()), (path.name, r.id))
 
     def test_q_xy_after_wasted_prefix(self):
         # SingleStepTests "DD 37 0008": the DD prefix clears Q, so SCF's X/Y come from (F | A), not ((Q ^ F) | A)
@@ -169,6 +185,88 @@ class Z80AdapterTests(unittest.TestCase):
         self.assertEqual(ad.passthrough, ("wz", "q", "ei", "p"))
         self.assertIn("fn on_fetch_opcode(", glue)
         self.assertIn("cpu_im = zt_state_in", glue)
+
+
+def m6502_state(**over):
+    s = {"pc": 0, "s": 0xFD, "a": 0, "x": 0, "y": 0, "p": 0x20, "ram": []}
+    s.update(over)
+    return s
+
+
+class M6502AdapterTests(unittest.TestCase):
+    def test_groups_and_reference_set(self):
+        keys = M6502Adapter.reference_keys()
+        self.assertEqual(len(keys), 256)
+        counts = {}
+        for k in keys:
+            counts[M6502Adapter.group(k)] = counts.get(M6502Adapter.group(k), 0) + 1
+        self.assertEqual(counts, {"documented": 151, "undocumented": 85, "unstable": 8, "jam": 12})
+        self.assertEqual([M6502Adapter.group(k) for k in ("a9", "a7", "8b", "02", "ea", "1a")],
+                         ["documented", "undocumented", "unstable", "jam", "documented", "undocumented"])
+
+    def test_bus_writes_parsed_in_order_and_validated(self):
+        d = Path(tempfile.mkdtemp())
+        try:
+            good = {"name": "0e 01 02", "initial": m6502_state(ram=[[0, 0x0E], [1, 0x10], [2, 0], [0x10, 5]]),
+                    "final": m6502_state(pc=3, ram=[[0, 0x0E], [1, 0x10], [2, 0], [0x10, 10]]),
+                    "cycles": [[0, 0x0E, "read"], [1, 0x10, "read"], [2, 0, "read"], [0x10, 5, "read"],
+                               [0x10, 5, "write"], [0x10, 10, "write"]]}
+            (d / "t.json").write_text(json.dumps([good]))
+            fb = sst.parse_file(d / "t.json", "0e", M6502Adapter(), 32, 8)
+            self.assertEqual(int(fb.bus_n[0]), 2)
+            self.assertEqual(fb.bus[0, :2].tolist(), [[0x10, 5], [0x10, 10]])
+            bad = [
+                [[0x10, 5, "wrote"]],  # unknown kind
+                [[0x10, 5]],  # malformed entry
+                [[0x10, 300, "write"]],  # byte beyond 8 bits
+                [[0x10000, 1, "write"]],  # address beyond 16 bits
+                [[0x10, 1.5, "write"]],  # not an integer
+                [[0x10, 1, "write"]] * 5,  # more writes than the log can hold with its free slots
+                "nope",
+            ]
+            for cyc in bad:
+                (d / "t.json").write_text(json.dumps([dict(good, cycles=cyc)]))
+                with self.subTest(cycles=str(cyc)[:60]), self.assertRaises(HarnessError):
+                    sst.parse_file(d / "t.json", "0e", M6502Adapter(), 32, 8)
+        finally:
+            import shutil
+            shutil.rmtree(d)
+
+    def test_glue(self):
+        core = "// fn on_decode(page: u32, key: u32) -> bool\nconst ZIL_HALT_TRAP: u32 = 3u;\n" \
+               "fn m6502_step() { if (on_decode(0u, 1u)) { return; } }"
+        ad = M6502Adapter()
+        glue = ad.glue(core)
+        self.assertEqual(ad.passthrough, ())
+        self.assertEqual(ad.halt_trap, 3)
+        self.assertIn("fn on_decode(", glue)
+        self.assertIn("m6502_halted = 0u;", glue)
+        with self.assertRaises(ValueError):  # the core must come with the host-contract prelude
+            M6502Adapter().glue("fn m6502_step() {}")
+
+    def test_halted_expectation_and_jam_pc(self):
+        import numpy as np
+        from ztest.vectors.model import LaneOutputs
+        d = Path(tempfile.mkdtemp())
+        try:
+            t = {"name": "x", "initial": m6502_state(pc=0x100, ram=[[0x100, 2]]),
+                 "final": m6502_state(pc=0x101, ram=[[0x100, 2]]), "cycles": [[0x100, 2, "read"]]}
+            (d / "t.json").write_text(json.dumps([t, t]))
+            ad = M6502Adapter()
+            ad.halt_trap = 3
+            H, PC = [f.name for f in M6502_FIELDS].index("halted"), [f.name for f in M6502_FIELDS].index("pc")
+            for key, halted, want_exp, want_pc in (("02", 3, 3, 0x101), ("02", 0, 3, 0x100), ("ea", 3, 0, 0x101)):
+                fb = sst.parse_file(d / "t.json", key, ad, 32, 8)
+                act = fb.state_in.copy()
+                act[:, H] = halted
+                out = LaneOutputs(act, *(np.zeros(1) for _ in range(7)))
+                mapped = ad.postprocess(fb, out)
+                self.assertEqual(fb.state_exp[:, H].tolist(), [want_exp, want_exp], key)
+                self.assertEqual(out.state[:, PC].tolist(), [want_pc, want_pc], key)
+                self.assertEqual(mapped, {"jam_pc": 2} if halted else {}, key)
+        finally:
+            import shutil
+            shutil.rmtree(d)
 
 
 class FetchScriptTests(unittest.TestCase):

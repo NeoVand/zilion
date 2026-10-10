@@ -15,10 +15,11 @@ from ..artifacts import REPO, Artifacts
 from . import sst
 from .ledger import Ledger
 from .model import Rule
+from .m6502 import M6502Adapter
 from .runner import Runner
 from .z80 import Z80Adapter
 
-ADAPTERS = {"z80": Z80Adapter}
+ADAPTERS = {"z80": Z80Adapter, "6502": M6502Adapter}
 
 
 def default_rules_path(isa: str, art: Artifacts) -> Path:

@@ -26,7 +26,7 @@ def main(argv: list[str]) -> int:
 
     v = sub.add_parser("vectors", help="run per-instruction vectors and write the divergence ledger")
     _common(v)
-    v.add_argument("isa", choices=["z80"])
+    v.add_argument("isa", choices=["z80", "6502"])
     v.add_argument("dirs", type=Path, nargs="+", help="vector directories (SingleStepTests layout, .json or .json.gz)")
     v.add_argument("--files", nargs="*", help="only these opcode keys (fnmatch patterns, e.g. 'ed b?' 'cb 4?')")
     v.add_argument("--test", nargs="*", help="only these test names (e.g. 'ed 70 0123')")
@@ -49,6 +49,7 @@ def main(argv: list[str]) -> int:
     t = sub.add_parser("selftest", help="harness self-tests on the GPU")
     _common(t)
     t.add_argument("--vectors", type=Path, help="Z80 vector directory for the mutant, invariance and determinism tests")
+    t.add_argument("--vectors-6502", type=Path, help="6502 vector directory for the 6502 mutant, invariance and determinism tests")
     t.add_argument("--limit-per-file", type=int, default=50, help="tests per file for invariance and determinism")
 
     a = ap.parse_args(argv)
@@ -57,7 +58,7 @@ def main(argv: list[str]) -> int:
             from . import selftest
 
             art = artifacts.load(a.wgsl_dir, do_emit=not a.no_emit)
-            return selftest.run(art, a.vectors, a.limit_per_file)
+            return selftest.run(art, a.vectors, a.limit_per_file, vectors_6502=a.vectors_6502)
         if a.cmd == "conformance":
             from . import conformance
 

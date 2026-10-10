@@ -32,6 +32,10 @@ PORT_READ_MISSING = 2  # a listed port read never happened
 PORT_UNLISTED = 4  # read of an unlisted port
 MEM_KINDS = {MEM_VALUE: "value", MEM_STRAY: "stray-write", MEM_READ: "unlisted-read"}
 PORT_KINDS = {PORT_WRITE: "write", PORT_READ_MISSING: "read-missing", PORT_UNLISTED: "unlisted-read"}
+# Sub-kinds of the pseudo-field `bus` (adapters with a bus-write log only, e.g. the 6502: every mem_write in order).
+BUS_COUNT = 1  # the core made a different number of memory writes than the reference
+BUS_ORDER = 2  # same number of writes, but an address or a value differs at some position of the sequence
+BUS_KINDS = {BUS_COUNT: "write-count", BUS_ORDER: "write-sequence"}
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,9 @@ class FileBatch:
     orig: np.ndarray  # [n] row -> index of the test in its file (rows may be a filtered subset)
     tests: list[dict] = field(repr=False, default_factory=list)  # the whole file's parsed tests, or [] (dropped)
     tests_loader: Callable[[], list[dict]] | None = field(repr=False, default=None)
+    # Bus-write log (adapters with write_cap > 0): the reference's memory writes, in order, as (address, value).
+    bus_n: np.ndarray | None = None  # [n]
+    bus: np.ndarray | None = None  # [n, W, 2]
 
     @property
     def n(self) -> int:
@@ -135,6 +142,7 @@ class FileBatch:
             mem_addr=pick(self.mem_addr), mem_init=pick(self.mem_init), mem_exp=pick(self.mem_exp),
             mem_final_only=pick(self.mem_final_only), port_in_n=pick(self.port_in_n), port_in=pick(self.port_in),
             port_out_n=pick(self.port_out_n), port_out=pick(self.port_out), orig=pick(self.orig), tests=self.tests,
+            bus_n=None if self.bus_n is None else pick(self.bus_n), bus=None if self.bus is None else pick(self.bus),
         )
 
 
@@ -150,10 +158,13 @@ class LaneOutputs:
     port_out_n: np.ndarray  # [n]
     port_out: np.ndarray  # [n, P, 2]
     status: np.ndarray  # [n, 4]: flags, first unlisted read, first stray write, first unlisted port
+    bus_n: np.ndarray | None = None  # [n]: memory writes the core made (adapters with a bus-write log)
+    bus: np.ndarray | None = None  # [n, W, 2]: (address, value) of each, in order
 
     def digest_parts(self) -> list[np.ndarray]:
-        return [self.state, self.mem_n, self.mem_addr, self.mem_word, self.port_in_word, self.port_out_n,
-                self.port_out, self.status]
+        parts = [self.state, self.mem_n, self.mem_addr, self.mem_word, self.port_in_word, self.port_out_n,
+                 self.port_out, self.status]
+        return parts + ([self.bus_n, self.bus] if self.bus is not None else [])
 
 
 Predicate = Callable[[FileBatch, LaneOutputs], np.ndarray]
