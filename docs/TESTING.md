@@ -8,6 +8,7 @@ runs that WGSL through [wgpu-py](https://github.com/pygfx/wgpu-py) and does ever
 | Conformance | `npm run test:conformance` | the 17 known-answer programs and the 8,192-program batch of `test/conformance.js` | yes |
 | Vectors | `npm run test:vectors` | every instruction against per-instruction golden vectors (SingleStepTests/z80, plus analytic vectors) | yes |
 | Harness self-test | `npm run test:harness` | the harness itself: unit tests, planted divergences, mutated cores, memory-model invariance, determinism | yes |
+| BFF equivalence | `npm run test:bff` | the BFF core against Algocell's `experiments/micro/bff.py` (its GPU kernel and its CPU reference), bit for bit; see [BFF equivalence](#bff-equivalence) | yes |
 
 The browser page `test/index.html` still runs `test/conformance.js` through `Zilion.run`. It is a demo, not a gate.
 
@@ -360,3 +361,50 @@ Notes:
 - **Runtime.** On an Apple M4 the full Z80 set (1.6 M tests) is dominated by JSON parsing, not by the GPU (see the
   baseline's Runtime row). lavapipe's GPU share will be larger; it is unmeasured.
 - The vector data is fetched in CI, never vendored. A cache keyed by the pinned commit avoids refetching.
+
+## BFF equivalence
+
+`test/world/bff_equiv.py` checks the BFF core (`src/cores/bff`) against Algocell's `experiments/micro/bff.py`, the
+kernel the paper's BFF arms ran on. It needs an Algocell checkout (`--algocell`, default `../algocell`, or
+`ALGOCELL_DIR`) and its venv's Python (wgpu, numpy, pytest). bff.py is imported from its own path in that checkout,
+never copied; the harness writes nothing there (bytecode writing is off, pytest's cache provider is disabled).
+`test/world/bff_machine.mjs` builds the Zilion machines and holds the whole mapping from bff.py's switches onto a
+world spec and core parameters.
+
+```sh
+npm run test:bff                                   # 131,072 pairs per configuration, CPU reference on 1/16 of them
+python -I test/world/bff_equiv.py --workers 5 --report test/baselines/bff-equivalence   # the committed baseline
+python -I test/world/bff_equiv.py --quick          # a smoke run
+```
+
+Options: `--pairs` (per configuration, default 1,048,576) and `--batch` (65,536), `--cpu` (the fraction of each batch
+also run on `reference_execute`, default 1), `--workers` (CPU processes), `--only <substring>` (configurations),
+`--skip variants,mutants,kernel,probe`, `--partial <file.jsonl>` (finished configurations are appended to it and
+reused by a rerun with the same settings and the same WGSL, so an interrupted run resumes), `--report <path>`
+(writes `<path>.md` and `<path>.json`).
+
+What it does, all on the same pairs for the three implementations (the Zilion machine run by `gpu_runner.Machine`,
+`BFF.execute`, `reference_execute`):
+
+1. **Configurations**: every one the paper ran (std, stdlit, wrap, wraplit, wraplitnh; `halt_p` 0.3, 0.1, 0.03,
+   0.01 on wraplit; `lit_rep` 2 and 3 on stdlit) plus nohalt, the dial on the published rule (0.5) and density maps
+   k = 2 and 4 (`density_map(k, seed=0)`, computed by bff.py and passed as the alphabet table). Batch b uses
+   `roll_seed` 1 + b and the same pairs in every configuration with the same alphabet; even batches are uniform
+   random bytes, odd batches op-rich (55% instruction bytes of the alphabet, 15% zero bytes, 30% uniform), so loops
+   run, heads reach the partner and literal pushes fire. Compared: the final memory and bff.py's `executed`,
+   `entered`, `max_pc`, `writesB`, decoded from the lane record (docs/ARCHITECTURE.md, "The BFF core").
+2. **Non-vacuity**: how encounters ended (budget, `bounds`, `unmatched`), how many entered or wrote the partner or
+   changed memory, a steps histogram; for each dial, how many lanes drew both outcomes (their result differs from
+   bff.py's always-halt and never-halt kernels on the same pairs).
+3. **Negative controls**: six mutated Zilion machines (scan, nesting, literal, wrap, dial salt, seed) must each
+   disagree with bff.py on an op-rich batch. A mutant must still terminate (a scan running past position 0 would
+   loop for 2³² iterations on the GPU).
+4. **bff.py's own kernel tests** (`experiments/tests/test_bff.py`) run under pytest with a plugin that replaces the
+   test module's `BFF` by a subclass mirroring every `execute` on Zilion and on `reference_execute`.
+5. **The dial hash**: a probe machine writes `zil_draw(0)` into memory through a raw `on_instruction_start` hook, so
+   the world's draw is read back for any lane, seed and step base and compared with bff.py's `hash32` and
+   `bracket_halts`; the thresholds in the generated WGSL are compared with bff.py's `halt_q`.
+
+Exit status 0 only if every comparison is identical and every negative control is caught. The full baseline
+(1,048,576 pairs × 15 configurations with the CPU reference on every pair) is CPU-bound: bff.py's reference is
+plain Python, about 0.2 to 0.3 µs per step on an idle M4 core, so it takes hours; the GPU part is minutes.

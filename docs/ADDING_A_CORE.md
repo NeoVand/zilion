@@ -3,7 +3,8 @@
 A core is WGSL text plus an `IsaCore` descriptor (`src/contract/isa.ts`). The world (`buildMachine`) and the
 engine use nothing else, so a core that satisfies this checklist runs in every world: rings of any size,
 padded pairs, budgets, dials, ablation, fetch and start maps, the Python host. Read `docs/ARCHITECTURE.md`
-first. The two skeletons in `src/cores/m6502/` and `src/cores/bff/` are short, complete examples of the shape.
+first. The 6502 skeleton in `src/cores/m6502/` is a short, complete example of the shape; `src/cores/bff/` is a
+small finished core (ring-native, with core parameters, including a table).
 
 ## Checklist
 
@@ -36,12 +37,14 @@ first. The two skeletons in `src/cores/m6502/` and `src/cores/bff/` are short, c
   `ZIL_HALT_HOST`, `ZIL_HALT_TRAP`.
 - **The trap cause** that halted the core, as a `ZIL_TRAP_<CAUSE>` code (0 otherwise), recoverable from state
   fields alone. A core whose only halting trap is evident from its halt state can derive it (the Z80:
-  `select(0u, ZIL_TRAP_HALT_INSN, cpu_halted == 1u)`); otherwise keep a state field for it (the skeletons'
+  `select(0u, ZIL_TRAP_HALT_INSN, cpu_halted == 1u)`); otherwise keep a state field for it (the 6502 skeleton's and BFF's
   `trap`, set next to `halted` in every trap path) and report it only while the halt reason says trap
   (`select(0u, m6502_trap, m6502_halted == ZIL_HALT_TRAP)`), so a running lane never reports a cause.
 - **Core parameters**, if the descriptor declares any, are read only through the builder's constants
-  `ZIL_PARAM_<NAME>` (and `ZIL_PARAM_<NAME>_<VALUE>` for enum values; see docs/ARCHITECTURE.md, Core parameters).
-  They are compile-time constants, so branching on them costs nothing. Never turn one into a uniform.
+  `ZIL_PARAM_<NAME>` (and `ZIL_PARAM_<NAME>_<VALUE>` for enum values; a table is a `const array<u32, N>` the core
+  may index at run time; see docs/ARCHITECTURE.md, Core parameters). They are compile-time constants, so branching
+  on them costs nothing. Never turn one into a uniform. Rules that relate several parameters are the core's: its
+  `wgsl(o)` receives the resolved values and throws on a selection it refuses (BFF's `literal` and its alphabet).
 - Use the prelude constants (`ZIL_*`), never their numeric values. Stay inside the WGSL subset a CPU twin can
   transpile (u32/i32/bool, `select`, `switch`, `if`/`for`/`loop`, private scalars and arrays).
 
@@ -55,8 +58,9 @@ them, the skip rule); `conventions` (step definition; the two stack conventions,
 `firstPushAt(P, t)`, the state that makes the first byte pushed land at ring position t, and `stackTop(P, t)`, the
 state whose stack pointer aliases t, with the ISA's own meaning; `entry(pos, P)`; trap causes with the chip's
 decision; prose on halting and illegal opcodes); `variants` and `compat`; optional `params` (name →
-`{ type: 'u32' | 'bool' | 'enum', default, values? }`, names and enum values lower snake case, checked by
-`checkCoreParamDecls`); `wgsl(options)` (which also receives the resolved `params`). Keep `firstPushAt` a small
+`{ type: 'u32' | 'bool' | 'enum', default, values? }` or `{ type: 'table', length, max, default }`, names and enum
+values lower snake case, checked by `checkCoreParamDecls`); `wgsl(options)` (which also receives the resolved
+`params`). Keep `firstPushAt` a small
 function of its own (`z80FirstPushAt`, `m6502FirstPushAt`): it is the cross-ISA meaning of the stack, and worlds
 compared across ISAs rely on it. Both stack conventions must succeed on a ring of one byte (`P = 1, t = 0`): the
 builder calls them there to learn the stack fields (the keys they assign), so that a world that sets every stack
@@ -105,35 +109,29 @@ vector read through positions 65534 mod P and 65535 mod P, and JAM re-policied a
    - *Decimal mode* is a candidate core parameter (decision 4).
    - *Cycle budgets* (M4) need a per-opcode table including page-crossing penalties.
 
-## What BFF still needs
+## BFF: what the full core needed
 
-The skeleton is ring-native: it runs `< > { } + - . ,` with heads modulo `ZIL_MEM_P`, maps bytes to op ids
-through the ASCII alphabet before the decode hook, ends an encounter with trap `bounds` when the instruction
-pointer leaves the ring (`ignore` wraps it: Algocell's `ip_wrap`), and stubs the brackets. Its tests pass,
-including the shared pair world. The contract needed **no change** for it. To be bit-identical to Algocell's
-`experiments/micro/bff.py` (the M2 exit criterion) the core needs:
+The skeleton ran the eight head and byte ops and stubbed the brackets. The full core (`src/cores/bff/index.ts`,
+status `stable`) reproduces Algocell's `experiments/micro/bff.py` bit for bit in every configuration it has; the
+semantics, the mapping of bff.py's switches onto world policies and core parameters, and the mapping of its
+per-encounter record onto the lane record are in docs/ARCHITECTURE.md, "The BFF core". What it took:
 
-1. **Brackets**: `[` with a zero under head 0 scans forward for the matching `]` by op id (depth counting),
-   `]` with a non-zero byte scans backward; both scans stay inside [0, P) and do not wrap, as bff.py does. The
-   scan reads bytes with `mem_read` and does **not** call `on_fetch` (it inspects code, it does not execute
-   it). An unmatched bracket calls `zil_trap(ZIL_TRAP_UNMATCHED)`; one step includes the whole scan.
-2. **The halting dial maps exactly**: bff.py's `bracket_halts(p, s)` is
-   `hash32(p·0x9E3779B1 ^ (s+1)·0x85EBCA77 ^ roll_seed) < halt_q` with `halt_q = round(p · 2³²)`. The world's
-   trap dial with salt 0, `seed = roll_seed`, lane = pair index and step = loop index is the same formula and
-   threshold (`test/unit.mjs` checks the hash). `nohalt` is the policy `ignore`; the published rule is `halt`.
-3. **The bounds check stays at the end of a step** (as in the skeleton), so `steps` equals bff.py's `executed`
-   (bff.py breaks before counting when the pointer is out of range at the top of the next iteration).
-4. **Variant parameters.** `density_map(k)` and the literal-push switch (`literal`, `lit_rep`) are parameters,
-   not names. The contract now has core parameters (decision 4): declare them in `params` (for example
-   `density: { type: 'u32', … }`, `literal: { type: 'bool', … }`), read them through `ZIL_PARAM_*` in the core
-   text, and tables that depend on them can be generated in `wgsl(o)` from `o.params`. The mechanism is in place and
-   tested with a test-only core; the BFF semantics are not written yet.
-5. **Records**: bff.py's `writesB` counts writes at positions ≥ 64; on the pair world [64, 64] on ring 128 that
-   is the world's write counter for segment B. Its `entered` ("an op executed in B") and `max_pc` are over the
-   positions of executed ops, which is the **start map**, not the fetch map: the literal-push op reads its two
-   operand bytes as instruction stream (fetched) but never executes them.
-6. **Resolved points**: the halt cause (`trapCause`: `bounds`, `unmatched`, `unimplemented`; the skeleton keeps a
-   `trap` state field); resumable runs (the params' `stepBase` reaches every dial draw, so bff.py's step index `s`
-   is `stepBase` plus the steps run; tested on the skeleton with the bounds dial for k = 1, 2, 7). BFF has no
-   stack: a world may still give `init.stack` (so one spec serves every ISA); BFF validates it, does not apply it and
-   lists it as `notApplicable: 'no stack'` in the manifest.
+1. **Brackets** inside the core: a scan by op id with depth counting, inside [0, P), never wrapping, read with
+   `mem_read` and not fetched; an unmatched bracket calls `zil_trap(ZIL_TRAP_UNMATCHED)`; one step includes the
+   whole scan. The skeleton's `unimplemented` trap is gone.
+2. **The literal push** (op 11): its two operand bytes are instruction stream, so `on_fetch` sees them; the start
+   map, not the fetch map, is therefore bff.py's "positions of executed ops" (`entered`, `max_pc`).
+3. **The dial needed nothing new.** bff.py's `bracket_halts(p, s)` is the world's trap dial with salt 0, seed =
+   `roll_seed`, lane = pair index and step = loop index: checked on the GPU against bff.py's own `hash32` and
+   `bracket_halts`, not only on paper. The bounds check stays at the end of a step, so `steps` = `executed`.
+4. **One generic contract addition: the `table` parameter type.** The alphabet is a 256-entry byte → op table.
+   bff.py's `density_map(k, seed)` draws it with numpy's `Generator` (SeedSequence, PCG64 and its bounded-integer
+   shuffle); rather than re-implement numpy in TypeScript or approximate it, the map itself is the parameter,
+   validated (length, entries in [0, max]) and recorded whole in the manifest.
+5. **Cross-parameter rules** belong to the core: `literal: true` without an op-11 byte in the alphabet, or an op-11
+   byte without `literal`, or `lit_rep` ≠ 1 without `literal`, would be silent no-ops, so the core refuses them.
+6. **Tests**: hand-computed world cases (`test/world/cases_cores.mjs`), resumable runs (k = 1, 2, 7) with the dial,
+   the wrap and the literal push on the 64 + 64 pair and an odd padded ring, and the equivalence harness
+   (`test/world/bff_equiv.py`, `npm run test:bff`; baseline `test/baselines/bff-equivalence.md`), which compares
+   Zilion, bff.py's GPU kernel and its CPU reference pair by pair, runs negative controls (mutated Zilion
+   machines must disagree) and bff.py's own kernel tests with every `BFF.execute` mirrored on Zilion.

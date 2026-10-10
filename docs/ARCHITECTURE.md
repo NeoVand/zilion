@@ -8,7 +8,7 @@ every machine**: comparisons across ISAs (Z80, 6502, BFF, …) are only clean if
 when the machine does.
 
 This document describes what is implemented on the `m1/architecture` branch, with the contract decisions of
-2026-10-10 implemented on `m1/contract` (see the end). The design it follows is
+2026-10-10 implemented on `m1/contract` (see the end) and the full BFF core on `m2/bff`. The design it follows is
 Algocell's `experiments/planning/ZILION_DESIGN_2026-10-10.md`; the differences are listed at the end.
 
 ## Layers
@@ -20,7 +20,7 @@ Algocell's `experiments/planning/ZILION_DESIGN_2026-10-10.md`; the differences a
  L2  engine      src/engine/        createEngine · Machine · Batch · chunking · typed results
  L1  world       src/world/         buildMachine · memory models · init · budgets · halting · outputs
      manifest    src/manifest.ts    the JSON contract for hosts in any language
- L0  cores       src/cores/<isa>/   z80 (stable) · m6502, bff (skeletons)
+ L0  cores       src/cores/<isa>/   z80, bff (stable) · m6502 (skeleton)
      contract    src/contract/      IsaCore descriptor · host contract v2 · ring address math
  ──────────────────────────────────────────────────────────────────────────────────────────────────
      0.2 API     src/legacy/        Zilion · buildComputeShader (byte-identical 0.2 kernel)
@@ -53,7 +53,7 @@ descriptor, so a new core writes only its state variables and its step function.
 | `decode` | the decode (ablation) hook: its WGSL name and parameters, page layouts, what a skip consumes |
 | `conventions` | step definition; `firstPushAt(P, t)` and `stackTop(P, t)` (both null without a stack); `entry(pos, P)`; trap causes with as-chip decisions; prose on halting and illegal opcodes |
 | `variants`, `compat` | named semantics; `compat` selects historical semantics (the Z80 has only `'0.2'` in this milestone) |
-| `params` (optional) | compile-time parameters: name → `{ type: 'u32' \| 'bool' \| 'enum', default, values? }` (see Core parameters) |
+| `params` (optional) | compile-time parameters: name → `{ type: 'u32' \| 'bool' \| 'enum' \| 'table', default, values?, length?, max? }` (see Core parameters) |
 | `wgsl({ variant, compat, hooks, params? })` | the core text; a disabled hook is never called (WGSL has no default functions) |
 
 From the descriptor the builder generates, identically for every ISA: the world reset (`zil_reset`: every
@@ -83,12 +83,12 @@ Halt reasons (`haltReason`): 0 running (budget exhausted), 1 `halt-insn` (the IS
 halts on it (as-chip) or a world policy or dial made it halt, and 0 when the lane did not halt on a trap (still
 running, for instance after an ignored trap, or halted by the host). Each core names it with `symbols.trapCause`, a
 u32 expression over its state fields, so it survives a state store and load: the Z80 derives it from `halted`
-(HALT is its only halting trap: `halt-insn` exactly when `halted` = 1), and the skeletons keep a `trap` state field
-that every trap path sets as it halts, reported only while `halted` says trap
+(HALT is its only halting trap: `halt-insn` exactly when `halted` = 1), and the 6502 skeleton and BFF keep a `trap`
+state field that every trap path sets as it halts, reported only while `halted` says trap
 (`select(0u, m6502_trap, m6502_halted == ZIL_HALT_TRAP)`). A core with a real vector continues after a vectored
-trap and reports 0; the skeletons have none and halt on any decision but `ignore`. A Z80 HALT, a 6502 JAM
-(`illegal`), an unimplemented opcode and a BFF run-off (`bounds`) are therefore told apart in the outputs;
-`haltReason` keeps its four codes.
+trap and reports 0; the 6502 skeleton and BFF have none and halt on any decision but `ignore`. A Z80 HALT, a 6502 JAM
+(`illegal`), an unimplemented opcode, a BFF run-off (`bounds`) and a BFF unmatched bracket (`unmatched`) are
+therefore told apart in the outputs; `haltReason` keeps its four codes.
 
 ### The Z80 core
 
@@ -124,6 +124,74 @@ commitment holds through 0.3.x:
 | `"var<private> cpu_halted: u32;\n"` | `gen_dial_shader.py`, `gen_conv_shader.py`, `gen_trace_shader.py` |
 | `"if (op == 0xddu \|\| op == 0xfdu) {"` before `"if (on_fetch_opcode(pfx, op)) { return; }"` | `gen_lethal_shader.py` |
 | `cpu_pc = (cpu_pc + 1u) & 0xffffu`, `cpu_sp = (cpu_sp ± 1u) & 0xffffu`, `cpu_pc = u32(i32(cpu_pc) + d) & 0xffffu` (present) | mutants in `z80difftest_ring.node.ts` |
+
+### The BFF core
+
+`src/cores/bff/index.ts` is BFF, the Brainfuck family of Agüera y Arcas et al. 2024 (arXiv 2406.19108), with the
+semantics of Algocell's `experiments/micro/bff.py` (which follows cubff `bff.inc.h`), reproduced **bit for bit** in
+every configuration bff.py has (`test/world/bff_equiv.py`; report in `test/baselines/bff-equivalence.md`). It is
+ring-native (`addressBits: 0`): the tape is the world's ring of P positions, so the same world (a pair of tapes,
+padding, write counts, dials, resumable runs) runs it unchanged.
+
+- **State** `ip`, `h0`, `h1` (ring positions), `halted`, `trap`. No stack, no halt instruction, no illegal opcodes.
+- **A step** is one op: the byte under `ip` is mapped to an op id by the alphabet (0 no-op, 1..10 `< > { } + - . , [ ]`,
+  11 the literal push), the op runs, `ip` advances; a no-op byte is a step. `[` with the byte **value** 0 under
+  head 0 (whatever byte 0 maps to) scans forward for the matching `]` by op id with depth counting, `]` with a
+  non-zero byte scans backward; execution resumes after the bracket found. Both scans stay inside [0, P) and never
+  wrap, also when the pointer does. A whole scan is one step, read with `mem_read` and **not fetched**: `on_fetch`
+  sees the op byte, and the literal push's two operand bytes.
+- **The literal push** (op 11, param `literal`): reads the bytes at `ip + 1` and `ip + 2` (mod P, fetched as
+  instruction stream), then `lit_rep` times moves head 1 down by two and writes them at head 1 + 1 and head 1, and
+  skips them (`ip += 3`).
+- **Termination** is two traps a world can re-policy. The pointer reaching P is trap `bounds` (as-chip: halt, the
+  published rule, with `ip` = P, or P + 1, P + 2 after a push; `ignore` wraps it modulo P: bff.py's `ip_wrap`). An
+  unmatched bracket is trap `unmatched` (as-chip: halt, `ip` on the bracket; `ignore` makes it a no-op: `nohalt`; a
+  dial `{ halt: { probability: p } }` is `halt_p`). The bounds check is at the end of a step, so `steps` equals
+  bff.py's `executed` (bff.py breaks at the top of the next iteration without counting).
+- **Ablation** (decode page 0, keys = op ids): a skipped op is a no-op on its one byte (a skipped push's operands
+  then run as code); scans still match an ablated bracket.
+- **Parameters**: `alphabet` (a `table` of 256 op ids, max 11; default `BFF_ASCII`, bff.py's `ascii_map()`;
+  `BFF_ASCII_LITERAL` adds `P` → 11), `literal` (bool) and `lit_rep` (u32, default 1). bff.py's `density_map(k, seed)`
+  shuffles with numpy's `Generator` (SeedSequence, PCG64, its bounded-integer draws), which TypeScript does not
+  reproduce, so a density map is passed as its table (computed by bff.py) and recorded whole in the manifest. Three
+  cross-parameter rules make silent no-ops errors: `literal: true` needs an op-11 byte in the alphabet, an op-11 byte
+  needs `literal: true`, and `lit_rep` other than 1 needs `literal: true` (bff.py accepts these selections; each is
+  equivalent to a consistent one).
+
+**bff.py's configurations as worlds** (`test/world/bff_machine.mjs` holds exactly this mapping):
+
+| bff.py | Zilion |
+|---|---|
+| `BFF(steps=n)`: two 64-byte tapes, 128 bytes | `memory: { kind: 'segments', segments: [{ bytes: 64, name: 'A' }, { bytes: 64, name: 'B' }] }` (ring 128, no padding), `budget: { unit: 'steps', value: n }` |
+| `ip_wrap=True` | `halting.traps.bounds = 'ignore'` (the published rule is the as-chip halt) |
+| `nohalt=True` | `halting.traps.unmatched = 'ignore'` |
+| `halt_p=p` with p < 1 | `halting.traps.unmatched = { halt: { probability: p } }` (salt 0) |
+| `alphabet=m` (default `ascii_map(literal)`) | `core.params.alphabet = m` (`BFF_ASCII`, `BFF_ASCII_LITERAL`) |
+| `literal=True`, `lit_rep=r` | `core.params.literal = true`, `core.params.lit_rep = r` |
+| `execute(pairs, roll_seed=s)`, pair index p | run `seed` s, lane p (`laneBase` 0 for each `execute` call) |
+
+**bff.py's per-encounter record from the lane record** (outputs `writeCounts`, `startMap`):
+
+| bff.py `out[p]` | Zilion |
+|---|---|
+| `executed` | `steps` |
+| `entered` (an op executed in the partner's half) | some `startMap` position in segment B (64..127) |
+| `max_pc` | the highest `startMap` position |
+| `writesB` (writes at positions ≥ 64) | `writeCounts[1]`, segment B (plus the padding counter on a padded ring) |
+| the 128 bytes after | `memory` |
+
+The start map is exact. The fetch map equals it without the literal push; with it, the fetch map also holds the
+push's two operand bytes, so `entered` read from the fetch map would differ (the report counts how often).
+
+**The dial is bff.py's.** `zil_draw(0)` is `zil_mix32(lane·0x9E3779B1 ^ (step+1)·0x85EBCA77 ^ seed ^ zil_mix32(0))`
+with `zil_mix32(0)` = 0 and `zil_mix32` = bff.py's `hash32`, at the 0-based index of the current step, which is
+bff.py's loop index `s`; the threshold `round(p · 2³²)` is bff.py's `halt_q`. Verified, not assumed: the draws read
+back from the GPU equal `hash32(p·C1 ^ (s+1)·C2 ^ roll_seed)` over lanes up to 2³² − 1, steps up to 2³² − 1 and
+four seeds, every decision equals `bracket_halts`, and the thresholds in the generated WGSL equal `halt_q` for the
+probabilities used. Two corners differ by construction, neither reachable with the probabilities used: where
+p · 2³² is exactly k + ½ (p an odd multiple of 2⁻³³), Zilion rounds up and Python rounds to even; and for p in
+[1 − 1.5·2⁻³², 1), bff.py's `halt_q` is 0xFFFFFFFF, its "always" (or 2³², which its params array cannot hold), while
+Zilion's clamped threshold 2³² − 1 lets the draw 0xFFFFFFFF continue.
 
 ## L1: the world spec
 
@@ -208,7 +276,7 @@ the one that halted.
   into the seed (`seed ^ zil_mix32(hi)`; `zil_mix32(0) = 0`, so below 2³² steps it is exactly
   `zil_hash(seed, lane, step, salt)`; CPU mirror `zilDraw`). Draws depend neither on lane chunking and order nor on
   how a run is split across dispatches (see Resumable runs). With salt 0 it equals the BFF kernel's
-  `hash32(p·0x9E3779B1 ^ (s+1)·0x85EBCA77 ^ roll_seed)`. Trap policies take the same dial:
+  `hash32(p·0x9E3779B1 ^ (s+1)·0x85EBCA77 ^ roll_seed)` (verified on the GPU; see The BFF core). Trap policies take the same dial:
   `traps: { unmatched: { halt: { probability: 0.1 } } }`.
 - **Trap policies.** Per cause the core lists: `'as-chip' | 'halt' | 'ignore' | 'vector'` (vector only where the
   chip has one) or a dial. The trap hook is emitted only when some policy differs from the chip.
@@ -262,23 +330,31 @@ resumable (see Resumable runs).
 
 ### Core parameters
 
-A descriptor may declare `params`: name → `{ type: 'u32' | 'bool' | 'enum', default, values? }` (names and enum
-values lower snake case). A machine selects values with `core: { isa, variant?, compat?, params? }` (the shorthand
+A descriptor may declare `params`: name → `{ type: 'u32' | 'bool' | 'enum', default, values? }` or
+`{ type: 'table', length, max, default }` (names and enum values lower snake case). A `table` is exactly `length`
+integers in [0, `max`] (`length` 1..65536, `max` a u32), such as a byte → op map; a machine gives it as an array
+or a typed array. A machine selects values with `core: { isa, variant?, compat?, params? }` (the shorthand
 `isa`, with `variant` and `compat` beside it, remains; mixing the two forms is an error). The builder validates the
-selection (an unknown name, a wrong type, a u32 out of range or an enum value outside `values` are errors; an
-omitted parameter takes its declared default), emits the constants after the world constants and **ahead of the
-core text**, and records every resolved value in `manifest.core.params` and in the options hash. A parameter is a
-compile-time constant, never a uniform. The naming scheme is fixed (`src/contract/params.ts`, `coreParamConstant`):
+selection (an unknown name, a wrong type, a u32 out of range, an enum value outside `values`, or a table of the
+wrong length or with an entry outside [0, max] are errors; an omitted parameter takes its declared default), emits
+the constants after the world constants and **ahead of the core text**, and records every resolved value in
+`manifest.core.params` and in the options hash (a table as a plain array, every entry: the manifest names the exact
+table). A parameter is a compile-time constant, never a uniform. The naming scheme is fixed
+(`src/contract/params.ts`, `coreParamConstant`):
 
 ```
 u32   const ZIL_PARAM_<NAME>: u32 = <value>u;
 bool  const ZIL_PARAM_<NAME>: bool = <true|false>;
 enum  const ZIL_PARAM_<NAME>_<VALUE>: u32 = <index>u;   (one per value, in declaration order)
       const ZIL_PARAM_<NAME>: u32 = <index of the selected value>u;
+table const ZIL_PARAM_<NAME>: array<u32, <length>> = array<u32, <length>>(<v0>u, <v1>u, …);
 ```
 
-with `<NAME>` and `<VALUE>` upper-cased; a descriptor whose names would emit the same constant twice is refused.
-No core declares parameters yet; a test-only core (`test/world/fake_core.mjs`) exercises the mechanism on the GPU.
+with `<NAME>` and `<VALUE>` upper-cased; a descriptor whose names would emit the same constant twice is refused. A
+table is a module-scope constant a core may index with a run-time index (BFF's `ZIL_PARAM_ALPHABET[b]`). BFF
+declares `alphabet` (a table), `literal` and `lit_rep` (see The BFF core); a test-only core
+(`test/world/fake_core.mjs`) exercises every kind on the GPU. Rules that relate several parameters belong to the
+core (its `wgsl` receives the resolved values and may refuse them, as BFF does).
 
 ### Generated shader
 
@@ -365,15 +441,16 @@ b.encode(encoder, { budget: 64, stepBase: 128, resume: true });   // continue th
 |---|---|
 | `npm run check:bytes` | byte identity of the 0.2 configuration against the v0.2.0 tag (built from source) and the published 0.2.0 package; anchors in all hook combinations |
 | `npm run test:unit` | address math, hash, SHA-256, validation, hook minimality, manifest invariants, chunk planner, packing, ISA neutrality; the required budget and stack and their error messages, presets, `firstPushAt` mappings, the trap-cause plumbing, core-param validation and constants (test-only core), the step base and resumability |
-| `npm run test:world` | the world spec on the GPU through `gpu_runner.py` (Python wgpu): hand-computed cases for odd and padded rings, the seam, stack conventions (`firstPushAt` on the Z80 and the 6502), budgets, halt and trap policies with trap causes, dials, ablation, maps, init, io hooks; ring = mask, hook neutrality, library = kernel, chunk invariance, 0.2 kernel = the `compat:'0.2'` preset; resumable runs (k = 1, 2, 7 dispatches = one, Z80 and BFF, with a negative control; the step base across 2³²; a hand-built record; library `zil_resume`); core params on a test-only core; the 6502 and BFF skeletons and one world on three ISAs. Set `ZILION_PYTHON` to an interpreter with `wgpu` and `numpy`. |
+| `npm run test:world` | the world spec on the GPU through `gpu_runner.py` (Python wgpu): hand-computed cases for odd and padded rings, the seam, stack conventions (`firstPushAt` on the Z80 and the 6502), budgets, halt and trap policies with trap causes, dials, ablation, maps, init, io hooks; ring = mask, hook neutrality, library = kernel, chunk invariance, 0.2 kernel = the `compat:'0.2'` preset; resumable runs (k = 1, 2, 7 dispatches = one, Z80 and BFF (a dial, the wrap, the literal push, an odd padded ring), with a negative control; the step base across 2³²; a hand-built record; library `zil_resume`); core params of every kind on a test-only core; the 6502 skeleton; BFF by hand (brackets, unmatched and bounds policies, the dial, the literal push, alphabet tables, ablation, the 64 + 64 pair, padding); one world on three ISAs. Set `ZILION_PYTHON` to an interpreter with `wgpu` and `numpy`. |
 | `npm run test:algocell` | 33 conditions against the executors Algocell exported with 0.2.0 (20,000 random pairs each) |
+| `npm run test:bff` | BFF against Algocell's `experiments/micro/bff.py`, its GPU kernel and its CPU reference, in 15 configurations, with negative controls, bff.py's own kernel tests mirrored and the dial hash read back from the GPU (`test/world/bff_equiv.py`; the npm script runs 131,072 pairs per configuration; the baseline `test/baselines/bff-equivalence.md` was made with 1,048,576) |
 | `npm run test:engine` | the engine's ordering and lifecycle on a mock device (no GPU): read snapshots, the 0.2 facade's buffer lifetime and destroy races, staging within `maxBufferSize`, the step base and resume params and the record upload per chunk, `trapCause` decoding |
 | `test/engine.html` | the engine and the facade on browser WebGPU (`node scripts/serve.mjs`), including a run split into k = 1, 2, 7 resumed dispatches and a batch resumed in place |
 
 ## Decisions on the open questions (2026-10-10)
 
 The first architecture review left six questions open. Decided as follows; all six are implemented (branch
-`m1/contract`), except the BFF use of decision 4, which comes with the BFF core.
+`m1/contract`; the BFF use of decision 4 came with the BFF core, branch `m2/bff`).
 
 1. **Stack convention: name the meaning, not the register.** Add `init.stack: { firstPushAt: t | 'lastByte' }`:
    the first byte pushed lands at position t, on every ISA (Z80: SP aliases t + 1; 6502: `0x0100 | S` aliases t).
@@ -403,8 +480,10 @@ The first architecture review left six questions open. Decided as follows; all s
    `core: { isa, params }`; the builder emits them as WGSL constants ahead of the core text and records them in
    the manifest's provenance. A param is a compile-time constant (a recompile), never a uniform. BFF's variant
    parameters (alphabet density, literal push) are the first use; the 6502's decimal mode and the Z80's
-   `zilog-nmos` Q latch are the next. **The generic mechanism is implemented** (see Core parameters), tested with a
-   test-only descriptor; the BFF parameters themselves come with the BFF core (M2).
+   `zilog-nmos` Q latch are the next. **Implemented** (see Core parameters), tested with a test-only descriptor, and
+   used by BFF (`alphabet`, `literal`, `lit_rep`). BFF needed one generic addition, the `table` type: bff.py's
+   density maps come from numpy's random generator, which TypeScript does not reproduce, so the map itself is the
+   parameter.
 5. **Resumable runs: a step base.** The params struct gains `stepBase` (64-bit, as two u32), added to the step
    counter in every dial draw, so a run split across dispatches draws exactly what one long dispatch draws.
    Test: k chunked dispatches equal one dispatch, byte for byte, for k = 1, 2, 7. **Implemented** (see Resumable
@@ -429,13 +508,13 @@ manifest (the world as given, `core`, `init`, `budget`, `record`, the options ha
 | `world.outputs.memory` | true | |
 | `world.outputs.state` | true | resumable runs need it |
 | `world.outputs.fetchMap`, `startMap`, `writeCounts` | false | |
-| `world.halting.traps.<cause>` | `'as-chip'` (Z80 HALT halts; 6502 JAM and unimplemented halt; BFF bounds, unmatched and unimplemented halt) | |
+| `world.halting.traps.<cause>` | `'as-chip'` (Z80 HALT halts; 6502 JAM and unimplemented halt; BFF bounds and unmatched halt) | |
 | `world.halting.lethal` | none; when given, `probability` 1 and `salt` 0 | |
 | trap dial `salt` | 0 | |
 | `world.ablation` | none | |
-| `variant` | `isa.defaultVariant`: Z80 `classic`, 6502 `nmos`, BFF `ascii` | recorded in `manifest.core` |
-| `compat` | `isa.compat[0]`: Z80 `'0.2'`, 6502 and BFF `'skeleton'` | recorded in `manifest.core` |
-| core `params` | each declared parameter's `default` | recorded in `manifest.core.params` |
+| `variant` | `isa.defaultVariant`: Z80 `classic`, 6502 `nmos`, BFF `cubff` | recorded in `manifest.core` |
+| `compat` | `isa.compat[0]`: Z80 `'0.2'`, 6502 `'skeleton'`, BFF `'bff.py'` | recorded in `manifest.core` |
+| core `params` | each declared parameter's `default` (BFF: the ASCII alphabet, `literal` false, `lit_rep` 1) | recorded in `manifest.core.params` |
 | `mode` | `'kernel'` | |
 | `workgroupSize` | 64 | |
 | run options | `seed` 0, `laneBase` 0, `stepBase` 0, `resume` off; `budget` = the world's `budget.value` | per dispatch, not compiled in |
@@ -448,7 +527,7 @@ manifest (the world as given, `core`, `init`, `budget`, `record`, the options ha
    let the builder generate all of them, the same way for every ISA.
 3. **`on_reset` is called by the world** (`zil_begin`, after the init conventions), not by the core.
 4. **Names.** The decode hook keeps the Z80's 0.2 name `on_fetch_opcode(prefix, op)`; the descriptor declares
-   each core's decode-hook name and parameters (`on_decode(page, key)` for the skeletons). Port hooks are
+   each core's decode-hook name and parameters (`on_decode(page, key)` for the 6502 and BFF). Port hooks are
    `io_in`/`io_out`. Library functions are `zil_begin`, `zil_run`, `zil_load_memory`, `zil_store_memory`,
    `zil_store_record`, `zil_load_state`.
 5. **Trap causes** gained `halt-insn` (so a world can make HALT a no-op), `bounds` (BFF) and `unimplemented`

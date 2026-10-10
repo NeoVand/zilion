@@ -224,8 +224,9 @@ const r2 = await m.run(r.memory, { seed: 1, ablation: masks, budget: 64, stepBas
 - **Python and other hosts** read the manifest (bindings, params offsets, memory and record layouts, SHA-256
   provenance); `node scripts/export-machines.mjs worlds.json --out shaders/` writes the WGSL and manifest for
   each named world, and `test/world/gpu_runner.py` is a complete wgpu-py host driven only by the manifest.
-- **More than the Z80.** The contract is validated against two deliberately different skeleton cores, a 6502 and
-  BFF; see [docs/ADDING_A_CORE.md](docs/ADDING_A_CORE.md). They are not exported and not for results.
+- **More than the Z80.** The contract is validated against a 6502 skeleton (not for results) and a full BFF core, a
+  ring-native tape machine bit-identical to Algocell's `bff.py` in every configuration it has; see
+  [docs/ADDING_A_CORE.md](docs/ADDING_A_CORE.md). Neither is exported from the package yet.
 
 The design and its layers are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
