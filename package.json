@@ -1,6 +1,6 @@
 {
 	"name": "@neovand/zilion",
-	"version": "0.2.0",
+	"version": "0.3.0-dev",
 	"publishConfig": {
 		"access": "public"
 	},
@@ -13,10 +13,16 @@
 		".": {
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
+		},
+		"./z80": {
+			"types": "./dist/cores/z80/index.d.ts",
+			"import": "./dist/cores/z80/index.js"
 		}
 	},
 	"files": [
 		"dist",
+		"!dist/cores/m6502",
+		"!dist/cores/bff",
 		"README.md",
 		"LICENSE"
 	],
@@ -24,6 +30,13 @@
 		"build": "tsc -p tsconfig.json",
 		"prepublishOnly": "npm run build",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"check:bytes": "npm run build && node scripts/check-byte-identity.mjs",
+		"test:unit": "npm run build && node test/unit.mjs",
+		"test:world": "npm run build && node test/world/run.mjs",
+		"test:algocell": "npm run build && node test/world/algocell.mjs",
+		"test": "npm run build && node test/unit.mjs && node test/engine-mock.mjs && node scripts/check-byte-identity.mjs && node test/world/run.mjs",
+		"export": "node scripts/export-machines.mjs",
+		"test:engine": "npm run build && node test/engine-mock.mjs",
 		"test:conformance": "${ZILION_PYTHON:-python3} -I tools/zt.py conformance",
 		"test:harness": "${ZILION_PYTHON:-python3} -I -m unittest discover -s test/harness && ${ZILION_PYTHON:-python3} -I tools/zt.py selftest --vectors ${ZILION_Z80_VECTORS:-../zilion-vectors/z80}",
 		"test:vectors": "${ZILION_PYTHON:-python3} -I tools/zt.py vectors z80 ${ZILION_Z80_VECTORS:-../zilion-vectors/z80} test/vectors/z80/analytic"

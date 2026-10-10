@@ -38,7 +38,8 @@ Zilion turns "run N Z80s" into one GPU dispatch instead of N CPU loops.
 ## Highlights
 
 - ⚡ **Massively parallel** — one Z80 per GPU invocation, thousands at a time.
-- 🎯 **Correct** — the full documented instruction set plus **IX/IY**, **CB/ED/DDCB/FDCB** prefixes, shadow registers, and undocumented flag behavior. Continuously [differential-tested](#correctness) against a real-Z80 reference emulator.
+- 🎯 **Correct** — the full documented instruction set plus **IX/IY**, **CB/ED/DDCB/FDCB** prefixes, shadow registers, and undocumented flag behavior, [differential-tested](#correctness) against a real-Z80 reference emulator.
+- 🌍 **Worlds** _(0.3, in development)_ — rings of any size (odd, padded), pairs of tapes, budgets, halting dials, fetch maps: one [world spec](#worlds-machines-and-the-engine-03-in-development) that is the same code for every instruction set.
 - 🧩 **Simple API** — `create` once, `run` batches, read back memory + registers.
 - 🔬 **Instruction ablation** — remove any instruction from the ISA (including prefixed ones like `LDIR`) with a one-line hook; built for instruction-set experiments.
 - 🪶 **Zero dependencies**, TypeScript-native, ships as ESM.
@@ -101,6 +102,7 @@ await z80.run([program], {
 interface ZilionOptions {
   memBytes?: number; // memory per program, power of two (default 256)
   device?: GPUDevice; // provide your own, or Zilion requests one
+  fetchHook?: string; // instruction ablation: a WGSL boolean over `prefix` and `op` (see below)
 }
 ```
 
@@ -124,6 +126,8 @@ interface RunResult {
 ```
 
 Each program is copied into its instance's memory (zero-padded or truncated to `memBytes`). Registers reset to zero except **SP = 0xFFFF** (a real Z80 reset), unless overridden via `init`.
+
+Any number of programs can be passed: since 0.3 a batch is split into chunks that respect the device limits (0.2 failed above 4,194,240 programs or 128 MiB of memory), and an invalid `fetchHook` makes `create` reject with the compiler's message. As in 0.2, each run owns its GPU buffers and releases them before it resolves.
 
 ### `zilion.destroy()`
 
@@ -172,7 +176,54 @@ fn on_fetch_opcode(prefix: u32, op: u32) -> bool { ... }
 ```
 
 then calls `z80_step()` in a loop after initialising the `cpu_*` registers. See
-`buildComputeShader` in `src/shader.ts` for a complete host.
+`buildComputeShader` in `src/legacy/shader.ts` for a complete host.
+
+`Z80_CORE_WGSL` is byte-identical to 0.2.0. `z80CoreText(hooks)` adds the opt-in hooks of host contract v2
+(`on_fetch`, `on_instruction_start`, `zil_trap`, `io_in`/`io_out`; see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md))
+without moving any line other hosts patch. Rather than writing a host by hand, `buildMachine({ mode: 'library' })`
+emits the world as functions (`zil_begin`, `zil_run`, `zil_load_memory`, …) for a shader that owns its buffers.
+
+## Worlds, machines and the engine (0.3, in development)
+
+A **world** says where programs live and how they run: the memory model (a power-of-two mask, a ring of any
+size, or segments such as a pair of tapes on a padded ring), the initial state, the budget, halting and trap
+policies, instruction ablation and what to record. `buildMachine` turns a core and a world into WGSL and a JSON
+**manifest**; the engine runs it.
+
+```ts
+import { createEngine, z80 } from "@neovand/zilion";
+
+const engine = await createEngine();
+const m = await engine.machine({
+  isa: z80,
+  world: {
+    // tapes A and B (16 bytes each) on a 37-byte ring: 5 bytes of padding, zeroed every run, never stored
+    memory: { kind: "segments", segments: [{ bytes: 16, name: "A" }, { bytes: 16, name: "B" }], ring: 37 },
+    init: { stack: { topAliases: "lastByte" } }, // SP aliases the last byte of B (0xFFF1 here)
+    budget: { value: 128 },
+    halting: { lethal: { firstUnit: 0x00, probability: 0.03 } }, // a zero opcode halts with p = 0.03
+    ablation: { table: "uniform" }, // a bitset per run, no recompile
+    outputs: { writeCounts: true, fetchMap: true, startMap: true },
+  },
+});
+const r = await m.run(pairs /* N × 32 bytes */, { seed: 1, ablation: masks });
+r.steps[i]; r.haltReasonOf(i); r.stateOf(i).sp; r.writesOf(i); r.fetchedOf(i); r.memoryOf(i);
+```
+
+- **The seam.** The Z80 forms 16-bit addresses and the world maps them to ring positions, so on a ring whose
+  size does not divide 65,536 a crossing of address 0 lands at (65536 + t) mod P (`seamOffset`, `ringPos`,
+  `highestAlias`).
+- **Randomness** is a stateless hash of (seed, lane, step, salt), so results do not depend on how a batch is
+  chunked or ordered.
+- **Batches** of any size; `m.batch(n)` keeps lanes resident on the GPU and encodes into your own command
+  encoder.
+- **Python and other hosts** read the manifest (bindings, params offsets, memory and record layouts, SHA-256
+  provenance); `node scripts/export-machines.mjs worlds.json --out shaders/` writes the WGSL and manifest for
+  each named world, and `test/world/gpu_runner.py` is a complete wgpu-py host driven only by the manifest.
+- **More than the Z80.** The contract is validated against two deliberately different skeleton cores, a 6502 and
+  BFF; see [docs/ADDING_A_CORE.md](docs/ADDING_A_CORE.md). They are not exported and not for results.
+
+The design and its layers are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## How it works
 
@@ -187,15 +238,27 @@ Zilion generates a WGSL compute shader containing a complete Z80 core. Each shad
 
 ## Correctness
 
-Emulator bugs hide in undocumented corners, so Zilion's Z80 core is developed against a **real-Z80 oracle** (a Fuse-lineage reference emulator that passes the `zexall`/`zexdoc` conformance suites). Thousands of random programs are run through both the GPU core and the reference each change, and their final **memory and registers** are compared — catching divergences down to individual instructions.
+Emulator bugs hide in undocumented corners, so Zilion's Z80 core was developed against a **real-Z80 oracle** (a Fuse-lineage reference emulator that passes the `zexall`/`zexdoc` conformance suites): in [Algocell](https://github.com/NeoVand/algocell), over a million random programs were run through both the GPU core and the reference at six ring sizes, and their final **memory and registers** compared, with every divergence attributed. That differential harness lives in Algocell; this repository carries known-answer vectors (`test/conformance.js`), a byte-identity check of the core against 0.2.0, and GPU tests of the world semantics (see [Development](#development)). Per-instruction conformance vectors are being added.
 
 The core implements the full documented instruction set, the **CB**, **ED**, **DD/FD (IX/IY)**, and **DDCB/FDCB** prefix pages (including the undocumented DDCB register-copy side effect and the CPI/CPD undocumented-flag quirk), shadow registers, and `EXX`/`EX AF,AF'`.
 
-> **Scope & honesty:** Zilion is a batch execution core, not a cycle-accurate machine emulator. There are no interrupts and no I/O ports (`IN` reads 0, `OUT` is a no-op), and time is counted in instructions, not T-states — every instruction advances the step counter by one. The `R` refresh register increments per M1 (opcode/prefix) fetch and `HALT` idles correctly (re-executing itself until the step budget runs out, matching a real Z80's PC/R behavior). The one documented simplification: the internal `WZ`/`memptr` register isn't modeled, so the _undocumented_ F3/F5 flag bits of `BIT n,(HL)` come from the operand rather than the memory address (this never affects control flow). Everything else — the full documented instruction set across the base, CB, ED, and DD/FD/DDCB/FDCB pages — is differential-tested against a real-Z80 reference to zero divergence in documented behavior. If you need cycle-accurate single-machine emulation, use a dedicated emulator; if you need to run a zillion Z80s fast, use Zilion.
+> **Scope & honesty:** Zilion is a batch execution core, not a cycle-accurate machine emulator. There are no interrupts and no I/O ports (`IN` reads 0, `OUT` is a no-op), and time is counted in instructions, not T-states — every instruction advances the step counter by one. The `R` refresh register increments per M1 (opcode/prefix) fetch and `HALT` idles correctly (re-executing itself until the step budget runs out, matching a real Z80's PC/R behavior). Two documented simplifications: the internal `WZ`/`memptr` register isn't modeled, so the _undocumented_ F3/F5 flag bits of `BIT n,(HL)` come from the operand rather than the memory address (this never affects control flow); and a wasted `DD`/`FD` prefix (one followed by `DD`, `FD` or `ED`) adds 2 to `R` instead of 1. Both are kept unchanged in 0.3.0-dev; their fixes will come behind a `compat: '0.2'` switch. Everything else — the full documented instruction set across the base, CB, ED, and DD/FD/DDCB/FDCB pages — is differential-tested against a real-Z80 reference to zero divergence in documented behavior. If you need cycle-accurate single-machine emulation, use a dedicated emulator; if you need to run a zillion Z80s fast, use Zilion.
 
 ## Performance
 
 One dispatch scales with your GPU, not your program count. As a rough sense of scale, a mid-range laptop GPU runs several thousand 16-instruction programs in a couple of milliseconds. For best throughput, keep `memBytes` small and batch as many programs as you can into a single `run`.
+
+## Development
+
+```bash
+npm run build
+npm run check:bytes    # the 0.2 configuration is byte-identical to the v0.2.0 tag and the published 0.2.0 package
+npm run test:unit      # no GPU needed
+npm run test:engine    # engine ordering and lifecycle on a mock device (no GPU needed)
+ZILION_PYTHON=/path/to/python npm run test:world      # GPU, via wgpu-py + numpy (headless)
+ZILION_PYTHON=/path/to/python npm run test:algocell   # against Algocell's exported shaders (needs a checkout)
+node scripts/serve.mjs # then open http://127.0.0.1:8937/test/engine.html (engine on browser WebGPU)
+```
 
 ## Origin
 
