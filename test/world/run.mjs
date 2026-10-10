@@ -25,8 +25,6 @@ const only = opt("--only", "");
 const keep = args.includes("--keep");
 const python = opt("--python", process.env.ZILION_PYTHON ?? "python3");
 
-/** Budget of a job whose case and world give none. */
-const DEFAULT_BUDGET = 100;
 const dir = mkdtempSync(join(tmpdir(), "zilion-world-"));
 const machines = new Map(); // wgsl -> { id, manifest }
 const jobs = [];
@@ -70,9 +68,14 @@ function addJob(c, spec, lanes, run = {}) {
   writeFileSync(join(dir, `${id}.in`), host);
   const job = {
     id, wgsl: `${m.id}.wgsl`, manifest: `${m.id}.manifest.json`, lanes: lanes.length, input: `${id}.in`,
-    seed: run.seed ?? 0, budget: run.budget ?? m.manifest.budget.default ?? DEFAULT_BUDGET, ablation: run.ablation ? Array.from(run.ablation) : null,
+    seed: run.seed ?? 0, budget: run.budget ?? null, ablation: run.ablation ? Array.from(run.ablation) : null,
     chunk: run.chunk ?? null, lane_base: run.laneBase ?? 0, out_memory: `${id}.mem`, out_record: `${id}.rec`,
+    step_base: run.stepBase ?? 0, step_chunks: run.stepChunks ?? null, step_advance: run.stepAdvance ?? true,
   };
+  if (run.resume) {
+    writeFileSync(join(dir, `${id}.resume`), new Uint8Array(run.resume.buffer, run.resume.byteOffset, run.resume.byteLength));
+    job.resume = `${id}.resume`;
+  }
   const st = packState(m.manifest, lanes);
   if (st) { writeFileSync(join(dir, `${id}.state`), new Uint8Array(st.buffer)); job.state = `${id}.state`; }
   if (lanes.some((l) => l.budget !== undefined)) {
@@ -108,6 +111,8 @@ function decode(p) {
       const w = Array.from(r.subarray(f.offset, f.offset + f.words));
       if (f.name === "steps") out.steps = w[0];
       else if (f.name === "haltReason") out.halt = Object.keys(manifest.haltReasons).find((k) => manifest.haltReasons[k] === w[0]) ?? w[0];
+      else if (f.name === "trapCause") out.trap = w[0] === 0 ? 0 : Object.keys(manifest.trapCauses).find((k) => manifest.trapCauses[k] === w[0]) ?? w[0];
+      else if (f.name === "padding") out.padding = w;
       else if (f.name === "state") out.state = Object.fromEntries(f.items.map((n, k) => [n, w[k]]));
       else if (f.name === "writeCounts") out.writes = w;
       else if (f.name === "fetchMap") out.fetched = bits(w);
@@ -125,6 +130,7 @@ function checkLane(exp, got) {
   if (!exp) return errs;
   if (exp.steps !== undefined && got.steps !== exp.steps) errs.push(`steps ${got.steps} != ${exp.steps}`);
   if (exp.halt !== undefined && got.halt !== exp.halt) errs.push(`halt ${got.halt} != ${exp.halt}`);
+  if (exp.trap !== undefined && got.trap !== exp.trap) errs.push(`trapCause ${got.trap} != ${exp.trap}`);
   for (const [k, v] of Object.entries(exp.state ?? {})) {
     if (got.state?.[k] !== v) errs.push(`${k} ${hex(got.state?.[k])} != ${hex(v)}`);
   }

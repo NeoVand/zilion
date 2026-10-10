@@ -1,7 +1,7 @@
 // A manifest for the 0.2 kernel (buildComputeShader), so the engine and non-TypeScript hosts drive it like any
 // other machine. The WGSL is buildComputeShader's, unchanged; only this description is new.
 
-import { HALT_REASONS, HOST_CONTRACT } from "../contract/host.js";
+import { HALT_REASONS, HOST_CONTRACT, TRAP_CAUSES } from "../contract/host.js";
 import { z80 } from "../cores/z80/index.js";
 import { MANIFEST_SCHEMA, type ShaderManifest } from "../manifest.js";
 import { canonicalJson } from "../util/json.js";
@@ -32,6 +32,7 @@ export function legacyMachine(memBytes: number, opts: ShaderOptions = {}): Built
       addressBits: z80.addressBits,
       fetchUnitBytes: z80.fetchUnitBytes,
       hooks: [],
+      params: {},
     },
     world: null,
     sha256: {
@@ -69,6 +70,8 @@ export function legacyMachine(memBytes: number, opts: ShaderOptions = {}): Built
     record: { wordsPerLane: REGS_PER_PROGRAM, fields: [{ name: "regs16", offset: 0, words: REGS_PER_PROGRAM, items: REG_FIELDS }] },
     state: REG_FIELDS.map((name, offset) => ({ name, bits: 16, offset })),
     haltReasons: HALT_REASONS,
+    trapCauses: TRAP_CAUSES, // the 0.2 record (regs16) has no trapCause field
+    resumable: false,
     ablation: hook === "false" ? { kind: "none" } : { kind: "expr" },
     budget: { unit: "steps", perLane: false, default: null },
     init: { perLane: true, stateWords: REGS_PER_PROGRAM },

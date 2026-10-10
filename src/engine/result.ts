@@ -1,6 +1,6 @@
 // Typed results, decoded from raw lane records through the manifest.
 
-import type { HaltReasonName } from "../contract/host.js";
+import type { HaltReasonName, TrapCause } from "../contract/host.js";
 import type { ShaderManifest } from "../manifest.js";
 
 export interface MachineResult {
@@ -14,6 +14,8 @@ export interface MachineResult {
   readonly steps: Uint32Array;
   /** Halt reason per lane (manifest.haltReasons; 0 = still running when the budget ran out). */
   readonly haltReason: Uint32Array;
+  /** Trap cause per lane (manifest.trapCauses): the trap that halted it, 0 when it did not halt on a trap. */
+  readonly trapCause: Uint32Array;
   /** Final state records, lanes × state fields (manifest.state); null when outputs.state is false. */
   readonly state: Uint32Array | null;
   /** Write counters, lanes × counters (segments, then padding); null unless outputs.writeCounts. */
@@ -25,6 +27,8 @@ export interface MachineResult {
   memoryOf(i: number): Uint8Array;
   stateOf(i: number): Record<string, number>;
   haltReasonOf(i: number): HaltReasonName | number;
+  /** The trap that halted lane i by name, or 0 when it did not halt on a trap. */
+  trapCauseOf(i: number): TrapCause | 0 | number;
   writesOf(i: number): Record<string, number>;
   /** Ring positions fetched as instruction stream by lane i. */
   fetchedOf(i: number): number[];
@@ -65,6 +69,7 @@ export function decodeResult(manifest: ShaderManifest, lanes: number, memory: Ui
   };
   const stepsF = f("steps");
   const haltF = f("haltReason");
+  const trapF = f("trapCause");
   const state = take("state");
   const writeCounts = take("writeCounts");
   const fetchMap = take("fetchMap");
@@ -74,8 +79,10 @@ export function decodeResult(manifest: ShaderManifest, lanes: number, memory: Ui
   const mapWords = f("fetchMap")?.words ?? f("startMap")?.words ?? 0;
   const counters = f("writeCounts")?.items ?? [];
   const haltNames = Object.entries(manifest.haltReasons);
+  const trapNames = Object.entries(manifest.trapCauses ?? {});
   const steps = stepsF ? column(record, lanes, R, stepsF.offset) : new Uint32Array(lanes);
   const haltReason = haltF ? column(record, lanes, R, haltF.offset) : new Uint32Array(lanes);
+  const trapCause = trapF ? column(record, lanes, R, trapF.offset) : new Uint32Array(lanes);
   return {
     lanes,
     manifest,
@@ -83,6 +90,7 @@ export function decodeResult(manifest: ShaderManifest, lanes: number, memory: Ui
     record,
     steps,
     haltReason,
+    trapCause,
     state,
     writeCounts,
     fetchMap,
@@ -96,6 +104,7 @@ export function decodeResult(manifest: ShaderManifest, lanes: number, memory: Ui
       return Object.fromEntries(manifest.state.map((s, k) => [s.name, state[i * S + k]]));
     },
     haltReasonOf: (i) => (haltNames.find(([, v]) => v === haltReason[i])?.[0] as HaltReasonName | undefined) ?? haltReason[i],
+    trapCauseOf: (i) => (trapCause[i] === 0 ? 0 : ((trapNames.find(([, v]) => v === trapCause[i])?.[0] as TrapCause | undefined) ?? trapCause[i])),
     writesOf: (i) => {
       if (!writeCounts) throw new Error("zilion: write counts are not an output of this machine");
       return Object.fromEntries(counters.map((n, k) => [n, writeCounts[i * counters.length + k]]));

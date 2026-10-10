@@ -23,7 +23,17 @@ const STATE: readonly StateField[] = [
   { name: "p", bits: 8, wgsl: "m6502_p", reset: 0x24, note: "NV-BDIZC; bit 5 reads 1" },
   { name: "pc", bits: 16, wgsl: "m6502_pc" },
   { name: "halted", bits: 8, wgsl: "m6502_halted", note: "0 running; 2 host; 3 trap (JAM or an unimplemented opcode)" },
+  { name: "trap", bits: 8, wgsl: "m6502_trap", note: "TRAP_CAUSES code of the trap that halted the core (illegal, unimplemented); 0 otherwise" },
 ];
+
+/**
+ * `init.stack.firstPushAt: t`: a push writes 0x0100 | S, then decrements S, so the first byte lands at t when
+ * 0x0100 | S aliases t (the largest such S).
+ */
+export function m6502FirstPushAt(P: number, t: number): { s: number } {
+  for (let s = 0xff; s >= 0; s--) if ((0x100 + s) % P === t) return { s };
+  throw new Error(`m6502: no stack pointer makes 0x0100|S alias position ${t} of ${P} (P > 256)`);
+}
 
 const JAM = [0x02, 0x12, 0x22, 0x32, 0x42, 0x52, 0x62, 0x72, 0x92, 0xb2, 0xd2, 0xf2];
 
@@ -40,8 +50,8 @@ function text(o: CoreGenOptions): string {
   // chip halts with PC on the opcode.
   const trap = (cause: keyof typeof TRAP_CAUSES) =>
     h.trap
-      ? `if (zil_trap(ZIL_TRAP_${cause.toUpperCase()}) != ZIL_TRAP_IGNORE) { m6502_halted = ZIL_HALT_TRAP; m6502_pc = pc0; }`
-      : `m6502_halted = ZIL_HALT_TRAP; m6502_pc = pc0;`;
+      ? `if (zil_trap(ZIL_TRAP_${cause.toUpperCase()}) != ZIL_TRAP_IGNORE) { m6502_halted = ZIL_HALT_TRAP; m6502_trap = ZIL_TRAP_${cause.toUpperCase()}; m6502_pc = pc0; }`
+      : `m6502_halted = ZIL_HALT_TRAP; m6502_trap = ZIL_TRAP_${cause.toUpperCase()}; m6502_pc = pc0;`;
   return /* wgsl */ `
 // === MOS 6502 (NMOS) — SKELETON: a handful of opcodes; every other opcode traps as 'unimplemented' ===
 var<private> m6502_a: u32;
@@ -51,6 +61,7 @@ var<private> m6502_s: u32;
 var<private> m6502_p: u32;
 var<private> m6502_pc: u32;
 var<private> m6502_halted: u32;
+var<private> m6502_trap: u32;   // the trap cause that halted the core (symbols.trapCause)
 const M6502_ADDR_MASK: u32 = 0xffffu;
 
 fn m6502_fetch() -> u32 {
@@ -104,7 +115,12 @@ export const m6502: IsaCore = {
   endianness: "little",
   state: STATE,
   internals: [],
-  symbols: { step: "m6502_step", haltReason: "m6502_halted", pc: "m6502_pc" },
+  symbols: {
+    step: "m6502_step",
+    haltReason: "m6502_halted",
+    pc: "m6502_pc",
+    trapCause: "select(0u, m6502_trap, m6502_halted == ZIL_HALT_TRAP)", // the cause only of a halt on a trap
+  },
   hooks: ["fetch", "instructionStart", "trap"],
   decode: {
     fn: "on_decode",
@@ -121,6 +137,7 @@ export const m6502: IsaCore = {
       for (let s = 0xff; s >= 0; s--) if ((0x100 + s) % P === t) return { s };
       throw new Error(`m6502: no stack pointer makes 0x0100|S alias position ${t} of ${P} (P > 256)`);
     },
+    firstPushAt: m6502FirstPushAt,
     entry: (pos) => {
       if (pos < 0 || pos > 0xffff) throw new Error(`m6502: entry position ${pos} is not a 16-bit address`);
       return { pc: pos };

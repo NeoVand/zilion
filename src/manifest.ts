@@ -2,9 +2,14 @@
 // layout by hand (bindings, the params struct, the memory and record layouts, provenance hashes). It is plain
 // JSON; `test/world/gpu_runner.py` is a complete Python host driven only by it.
 
-import type { CoreHook, DecodePage } from "./contract/isa.js";
+import type { CoreHook, CoreParamValue, DecodePage } from "./contract/isa.js";
 
-export const MANIFEST_SCHEMA = "zilion.manifest/1";
+/**
+ * Schema 2 (0.3.0-dev): the record gains `trapCause` (word 2, after `haltReason`, so later fields moved by one
+ * word) and, on resumable padded worlds, `padding`; the params gain `stepBase` and `resume`; the manifest gains
+ * `trapCauses`, `resumable` and `core.params`.
+ */
+export const MANIFEST_SCHEMA = "zilion.manifest/2";
 
 /** What the host writes into a params word. */
 export type ParamRole =
@@ -16,6 +21,13 @@ export type ParamRole =
   | "budget"
   /** Run seed for random initial state and dials. */
   | "seed"
+  /**
+   * 64-bit step base, two words (low, high): the index the dials give the first step of the dispatch. A run split
+   * into dispatches draws what one long dispatch draws when each dispatch passes the steps already run.
+   */
+  | "stepBase"
+  /** 0: lanes begin (reset, init conventions, on_reset). 1: lanes continue from their record and memory. */
+  | "resume"
   /** Ablation bitset: `words` u32, page-major, bit (key & 31) of word page·wordsPerPage + (key >> 5). */
   | "ablation"
   /** A fixed value (`value`). */
@@ -84,7 +96,18 @@ export interface MemoryLayout {
   readonly stored: boolean;
 }
 
-export type RecordFieldName = "steps" | "haltReason" | "state" | "writeCounts" | "fetchMap" | "startMap" | "regs16";
+export type RecordFieldName =
+  | "steps"
+  | "haltReason"
+  /** TRAP_CAUSES code of the trap that halted the lane (manifest.trapCauses); 0 when it did not halt on a trap. */
+  | "trapCause"
+  | "state"
+  | "writeCounts"
+  | "fetchMap"
+  | "startMap"
+  /** The padding bytes at the end of the run (resumable padded worlds), packed like memory. */
+  | "padding"
+  | "regs16";
 
 export interface RecordField {
   readonly name: RecordFieldName;
@@ -126,6 +149,8 @@ export interface ShaderManifest {
     readonly fetchUnitBytes: number;
     /** v2 hooks the generated core text calls. */
     readonly hooks: readonly CoreHook[];
+    /** Every compile-time parameter the core declares, resolved (`IsaCore.params`); empty when it declares none. */
+    readonly params: Readonly<Record<string, CoreParamValue>>;
   };
   /** The world spec as given (raw hook text included); null for the 0.2 layout. */
   readonly world: unknown;
@@ -145,6 +170,15 @@ export interface ShaderManifest {
   readonly record: RecordLayout;
   readonly state: readonly StateLayoutField[];
   readonly haltReasons: Readonly<Record<string, number>>;
+  /** Codes of the record field `trapCause` (0: the lane did not halt on a trap). */
+  readonly trapCauses: Readonly<Record<string, number>>;
+  /**
+   * Whether a dispatch can continue lanes from their previous record and memory (params role `resume`): the world
+   * counts `steps`, stores the state and the memory, and its raw hooks declare no private state. What a lane carries
+   * over: memory (and padding, in the record), the state record, steps, write counts and maps; the dials continue
+   * through `stepBase`.
+   */
+  readonly resumable: boolean;
   readonly ablation: {
     readonly kind: "none" | "expr" | "uniform";
     readonly layout?: string;

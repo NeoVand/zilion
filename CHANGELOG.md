@@ -28,6 +28,28 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
   manifest and shader header.
 - Docs: `docs/ARCHITECTURE.md`, `docs/ADDING_A_CORE.md`; the README options table now lists `fetchHook`.
 
+**Contract decisions of 2026-10-10 (branch `m1/contract`; docs/ARCHITECTURE.md, the decisions)**
+
+- *Breaking (0.3-dev API):* a world must state its budget (`budget: { unit, value }`, both fields) and, on an ISA
+  with a stack, `init.stack` (or load the state per lane); the build fails and names the missing field. Presets
+  `compat02World` (0.2's `Zilion.run` world) and `algocellPairWorld` state both. `scripts/export-machines.mjs` also
+  requires the ISA to be named.
+- `init.stack: { firstPushAt: t | 'lastByte' }`: the first byte pushed lands at t on every ISA (descriptor
+  `conventions.firstPushAt`). `topAliases` keeps its per-ISA meaning; giving both is an error.
+- The lane record carries `trapCause` (word 2; 0 when the lane did not halt on a trap), from the descriptor's
+  `symbols.trapCause`; codes in `manifest.trapCauses`. The skeletons gain a `trap` state field.
+- Core parameters: a descriptor may declare `params` (u32, bool, enum); a machine selects them with
+  `core: { isa, params }`; the builder validates them, emits `ZIL_PARAM_*` constants ahead of the core text and
+  records them in `manifest.core.params`.
+- Resumable runs: a 64-bit `stepBase` in the params reaches every dial draw (`zil_draw`, CPU mirror `zilDraw`), and
+  a `resume` flag continues lanes from their record and memory (state, steps, write counts, maps, padding).
+  Engine: `run(memory, { resume, stepBase })`, `Batch.encode({ resume, stepBase })`, `Batch.uploadRecords`;
+  `MachineResult.trapCause`/`trapCauseOf`. Library: `zil_begin_at`, `zil_resume`, `zil_set_step_base`.
+- Manifest schema `zilion.manifest/2`: the record's `trapCause` (later fields move by one word) and `padding`;
+  params `stepBase` and `resume` (the ablation table moved from byte 16 to 32); `trapCauses`, `resumable`,
+  `core.params`.
+- Unchanged: the 0.2 kernel and the Z80 core text, byte for byte (`npm run check:bytes`), and the anchors.
+
 **Fixed (0.2 API, same results)**
 
 - `Zilion.run` no longer fails above 4,194,240 programs (the dispatch limit) or 128 MiB of lane memory: batches

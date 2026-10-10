@@ -199,22 +199,26 @@ const m = await engine.machine({
   world: {
     // tapes A and B (16 bytes each) on a 37-byte ring: 5 bytes of padding, zeroed every run, never stored
     memory: { kind: "segments", segments: [{ bytes: 16, name: "A" }, { bytes: 16, name: "B" }], ring: 37 },
-    init: { stack: { topAliases: "lastByte" } }, // SP aliases the last byte of B (0xFFF1 here)
-    budget: { value: 128 },
+    init: { stack: { firstPushAt: "lastByte" } }, // the first byte pushed lands on the last byte of B (SP0 = 0xFFF2 here)
+    budget: { unit: "steps", value: 128 }, // a world always states its budget and (on a CPU with a stack) its stack
     halting: { lethal: { firstUnit: 0x00, probability: 0.03 } }, // a zero opcode halts with p = 0.03
     ablation: { table: "uniform" }, // a bitset per run, no recompile
     outputs: { writeCounts: true, fetchMap: true, startMap: true },
   },
 });
 const r = await m.run(pairs /* N × 32 bytes */, { seed: 1, ablation: masks });
-r.steps[i]; r.haltReasonOf(i); r.stateOf(i).sp; r.writesOf(i); r.fetchedOf(i); r.memoryOf(i);
+r.steps[i]; r.haltReasonOf(i); r.trapCauseOf(i); r.stateOf(i).sp; r.writesOf(i); r.fetchedOf(i); r.memoryOf(i);
+// continue the same lanes for 64 more steps: the dials draw what one 192-step run would have drawn
+const r2 = await m.run(r.memory, { seed: 1, ablation: masks, budget: 64, stepBase: 128, resume: r.record });
 ```
 
 - **The seam.** The Z80 forms 16-bit addresses and the world maps them to ring positions, so on a ring whose
   size does not divide 65,536 a crossing of address 0 lands at (65536 + t) mod P (`seamOffset`, `ringPos`,
   `highestAlias`).
 - **Randomness** is a stateless hash of (seed, lane, step, salt), so results do not depend on how a batch is
-  chunked or ordered.
+  chunked or ordered, nor on how a run is split across dispatches (`stepBase`, `resume`).
+- **Core parameters** are compile-time constants a core declares and a machine selects:
+  `engine.machine({ core: { isa, params: { … } }, world })`.
 - **Batches** of any size; `m.batch(n)` keeps lanes resident on the GPU and encodes into your own command
   encoder.
 - **Python and other hosts** read the manifest (bindings, params offsets, memory and record layouts, SHA-256

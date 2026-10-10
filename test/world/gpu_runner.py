@@ -8,12 +8,19 @@ item; this is the minimal host the world tests run on.)
     python gpu_runner.py plan.json
 
 plan.json: {"jobs": [{"id", "wgsl", "manifest", "lanes", "input", "seed", "budget", "ablation", "state", "budgets",
-                      "chunk", "lane_base", "out_memory", "out_record"}]}
+                      "chunk", "lane_base", "step_base", "resume", "step_chunks", "out_memory", "out_record"}]}
   input       host-layout lane memory, lanes x manifest.memory.hostBytesPerLane bytes (uint8)
+  budget      steps (or fetched bytes) per lane; default: the manifest's budget (a world always states one)
   state       optional, lanes x stateIn wordsPerLane (uint32 LE)        (role stateIn)
   budgets     optional, lanes (uint32 LE)                                 (role budgetIn)
   ablation    optional list of u32 words                                  (param role ablation)
   chunk       optional max lanes per dispatch (lane_base advances per chunk, so hashes see global lanes)
+  step_base   optional 64-bit dial index of the first step (param role stepBase), default 0
+  resume      optional previous records, lanes x record words (uint32 LE): continue the lanes (param role resume)
+              from them, with `input` as their previous memory
+  step_chunks optional list of budgets: run them one after the other, each dispatch resuming the previous one
+              at step_base = the steps already run (a run split across dispatches)
+  step_advance optional, default true; false keeps every dispatch of step_chunks at step_base (a negative control)
   out_memory  host-layout final memory (uint8), out_record: lanes x record words (uint32 LE)
 
 Adapter policy: never a CPU adapter unless ZILION_ALLOW_CPU_ADAPTER=1.
@@ -27,6 +34,7 @@ import sys
 import numpy as np
 import wgpu
 
+SCHEMA = "zilion.manifest/2"
 _DEV = None
 _INFO: dict = {}
 
@@ -57,6 +65,8 @@ class Machine:
 
     def __init__(self, wgsl: str, manifest: dict):
         self.m = manifest
+        if manifest.get("schema") != SCHEMA:
+            raise ValueError(f"manifest schema {manifest.get('schema')!r}; this host reads {SCHEMA}")
         if manifest.get("entryPoint") is None:
             raise ValueError("library-mode manifests have no entry point; embed them in a host shader")
         dev = self.dev = get_device()
@@ -97,8 +107,15 @@ class Machine:
             host[:, s["hostOffset"]: s["hostOffset"] + s["bytes"]] = st[:, 4 * s["storageWord"]: 4 * s["storageWord"] + s["bytes"]]
         return host
 
-    def params(self, n: int, lane_base: int, seed: int, budget: int, ablation) -> bytes:
+    def params(self, n: int, lane_base: int, seed: int, budget: int, ablation, step_base: int = 0, resume: bool = False) -> bytes:
         p = np.zeros(max(self.m["params"]["bytes"], 16) // 4, dtype=np.uint32)
+        roles = {f["role"] for f in self.m["params"]["fields"]}
+        if resume and "resume" not in roles:
+            raise ValueError("this machine cannot resume lanes (manifest.resumable is false)")
+        if step_base and "stepBase" not in roles:
+            raise ValueError("this machine has no step base (params role stepBase)")
+        if not (0 <= step_base < 2 ** 64):
+            raise ValueError(f"step_base {step_base} is not a 64-bit step index")
         for f in self.m["params"]["fields"]:
             o = f["offset"] // 4
             r = f["role"]
@@ -110,6 +127,11 @@ class Machine:
                 p[o] = budget
             elif r == "seed":
                 p[o] = seed & 0xFFFFFFFF
+            elif r == "stepBase":
+                p[o] = step_base & 0xFFFFFFFF
+                p[o + 1] = step_base >> 32
+            elif r == "resume":
+                p[o] = 1 if resume else 0
             elif r == "constant":
                 p[o] = f["value"]
             elif r == "ablation" and ablation is not None:
@@ -118,11 +140,20 @@ class Machine:
         return p.tobytes()
 
     # --- run --------------------------------------------------------------------------------------------------
-    def run(self, host_mem: np.ndarray, seed=0, budget=None, ablation=None, state=None, budgets=None, lane_base=0, chunk=None):
+    def run(self, host_mem: np.ndarray, seed=0, budget=None, ablation=None, state=None, budgets=None, lane_base=0, chunk=None,
+            step_base=0, resume=None):
+        """One run of every lane. resume: the previous records (lanes x record words) to continue from, with
+        host_mem their previous memory; step_base: the dial index of the first step (the steps already run)."""
         host_mem = np.ascontiguousarray(host_mem, dtype=np.uint8).reshape(-1, self.host_bytes)
         n = host_mem.shape[0]
         if budget is None:
-            budget = self.m["budget"]["default"] if self.m["budget"]["default"] is not None else 0
+            budget = self.m["budget"]["default"]
+        if budget is None:
+            if not self.m["budget"]["perLane"]:
+                raise ValueError("no budget: pass one (the manifest has no default)")
+            budget = 0  # unused: the per-lane budget buffer is read instead
+        if resume is not None:
+            resume = np.ascontiguousarray(np.asarray(resume, dtype=np.uint32).reshape(n, self.record_words))
         wg = self.m["workgroupSize"]
         lim = self.dev.limits.get("max-compute-workgroups-per-dimension", 65535) * wg
         chunk = min(chunk or n, lim)
@@ -137,17 +168,21 @@ class Machine:
             for b in self.bindings:
                 r = b["role"]
                 if r == "params":
-                    data = self.params(c, lane_base + s0, seed, budget, ablation)
+                    data = self.params(c, lane_base + s0, seed, budget, ablation, step_base, resume is not None)
                     buf = self.dev.create_buffer(size=len(data), usage=B.UNIFORM | B.COPY_DST)
                 elif r == "memory":
                     data = storage.tobytes()
                     buf = self.dev.create_buffer(size=max(len(data), 4), usage=B.STORAGE | B.COPY_SRC | B.COPY_DST)
                 elif r == "record":
-                    data = None
-                    buf = self.dev.create_buffer(size=max(c * self.record_words * 4, 4), usage=B.STORAGE | B.COPY_SRC)
+                    data = resume[s0: s0 + c].tobytes() if resume is not None else None
+                    buf = self.dev.create_buffer(size=max(c * self.record_words * 4, 4), usage=B.STORAGE | B.COPY_SRC | B.COPY_DST)
                 elif r == "stateIn":
-                    arr = np.ascontiguousarray(np.asarray(state, dtype=np.uint32).reshape(n, -1)[s0: s0 + c])
-                    data = arr.tobytes()
+                    if state is None and resume is None:
+                        raise ValueError("this machine loads the state per lane (init.state 'perLane'): pass state")
+                    if state is None:  # a resumed dispatch reads the state from the records instead
+                        data = bytes(c * b["wordsPerLane"] * 4)
+                    else:
+                        data = np.ascontiguousarray(np.asarray(state, dtype=np.uint32).reshape(n, -1)[s0: s0 + c]).tobytes()
                     buf = self.dev.create_buffer(size=max(len(data), 4), usage=B.STORAGE | B.COPY_DST)
                 elif r == "budgetIn":
                     data = np.ascontiguousarray(np.asarray(budgets, dtype=np.uint32)[s0: s0 + c]).tobytes()
@@ -173,6 +208,21 @@ class Machine:
                 b.destroy()
         return mem_out, rec_out
 
+    def run_split(self, host_mem: np.ndarray, step_chunks, seed=0, step_base=0, advance=True, **kw):
+        """A run split across dispatches: budgets step_chunks[0], [1], ... one after the other, each dispatch resuming
+        the lanes of the previous one at step_base + the steps already run. With a steps budget this equals one
+        dispatch of sum(step_chunks) steps, byte for byte. (advance=False keeps the step base: a negative control.)"""
+        if self.m["budget"]["unit"] != "steps" or self.m["budget"]["perLane"]:
+            raise ValueError("run_split needs a uniform steps budget")
+        if not self.m.get("resumable") and len(step_chunks) > 1:
+            raise ValueError("this machine cannot resume lanes (manifest.resumable is false)")
+        mem, rec, base = host_mem, None, step_base
+        for k, b in enumerate(step_chunks):
+            mem, rec = self.run(mem, seed=seed, budget=b, step_base=base, resume=rec if k else None, **kw)
+            if advance:
+                base += b
+        return mem, rec
+
 
 def main(plan_path: str) -> int:
     plan = json.load(open(plan_path))
@@ -190,8 +240,15 @@ def main(plan_path: str) -> int:
             host = np.fromfile(path(job["input"]), dtype=np.uint8).reshape(lanes, m.host_bytes)
             state = np.fromfile(path(job["state"]), dtype="<u4") if job.get("state") else None
             budgets = np.fromfile(path(job["budgets"]), dtype="<u4") if job.get("budgets") else None
-            mem, rec = m.run(host, seed=job.get("seed", 0), budget=job.get("budget"), ablation=job.get("ablation"),
-                             state=state, budgets=budgets, lane_base=job.get("lane_base", 0), chunk=job.get("chunk"))
+            resume = np.fromfile(path(job["resume"]), dtype="<u4") if job.get("resume") else None
+            common = dict(ablation=job.get("ablation"), state=state, budgets=budgets, lane_base=job.get("lane_base", 0),
+                          chunk=job.get("chunk"))
+            if job.get("step_chunks"):
+                mem, rec = m.run_split(host, job["step_chunks"], seed=job.get("seed", 0), step_base=job.get("step_base", 0),
+                                       advance=job.get("step_advance", True), **common)
+            else:
+                mem, rec = m.run(host, seed=job.get("seed", 0), budget=job.get("budget"), step_base=job.get("step_base", 0),
+                                 resume=resume, **common)
             mem.tofile(path(job["out_memory"]))
             rec.astype("<u4").tofile(path(job["out_record"]))
         except Exception as e:  # report and continue: the driver marks the job failed
