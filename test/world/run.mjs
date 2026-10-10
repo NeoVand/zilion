@@ -13,7 +13,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as Z from "../../dist/index.js";
-import { CASES } from "./cases.mjs";
+import { CASES as Z80_CASES } from "./cases.mjs";
+import { CORE_CASES } from "./cases_cores.mjs";
+
+const CASES = [...Z80_CASES, ...CORE_CASES];
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);

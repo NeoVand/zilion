@@ -9,6 +9,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as Z from "../dist/index.js";
+import { m6502 } from "../dist/cores/m6502/index.js";
+import { bff } from "../dist/cores/bff/index.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 let pass = 0;
@@ -179,6 +181,24 @@ test("the world layer names no register, opcode or core function of any ISA", ()
       const m = code.match(bad);
       if (m) throw new Error(`${f} mentions ${m[0]}`);
     }
+  }
+});
+
+// --- skeleton cores: the contract rejects what a core cannot do ---------------------------------------------------
+test("skeletons: the builder refuses what a core cannot do, and accepts each core's own traps and pages", () => {
+  throws(() => Z.buildMachine({ isa: bff, world: ring(32, { init: { stack: { topAliases: 0 } } }) }), /no hardware stack/);
+  throws(() => Z.buildMachine({ isa: bff, world: ring(32, { hooks: { ioIn: "return 0u;" } }) }), /does not call the 'io' hook/);
+  throws(() => Z.buildMachine({ isa: m6502, world: ring(32, { halting: { traps: { "halt-insn": "ignore" } } }) }), /never raises trap 'halt-insn'/);
+  throws(() => Z.buildMachine({ isa: Z.z80, world: ring(32, { halting: { traps: { bounds: "ignore" } } }) }), /never raises trap 'bounds'/);
+  throws(() => Z.buildMachine({ isa: m6502, world: ring(512, { init: { stack: { topAliases: 0 } } }) }), /no stack pointer/);
+  eq(Z.buildMachine({ isa: bff, world: ring(32, { halting: { traps: { unmatched: { halt: { probability: 0.25 } } } } }) }).manifest.core.hooks, ["trap"]);
+  eq(Z.buildMachine({ isa: m6502, world: ring(32, { ablation: { table: "uniform" } }) }).manifest.ablation.words, 8);
+  eq(Z.buildMachine({ isa: bff, world: ring(32, { ablation: { table: "uniform" } }) }).manifest.ablation.words, 1);
+  eq(m6502.conventions.stackTop(40, 39), { s: 0xdf });
+  eq(m6502.conventions.stackTop(32, 20), { s: 0xf4 });
+  for (const core of [m6502, bff]) {
+    const w = Z.buildMachine({ isa: core, world: ring(33, { outputs: { fetchMap: true } }) }).wgsl;
+    if (/\bcpu_|\bz80_/.test(w)) throw new Error(`${core.id}: a Z80 symbol leaked into the generated shader`);
   }
 });
 

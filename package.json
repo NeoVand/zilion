@@ -13,6 +13,10 @@
 		".": {
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
+		},
+		"./z80": {
+			"types": "./dist/cores/z80/index.d.ts",
+			"import": "./dist/cores/z80/index.js"
 		}
 	},
 	"files": [
