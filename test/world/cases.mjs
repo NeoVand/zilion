@@ -376,6 +376,43 @@ export const CASES = [
         [{ mem: mem(32, { 0: [0x3c, 0x3c, 0x3e, 0x05, 0x76] }), expect: { steps: 4, state: { a: 5 } } }]),
   },
 
+  {
+    name: "io hooks: port numbers of IN/OUT, IN r,(C), OUT (C),r, OUT (C),0, INI (BC before B--), OUTI (after)",
+    // io_in(port) returns (port >> 8) ^ (port & 0xFF); io_out(port, val) stores val at 0x20 + (port & 0xF).
+    setup: ({ Z, addJob }) =>
+      addJob({ isa: Z.z80, world: ring(64, { hooks: {
+        ioIn: "return ((port >> 8u) ^ port) & 0xffu;", ioOut: "mem_write(0x20u + (port & 0xfu), val);" } }) }, [
+        // LD A,0x12; IN A,(0x34): port 0x1234 → 0x12 ^ 0x34 = 0x26.
+        { label: "IN A,(n)", mem: mem(64, { 0: [0x3e, 0x12, 0xdb, 0x34, 0x76] }), expect: { steps: 3, state: { a: 0x26 } } },
+        // LD BC,0x5678; IN D,(C) (ED 50): port 0x5678 → 0x56 ^ 0x78 = 0x2E.
+        { label: "IN D,(C)", mem: mem(64, { 0: [0x01, 0x78, 0x56, 0xed, 0x50, 0x76] }), expect: { steps: 3, state: { d: 0x2e } } },
+        // LD A,0x9A; OUT (0x05),A: port 0x9A05 → stored at 0x25.
+        { label: "OUT (n),A", mem: mem(64, { 0: [0x3e, 0x9a, 0xd3, 0x05, 0x76] }), expect: { steps: 3, mem: { 0x25: 0x9a } } },
+        // LD BC,0x0003; LD E,0x77; OUT (C),E (ED 59): port 0x0003 → 0x23.
+        { label: "OUT (C),E", mem: mem(64, { 0: [0x01, 0x03, 0x00, 0x1e, 0x77, 0xed, 0x59, 0x76] }), expect: { steps: 4, mem: { 0x23: 0x77 } } },
+        // LD BC,0x0006; OUT (C),0 (ED 71): 0 → 0x26 (pre-filled with 0xFF).
+        { label: "OUT (C),0", mem: mem(64, { 0: [0x01, 0x06, 0x00, 0xed, 0x71, 0x76], 0x26: [0xff] }), expect: { steps: 3, mem: { 0x26: 0x00 } } },
+        // LD HL,0x30; LD BC,0x0207; INI: port 0x0207 (before B is decremented) → 0x05 at (HL); B = 1, HL = 0x31.
+        { label: "INI", mem: mem(64, { 0: [0x21, 0x30, 0x00, 0x01, 0x07, 0x02, 0xed, 0xa2, 0x76] }),
+          expect: { steps: 4, mem: { 0x30: 0x05 }, state: { b: 1, c: 7, h: 0, l: 0x31 } } },
+        // LD HL,0x30; LD BC,0x0204; OUTI with (HL) = 0xAB: port 0x0104 (after B is decremented) → 0x24.
+        { label: "OUTI", mem: mem(64, { 0: [0x21, 0x30, 0x00, 0x01, 0x04, 0x02, 0xed, 0xa3, 0x76], 0x30: [0xab] }),
+          expect: { steps: 4, mem: { 0x24: 0xab }, state: { b: 1, l: 0x31 } } },
+      ]),
+  },
+
+  {
+    name: "on_instruction_start ZIL_SKIP consumes the first unit only (a skipped DD is not a prefix)",
+    // Raw hook: skip first units 0x3C and 0xDD. 3C 3C LD A,5 HALT → A = 5 (R counts the skipped M1s).
+    // DD 04 HALT: the DD alone is skipped, so 04 runs as INC B (ablation would have consumed DD 04 together).
+    setup: ({ Z, addJob }) =>
+      addJob({ isa: Z.z80, world: ring(32, { outputs: maps, hooks: {
+        onInstructionStart: "if (unit == 0x3cu || unit == 0xddu) { return ZIL_SKIP; }" } }) }, [
+        { mem: mem(32, { 0: [0x3c, 0x3c, 0x3e, 0x05, 0x76] }), expect: { steps: 4, halt: "halt-insn", state: { a: 5, r: 4, pc: 4 }, starts: [0, 1, 2, 4] } },
+        { mem: mem(32, { 0: [0xdd, 0x04, 0x76] }), expect: { steps: 3, state: { b: 1, pc: 2 }, starts: [0, 1, 2] } },
+      ]),
+  },
+
   // ---------------------------------------------------------------------------------------------------------
   // Fetch and instruction-start maps
   // ---------------------------------------------------------------------------------------------------------
