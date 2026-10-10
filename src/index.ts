@@ -80,3 +80,15 @@ export type {
   StateLayoutField,
 } from "./manifest.js";
 export { sha256 } from "./util/sha256.js";
+
+// L2: the batch engine
+export { createEngine, Engine, Machine, Batch } from "./engine/engine.js";
+export type { EngineOptions, MachineRunOptions, LaneInput } from "./engine/engine.js";
+export type { MachineResult } from "./engine/result.js";
+export { decodeResult } from "./engine/result.js";
+export { ZilionShaderError } from "./engine/gpu.js";
+export { maxLanesPerChunk, planChunks, DEFAULT_LIMITS } from "./engine/chunks.js";
+export type { ChunkLimits, ChunkPlanOptions } from "./engine/chunks.js";
+export { packMemory, unpackMemory } from "./engine/runner.js";
+export type { Slab, SlabBuffers } from "./engine/runner.js";
+export { legacyMachine } from "./legacy/manifest.js";

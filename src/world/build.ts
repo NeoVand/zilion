@@ -568,6 +568,7 @@ ${out.memory ? "    zil_store_memory(i * ZIL_MEM_WORDS);\n" : ""}    zil_store_r
       packing: "little-endian bytes",
       segments: mem.segments,
       padding: mem.padding,
+      stored: mode === "kernel" ? out.memory : !!MEM,
     },
     record: { wordsPerLane: rw, fields: recordFields },
     state: fields.map((f, k) => ({ name: f.name, bits: f.bits, offset: k })),

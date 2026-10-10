@@ -80,6 +80,8 @@ export interface MemoryLayout {
   readonly segments: readonly SegmentLayout[];
   /** Ring positions zeroed every run and never stored. */
   readonly padding: { readonly from: number; readonly to: number } | null;
+  /** Whether the kernel writes lane memory back (outputs.memory). */
+  readonly stored: boolean;
 }
 
 export type RecordFieldName = "steps" | "haltReason" | "state" | "writeCounts" | "fetchMap" | "startMap" | "regs16";

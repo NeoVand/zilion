@@ -1,4 +1,8 @@
-import { buildComputeShader, REG_FIELDS, REGS_PER_PROGRAM } from "./shader.js";
+import { maxLanesPerChunk, planChunks } from "../engine/chunks.js";
+import { createKernel } from "../engine/gpu.js";
+import { deviceLimits, LaneRunner, type Slab } from "../engine/runner.js";
+import { legacyMachine } from "./manifest.js";
+import { REG_FIELDS, REGS_PER_PROGRAM } from "./shader.js";
 
 /** Register state of one Z80 (16-bit register pairs). */
 export interface Z80Registers {
@@ -60,35 +64,28 @@ const WORKGROUP_SIZE = 64;
 /**
  * A batch Z80 executor. Runs many independent Z80 CPUs in parallel on the GPU.
  * Create once, call `run` as many times as you like, then `destroy`.
+ *
+ * Since 0.3 this is a facade over the engine's lane runner: the kernel is still buildComputeShader's (byte-identical
+ * to 0.2), but batches are chunked against the device limits (no more failure above 4,194,240 programs or 128 MiB
+ * of memory), GPU buffers are reused between runs, each chunk is read back with one map, and an invalid
+ * `fetchHook` makes `create` reject with the compiler's message instead of failing later.
  */
 export class Zilion {
   readonly memBytes: number;
   readonly device: GPUDevice;
-  private pipeline: GPUComputePipeline;
+  private readonly runner: LaneRunner;
+  private slab: Slab | null = null;
   private ownsDevice: boolean;
   private destroyed = false;
 
-  private constructor(
-    device: GPUDevice,
-    memBytes: number,
-    ownsDevice: boolean,
-    fetchHook?: string,
-  ) {
+  private constructor(device: GPUDevice, memBytes: number, ownsDevice: boolean, runner: LaneRunner) {
     this.device = device;
     this.memBytes = memBytes;
     this.ownsDevice = ownsDevice;
-    const module = device.createShaderModule({
-      label: "zilion-z80",
-      code: buildComputeShader(memBytes, { fetchHook }),
-    });
-    this.pipeline = device.createComputePipeline({
-      label: "zilion-z80",
-      layout: "auto",
-      compute: { module, entryPoint: "main" },
-    });
+    this.runner = runner;
   }
 
-  /** Create a Zilion batch executor. */
+  /** Create a Zilion batch executor. Rejects with a ZilionShaderError if `fetchHook` does not compile. */
   static async create(opts: ZilionOptions = {}): Promise<Zilion> {
     const memBytes = opts.memBytes ?? 256;
     if (memBytes < 4 || (memBytes & (memBytes - 1)) !== 0) {
@@ -104,7 +101,14 @@ export class Zilion {
       device = await adapter.requestDevice();
       owns = true;
     }
-    return new Zilion(device, memBytes, owns, opts.fetchHook);
+    const built = legacyMachine(memBytes, { fetchHook: opts.fetchHook });
+    try {
+      const { pipeline, layout } = await createKernel(device, built.wgsl, built.manifest, "zilion-z80");
+      return new Zilion(device, memBytes, owns, new LaneRunner(device, pipeline, layout, built.manifest));
+    } catch (e) {
+      if (owns) device.destroy();
+      throw e;
+    }
   }
 
   /**
@@ -127,18 +131,15 @@ export class Zilion {
         memoryOf: () => new Uint8Array(0),
       };
     }
-    const device = this.device;
     const memBytes = this.memBytes;
-    const words = memBytes >> 2;
 
-    // Pack memory (flat u32 per program).
-    const memData = new Uint32Array(count * words);
-    const memBytesView = new Uint8Array(memData.buffer);
+    // Pack memory (memBytes per program; the 0.2 storage layout is the bytes themselves).
+    const memory = new Uint8Array(count * memBytes);
     for (let p = 0; p < count; p++) {
       const prog = programs[p];
       const off = p * memBytes;
       const len = Math.min(prog.length, memBytes);
-      for (let i = 0; i < len; i++) memBytesView[off + i] = prog[i] & 0xff;
+      for (let i = 0; i < len; i++) memory[off + i] = prog[i] & 0xff;
     }
 
     // Pack initial registers (defaults: 0, sp=0xFFFF).
@@ -155,79 +156,33 @@ export class Zilion {
       }
     }
 
-    const params = new Uint32Array([count, memBytes, opts.steps, 0]);
-
-    // Buffers.
-    const memBuf = device.createBuffer({
-      size: memData.byteLength,
-      usage:
-        GPUBufferUsage.STORAGE |
-        GPUBufferUsage.COPY_SRC |
-        GPUBufferUsage.COPY_DST,
+    // Run in chunks that respect the device limits, reusing one set of buffers.
+    const per = maxLanesPerChunk({
+      workgroupSize: WORKGROUP_SIZE,
+      bytesPerLane: this.runner.bytesPerLane(),
+      limits: deviceLimits(this.device),
     });
-    device.queue.writeBuffer(memBuf, 0, memData);
-    const regsOutBuf = device.createBuffer({
-      size: regData.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    });
-    const regsInBuf = device.createBuffer({
-      size: regData.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(regsInBuf, 0, regData);
-    const paramsBuf = device.createBuffer({
-      size: params.byteLength,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(paramsBuf, 0, params);
-
-    const bindGroup = device.createBindGroup({
-      layout: this.pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: paramsBuf } },
-        { binding: 1, resource: { buffer: memBuf } },
-        { binding: 2, resource: { buffer: regsOutBuf } },
-        { binding: 3, resource: { buffer: regsInBuf } },
-      ],
-    });
-
-    const memStage = device.createBuffer({
-      size: memData.byteLength,
-      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-    });
-    const regsStage = device.createBuffer({
-      size: regData.byteLength,
-      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-    });
-
-    const enc = device.createCommandEncoder();
-    const pass = enc.beginComputePass();
-    pass.setPipeline(this.pipeline);
-    pass.setBindGroup(0, bindGroup);
-    pass.dispatchWorkgroups(Math.ceil(count / WORKGROUP_SIZE));
-    pass.end();
-    enc.copyBufferToBuffer(memBuf, 0, memStage, 0, memData.byteLength);
-    enc.copyBufferToBuffer(regsOutBuf, 0, regsStage, 0, regData.byteLength);
-    device.queue.submit([enc.finish()]);
-
-    await memStage.mapAsync(GPUMapMode.READ);
-    const outMem = new Uint8Array(memStage.getMappedRange().slice(0));
-    memStage.unmap();
-    await regsStage.mapAsync(GPUMapMode.READ);
-    const outRegs = new Uint32Array(regsStage.getMappedRange().slice(0));
-    regsStage.unmap();
-
-    memBuf.destroy();
-    regsOutBuf.destroy();
-    regsInBuf.destroy();
-    paramsBuf.destroy();
-    memStage.destroy();
-    regsStage.destroy();
-
-    // Repack memory: private-array layout stores 1 byte per u32, but we wrote
-    // it back packed 4-per-word, so outMem is already tight bytes.
-    const memory = new Uint8Array(count * memBytes);
-    memory.set(outMem.subarray(0, count * memBytes));
+    const cap = Math.min(count, per);
+    if (!this.slab || this.slab.lanes < cap) {
+      if (this.slab) this.runner.destroySlab(this.slab);
+      this.slab = this.runner.createSlab(0, cap, "zilion-z80");
+    }
+    const slab = this.slab;
+    const outRegs = new Uint32Array(count * REGS_PER_PROGRAM);
+    for (const { start, count: n } of planChunks(count, per)) {
+      const memWords = new Uint32Array(memory.buffer, start * memBytes, (n * memBytes) >> 2);
+      this.runner.writeMemory(slab, memWords);
+      this.runner.writeState(slab, regData.subarray(start * REGS_PER_PROGRAM, (start + n) * REGS_PER_PROGRAM));
+      this.runner.writeParams(slab, { laneCount: n, laneBase: 0, budget: opts.steps, seed: 0 });
+      const enc = this.device.createCommandEncoder();
+      const pass = enc.beginComputePass();
+      this.runner.dispatch(pass, slab, n);
+      pass.end();
+      this.device.queue.submit([enc.finish()]);
+      const out = await this.runner.read(slab, n, true);
+      memory.set(new Uint8Array(out.memory!.buffer, out.memory!.byteOffset, n * memBytes), start * memBytes);
+      outRegs.set(out.record, start * REGS_PER_PROGRAM);
+    }
 
     const registers: Z80Registers[] = [];
     for (let p = 0; p < count; p++) {
@@ -262,6 +217,8 @@ export class Zilion {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    if (this.slab) this.runner.destroySlab(this.slab);
+    this.slab = null;
     if (this.ownsDevice) this.device.destroy();
   }
 }

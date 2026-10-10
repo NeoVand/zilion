@@ -182,5 +182,29 @@ test("the world layer names no register, opcode or core function of any ISA", ()
   }
 });
 
+// --- engine chunk planner ---------------------------------------------------------------------------------------
+test("chunk planner at the default limits: 4,194,240 lanes per dispatch, 524,288 lanes of 256 B per binding", () => {
+  const L = Z.DEFAULT_LIMITS;
+  eq(Z.maxLanesPerChunk({ workgroupSize: 64, bytesPerLane: [4, 48, 48], limits: L }), Math.floor(134217728 / 48 / 64) * 64);
+  eq(Z.maxLanesPerChunk({ workgroupSize: 64, bytesPerLane: [4], limits: L }), 65535 * 64);
+  eq(65535 * 64, 4194240);
+  eq(Z.maxLanesPerChunk({ workgroupSize: 64, bytesPerLane: [256, 48, 48], limits: L }), 524288);
+  eq(Z.maxLanesPerChunk({ workgroupSize: 64, bytesPerLane: [256], limits: L, maxLanes: 1000 }), 960);
+  eq(Z.maxLanesPerChunk({ workgroupSize: 64, bytesPerLane: [256], limits: L, maxLanes: 10 }), 10);
+  eq(Z.maxLanesPerChunk({ workgroupSize: 16, lanesPerInvocation: 4, bytesPerLane: [4], limits: L }), 65535 * 64);
+  throws(() => Z.maxLanesPerChunk({ workgroupSize: 64, bytesPerLane: [2 ** 28], limits: L }), /does not fit/);
+  eq(Z.planChunks(10, 4), [{ start: 0, count: 4 }, { start: 4, count: 4 }, { start: 8, count: 2 }]);
+  eq(Z.planChunks(0, 4), []);
+  eq(Z.planChunks(4194241, 4194240).length, 2);
+});
+test("host <-> storage packing follows the manifest segments (word-padded tapes)", () => {
+  const m = build({ memory: { kind: "segments", segments: [{ bytes: 5 }, { bytes: 3 }], ring: 9 } }).manifest;
+  const host = Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18]);
+  const st = Z.packMemory(m, host, 2);
+  eq(m.memory.storageWordsPerLane, 3);
+  eq(Array.from(new Uint8Array(st.buffer)), [1, 2, 3, 4, 5, 0, 0, 0, 6, 7, 8, 0, 11, 12, 13, 14, 15, 0, 0, 0, 16, 17, 18, 0]);
+  eq(Array.from(Z.unpackMemory(m, st, 2)), Array.from(host));
+});
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

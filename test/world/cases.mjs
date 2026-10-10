@@ -569,6 +569,41 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     check: ([a, b]) => compareJobs(a, b),
   },
   {
+    name: "0.2 kernel (buildComputeShader, legacy manifest) = mask world with per-lane state (2048 random programs)",
+    setup: ({ Z, addJob }) => {
+      const n = 2048;
+      const progs = lanesOf(randomBytes(n * 64, 41), 64);
+      const rnd = randomBytes(n * 24, 42);
+      const w16 = (i, k) => rnd[i * 24 + 2 * k] | (rnd[i * 24 + 2 * k + 1] << 8);
+      const legacyLanes = progs.map((l, i) => ({ mem: l.mem, state: Object.fromEntries(Z.REG_FIELDS.map((f, k) => [f, w16(i, k)])) }));
+      const split = { af: ["a", "f"], bc: ["b", "c"], de: ["d", "e"], hl: ["h", "l"], afPrime: ["a_", "f_"], bcPrime: ["b_", "c_"], dePrime: ["d_", "e_"], hlPrime: ["h_", "l_"] };
+      const worldLanes = legacyLanes.map((l) => {
+        const st = {};
+        for (const [k, v] of Object.entries(l.state)) {
+          if (split[k]) { st[split[k][0]] = v >> 8; st[split[k][1]] = v & 0xff; } else st[k] = v;
+        }
+        return { mem: l.mem, state: st };
+      });
+      return [
+        addJob(Z.legacyMachine(64), legacyLanes, { budget: 100 }),
+        addJob({ isa: Z.z80, world: { memory: { kind: "mask", bytes: 64 }, init: { state: "perLane" } } }, worldLanes, { budget: 100 }),
+      ];
+    },
+    check: ([a, b]) => {
+      const errs = [];
+      const join = { af: ["a", "f"], bc: ["b", "c"], de: ["d", "e"], hl: ["h", "l"], afPrime: ["a_", "f_"], bcPrime: ["b_", "c_"], dePrime: ["d_", "e_"], hlPrime: ["h_", "l_"] };
+      a.result.forEach((x, i) => {
+        const y = b.result[i];
+        if (!x.mem.every((v, k) => v === y.mem[k])) errs.push(`program ${i}: memory differs`);
+        ["af", "bc", "de", "hl", "ix", "iy", "sp", "pc", "afPrime", "bcPrime", "dePrime", "hlPrime"].forEach((f, k) => {
+          const want = join[f] ? (y.state[join[f][0]] << 8) | y.state[join[f][1]] : y.state[f];
+          if (x.regs16[k] !== want) errs.push(`program ${i}: ${f} ${x.regs16[k]} vs ${want}`);
+        });
+      });
+      return errs;
+    },
+  },
+  {
     name: "chunk invariance: 5000 lanes with a dial in 1, 5 and 16 dispatches, and a lane_base slice",
     setup: ({ Z, addJob }) => {
       const lanes = lanesOf(randomBytes(5000 * 32, 11), 32);
