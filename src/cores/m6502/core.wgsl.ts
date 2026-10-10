@@ -131,8 +131,8 @@ function decodeWord({ mnemonic: m, mode }: { mnemonic: string; mode: M6502Mode }
   let d = AM[mode];
   if (m in SOP) d |= mode === "acc" ? SHIFT_A : RMW | READ;
   if (m in SOP) d |= SOP[m] << 8;
-  if (m in ALU && !(m in SOP && !(m in { SLO: 1, RLA: 1, SRE: 1, RRA: 1, DCP: 1, ISC: 1 }))) {
-    d |= ALU[m] << 11;
+  if (m in ALU) {
+    d |= ALU[m] << 11; // the combined RMW opcodes (SLO RLA SRE RRA DCP ISC) are in both SOP and ALU
     if (mem) d |= READ;
   }
   if (m === "NOP" && mem) d |= READ; // the NOPs with an operand address read it

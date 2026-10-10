@@ -65,8 +65,9 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
 - Validated against SingleStepTests/65x02 `6502/v1`: 2,560,000 tests, zero divergences, zero expected-divergence
   rules (`test/baselines/6502-v0.3.0-dev.md`). 18 planted 6502 bugs in the harness self-test, all caught.
 - Harness: the 6502 adapter (`tools/zt.py vectors 6502`), an optional bus-write log compared against the vectors'
-  `cycles` (the `bus` field), `npm run test:vectors:6502`, `ZILION_6502_VECTORS`. The Z80 host text and ledger are
-  unchanged byte for byte.
+  `cycles` (the `bus` field), `npm run test:vectors:6502`, `ZILION_6502_VECTORS`. The Z80 test-host WGSL and the
+  Z80 ledger JSON are unchanged byte for byte; a regenerated Z80 Markdown report gains one line listing the
+  convention mappings applied (HALT-PC).
 - `test/world/cases_m6502.mjs`: the 6502 on rings of 32, 33 and 64 bytes, with a self-copier under the soup's init.
 - `test/bench/bench-cores.mjs`: Z80 and 6502 throughput on random 32-byte pairs.
 

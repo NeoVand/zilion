@@ -7,6 +7,7 @@
 //        manifest.json              provenance: package version, git commit, core SHA-256, toolchain
 //        z80-core.wgsl              Z80_CORE_WGSL exactly as exported
 //        m6502-core.wgsl            HOST_CONTRACT_PRELUDE_WGSL + M6502_CORE_WGSL (the 6502 core, every hook off)
+//        m6502-core-hooks.wgsl      the same with the fetch, instruction-start and trap hooks on (self-test)
 //        conformance/plan.json      the vectors of test/conformance.js (programs, steps, hook index)
 //        conformance/shader-N.wgsl  buildComputeShader(memBytes, { fetchHook }) for each distinct hook
 //
@@ -60,6 +61,15 @@ const cores = {
     core: "m6502",
     coreVersion: m6502.m6502.coreVersion,
     ...write("m6502-core.wgsl", zilion.HOST_CONTRACT_PRELUDE_WGSL + m6502.M6502_CORE_WGSL),
+  },
+  // The same core with every hook it can call enabled (the text worlds with maps, dials or trap policies run); the
+  // self-test runs the vectors on it with neutral hooks.
+  "6502-hooks": {
+    export: "HOST_CONTRACT_PRELUDE_WGSL + m6502CoreText({ fetch: true, instructionStart: true, trap: true })",
+    core: "m6502",
+    coreVersion: m6502.m6502.coreVersion,
+    ...write("m6502-core-hooks.wgsl",
+      zilion.HOST_CONTRACT_PRELUDE_WGSL + m6502.m6502CoreText({ fetch: true, instructionStart: true, trap: true })),
   },
 };
 

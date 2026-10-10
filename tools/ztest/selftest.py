@@ -360,6 +360,27 @@ MUTANTS_6502 = [
 ]
 
 
+# Neutral hooks: the hooked core must then behave exactly as the hooks-off core the baseline tests.
+NEUTRAL_HOOKS_6502 = """
+fn on_fetch(addr: u32) {}
+fn on_instruction_start(pc: u32, unit: u32) -> u32 { return ZIL_CONTINUE; }
+fn zil_trap(cause: u32) -> u32 { return ZIL_TRAP_HALT; }
+"""
+
+
+def hooked_6502(art: Artifacts, vectors: Path, log) -> bool:
+    """The full 6502 vector set on the core text with every hook on (neutral), against the hooks-off rules."""
+    text = art.core("6502-hooks")
+    calls = all(f"{h}(" in text for h in ("on_fetch", "on_instruction_start", "zil_trap"))
+    fake = with_core(art, "6502", text + NEUTRAL_HOOKS_6502, "hooks on (fetch, instructionStart, trap), neutral")
+    led, info = session.run(fake, "6502", [vectors], progress=None, rules_path=session.default_rules_path("6502", art))
+    t = led.summary()["totals"]
+    ok = calls and t.get("unexpected", 1) == 0 and t["pass_all"] == t["tests"]
+    log(f"  {'ok  ' if ok else 'FAIL'} 6502 with every hook on (neutral): {t['tests']:,} tests, "
+        f"{t.get('unexpected', 0)} unexpected, {t['tests'] - t['pass_all']} diverging")
+    return ok
+
+
 def mutants_6502(art: Artifacts, vectors: Path, log) -> bool:
     ok = True
     base = art.core("6502")
@@ -422,6 +443,7 @@ def run(art: Artifacts, vectors: Path | None, limit: int, log=print, vectors_650
         log(f"  FAIL 6502 vector directory {vectors_6502} not found")
         ok = False
     else:
+        ok &= hooked_6502(art, vectors_6502, log)
         ok &= mutants_6502(art, vectors_6502, log)
         ok &= invariance_and_determinism(art, vectors_6502, limit, log, isa="6502")
     log("selftest " + ("passed" if ok else "FAILED"))

@@ -14,8 +14,9 @@ Comparisons beyond the state and the final RAM (both architectural):
   * `bus`: the reference's memory writes, in order (the `cycles` entries marked "write"), against every mem_write
     call the core makes. This is how the old-value write of a read-modify-write instruction is checked. The
     reference's dummy *reads* are not compared: a read has no effect in a Zilion world (only instruction-stream
-    fetches are hooked), and the core does not make them. A read of an address the vector does not list is still
-    caught (`mem` unlisted-read), because the vectors list every address the reference touched.
+    fetches are hooked), and the core does not make them. A read of an address the reference never touched is
+    caught (`mem` unlisted-read); a read of an address it touched (even only by a dummy read) is not, and the order
+    of reads is not checked. A wrong read usually shows as a wrong value anyway.
 
 Convention mapping (JAM-PC): the core parks PC on a JAM opcode, as Zilion parks every halting instruction (the Z80's
 HALT, a host halt); the vectors leave PC one past it. When the core reports the trap halt, the adapter reports

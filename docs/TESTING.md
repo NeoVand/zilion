@@ -252,7 +252,8 @@ Outputs:
 - **JAM-PC.** Zilion parks PC on a JAM opcode; the vectors leave it one past. When the core reports the trap halt,
   the adapter reports PC + 1, counted in the ledger (`mapped.jam_pc`: 120,000 tests, the 12 JAM files).
 - **`bus`.** `write_cap = 8`: the reference's writes (at most 3, for BRK) against every `mem_write`. Dummy reads are
-  not compared: the core does not make them, and an extra read would show as an unlisted read.
+  not compared: the core does not make them. A read of an address the reference never touched shows as an
+  unlisted read; a read of one it touched (even only by a dummy read) does not, and read order is not checked.
 - **Hooks.** `on_decode` is stubbed to "never ablate".
 - **Groups.** documented (151 files), undocumented (85), unstable (8: ANE LXA SHA SHA TAS SHY SHX LAS), jam (12).
 - **Test names are not unique** within a file (the name is the instruction bytes): `--test` selects every test of
@@ -341,7 +342,8 @@ A future CI gate should fail on any unexpected divergence (exit 1) and on any ru
      ($xxFF) carrying into the high byte, zp,X carrying into page 1, a (zp),Y pointer read from page 1, an RMW
      without its old-value write and one writing the new value twice, ANE and LXA with other magic constants, SHA/SHX
      without the + 1, PHP pushing B clear, PLP loading B, BRK through 0xFFFC, a JAM that does not halt, a NOP that
-     halts, TXS setting flags.
+     halts, TXS setting flags. Before them, the whole 6502 set runs on the core text with every hook on and neutral
+     (`m6502-core-hooks.wgsl`: the text worlds with maps, dials and trap policies run) and must match exactly.
   4. **memory-model invariance.** `sparse` and `full` give identical ledgers on real vectors (Z80 and 6502).
   5. **determinism.** Two sessions give the same canonical ledger, and repeated dispatches give identical bytes.
 

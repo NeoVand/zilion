@@ -49,7 +49,10 @@ const STATE: readonly StateField[] = [
     bits: 8,
     wgsl: "m6502_p",
     reset: 0x20,
-    note: "N V 1 B D I Z C. Bit 5 reads 1; B and bit 5 are pushed as 1 by PHP/BRK whatever is stored, PLP/RTI store B = 0, bit 5 = 1",
+    note:
+      "N V 1 B D I Z C. PHP/BRK push B and bit 5 as 1 whatever is stored; PLP/RTI store B = 0, bit 5 = 1; no other " +
+      "instruction touches them. A world may store bit 5 = 0 or B = 1 (init.set, a state load): the chip cannot hold " +
+      "such a P, but it changes no behaviour and stays in the record until a PLP or RTI",
   },
   { name: "pc", bits: 16, wgsl: "m6502_pc", note: "parked on the JAM opcode while halted by it" },
   { name: "halted", bits: 8, wgsl: "m6502_halted", note: "0 running; 2 host; 3 trap (JAM)" },
