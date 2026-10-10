@@ -46,11 +46,16 @@ class Artifacts:
         return json.loads((self.root / rel).read_text(encoding="utf-8"))
 
     def provenance(self, isa: str | None = None) -> dict:
+        """What the results depend on: the package version and the core text's SHA-256."""
         m = self.manifest
-        out = {"package": m["package"], "git": m["git"], "toolchain": m["toolchain"]}
+        out = {"package": m["package"]}
         if isa is not None:
             out["core"] = {"isa": isa, "sha256": m["cores"][isa]["sha256"]}
         return out
+
+    def source(self) -> dict:
+        """Where the WGSL came from (git commit, toolchain): recorded with a run, not in the canonical ledger."""
+        return {"git": self.manifest["git"], "toolchain": self.manifest["toolchain"]}
 
 
 def emit(out_dir: Path = DEFAULT_WGSL_DIR) -> None:
@@ -77,3 +82,25 @@ def run_node(script: str, *args: str) -> subprocess.CompletedProcess:
     if not node:
         raise HarnessError("node not found (set ZILION_NODE)")
     return subprocess.run([node, str(REPO / "tools" / script), *args], cwd=REPO, capture_output=True, text=True)
+
+
+def with_core(art: Artifacts, isa: str, text: str, origin: str) -> Artifacts:
+    """Artifacts whose `isa` core is replaced by `text` (an override, recorded by SHA-256 and origin)."""
+    m = json.loads(json.dumps(art.manifest))
+    m["cores"][isa] = {"export": f"override:{origin}", "file": None, "sha256": sha256_text(text), "override": True}
+    return _OverrideArtifacts(root=art.root, manifest=m, _text=text, _isa=isa)
+
+
+@dataclass(frozen=True)
+class _OverrideArtifacts(Artifacts):
+    _text: str = ""
+    _isa: str = ""
+
+    def core(self, isa: str) -> str:
+        return self._text if isa == self._isa else super().core(isa)
+
+    def provenance(self, isa: str | None = None) -> dict:
+        out = super().provenance(isa)
+        if isa == self._isa:
+            out["core"]["override"] = self.manifest["cores"][isa]["export"]
+        return out

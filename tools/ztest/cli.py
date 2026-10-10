@@ -44,6 +44,7 @@ def main(argv: list[str]) -> int:
     v.add_argument("--analysis", type=Path, help="Markdown included verbatim in the report (hand-written analysis)")
     v.add_argument("--show", type=int, default=20, help="unexpected classes to print")
     v.add_argument("--dump-wgsl", type=Path, help="write the composed test shader (host + glue + core) here")
+    v.add_argument("--core", type=Path, help="use this core WGSL instead of the emitted one (experiments; recorded by SHA-256)")
 
     t = sub.add_parser("selftest", help="harness self-tests on the GPU")
     _common(t)
@@ -75,6 +76,8 @@ def _vectors(a) -> int:
     from .vectors.ledger import canonical_json
 
     art = artifacts.load(a.wgsl_dir, do_emit=not a.no_emit)
+    if a.core:
+        art = artifacts.with_core(art, a.isa, a.core.read_text(encoding="utf-8"), str(a.core))
     ledger, info = session.run(
         art, a.isa, a.dirs, patterns=a.files, limit_per_file=a.limit_per_file, only_tests=a.test, mode=a.memory,
         mem_cap=a.mem_cap, port_cap=a.port_cap, lanes=a.lanes, repeat=a.repeat, rules_path=a.expected,

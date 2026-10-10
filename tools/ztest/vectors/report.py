@@ -19,10 +19,10 @@ def pct(a: int, b: int) -> str:
 def flag_names(mask: int, isa: str, field: str) -> str:
     if field == "f" and isa == "z80":
         names = [(0x80, "S"), (0x40, "Z"), (0x20, "Y(5)"), (0x10, "H"), (0x08, "X(3)"), (0x04, "P/V"), (0x02, "N"), (0x01, "C")]
-        return "|".join(n for b, n in names if mask & b) or "-"
+        return "+".join(n for b, n in names if mask & b) or "-"
     if field in ("mem", "ports"):
         kinds = MEM_KINDS if field == "mem" else PORT_KINDS
-        return "|".join(n for b, n in kinds.items() if mask & b) or "-"
+        return "+".join(n for b, n in kinds.items() if mask & b) or "-"
     return f"0x{mask:x}"
 
 

@@ -59,8 +59,9 @@ def render(doc: dict, run: dict, digest: str, analysis: str | None) -> str:
     w("| | |")
     w("|---|---|")
     w(f"| Core | `{prov['package']['name']}@{prov['package']['version']}`, {isa} core SHA-256 `{prov['core']['sha256']}` |")
-    w(f"| Source | git `{prov['git']['commit']}`" + (" (src/ modified)" if prov["git"].get("srcDirty") else "") +
-      f"; emitted with Node {prov['toolchain']['node']}, TypeScript {prov['toolchain']['typescript']} |")
+    src = run["source"]
+    w(f"| Source | git `{src['git']['commit']}`" + (" (src/ modified)" if src["git"].get("srcDirty") else "") +
+      f"; emitted with Node {src['toolchain']['node']}, TypeScript {src['toolchain']['typescript']} |")
     w(f"| Vectors | {vec['files']:,} files, {vec['tests']:,} tests; files digest `{vec['files_sha256'][:16]}…` |")
     w(f"| Harness | v{h['version']}; {h['memory']} memory; {h['steps']} step per test; host WGSL `{h['host_wgsl_sha256'][:16]}…`;"
       f" passed through (not modelled): {', '.join(_code(x) for x in h['passthrough'])} |")

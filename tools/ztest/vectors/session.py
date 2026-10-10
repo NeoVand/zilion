@@ -136,6 +136,7 @@ def run(art: Artifacts, isa: str, dirs: list[Path], *, patterns=None, limit_per_
         "expected_rules": {"file": str(rules_path.relative_to(REPO)) if rules_path.is_relative_to(REPO) else str(rules_path)},
     }
     run_info = {
+        "source": art.source(),
         "adapter": gpu.adapter_info,
         "dispatches": runner.dispatches,
         "lanes_per_dispatch": runner.lanes,

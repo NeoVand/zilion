@@ -86,7 +86,8 @@ python -I tools/zt.py vectors z80 ../zilion-vectors/z80 --files 'ed 70' --test '
 
 Options: `--files` (fnmatch patterns over opcode keys), `--test` (test names), `--limit-per-file N`,
 `--memory sparse|full`, `--repeat N`, `--lanes`, `--mem-cap`, `--port-cap`, `--workers`, `--expected <rules.json>`,
-`--json`, `--run-json`, `--md`, `--analysis <included.md>`, `--dump-wgsl <file>` (the composed test shader).
+`--json`, `--run-json`, `--md`, `--analysis <included.md>`, `--dump-wgsl <file>` (the composed test shader),
+`--core <file.wgsl>` (run a patched core text instead of the emitted one; the report records its SHA-256 and origin).
 
 Exit codes: **0**, every divergence is explained by an expected rule; **1**, at least one unexpected divergence;
 **2**, harness error (bad data, capacity exceeded, WGSL that does not compile, adapter missing).
@@ -192,9 +193,11 @@ or not exercised.
 
 Outputs:
 
-- `--json`: the canonical ledger, with sorted keys and no timestamps. It is byte-identical across runs on the same
-  inputs, core and harness;
-- `--run-json`: adapter, timings, dispatch counts and the ledger's SHA-256;
+- `--json`: the canonical ledger, with sorted keys and no timestamps. It depends only on the vectors, the core text
+  (by SHA-256), the harness's host shader and the rules, and is byte-identical across runs on those. The git commit
+  and toolchain are kept out of it, so a commit that changes neither the core nor the harness leaves it unchanged;
+- `--run-json`: the source (git commit, Node and TypeScript versions), adapter, timings, dispatch counts and the
+  ledger's SHA-256;
 - `--md`: the report. `--analysis` includes a hand-written section verbatim, so the report can be regenerated
   without losing it.
 
