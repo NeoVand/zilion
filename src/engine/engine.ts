@@ -5,6 +5,7 @@ import { buildMachine, type BuiltMachine } from "../world/build.js";
 import type { MachineSpec } from "../world/spec.js";
 import { maxLanesPerChunk, planChunks } from "./chunks.js";
 import { createKernel } from "./gpu.js";
+import { Lock } from "./lock.js";
 import { decodeResult, type MachineResult } from "./result.js";
 import { deviceLimits, LaneRunner, packMemory, unpackMemory, type Slab } from "./runner.js";
 
@@ -123,6 +124,7 @@ export class Machine {
   readonly wgsl: string;
   private slab: Slab | null = null;
   private destroyed = false;
+  private readonly lock = new Lock();
 
   constructor(
     readonly device: GPUDevice,
@@ -145,8 +147,15 @@ export class Machine {
     });
   }
 
-  /** Upload, run and read back any number of lanes (processed in chunks; buffers are reused between calls). */
-  async run(input: LaneInput, o: MachineRunOptions = {}): Promise<MachineResult> {
+  /**
+   * Upload, run and read back any number of lanes (processed in chunks; buffers are reused between calls, and
+   * concurrent calls on one machine run one after the other).
+   */
+  run(input: LaneInput, o: MachineRunOptions = {}): Promise<MachineResult> {
+    return this.lock.run(() => this.runNow(input, o));
+  }
+
+  private async runNow(input: LaneInput, o: MachineRunOptions): Promise<MachineResult> {
     if (this.destroyed) throw new Error("zilion: machine destroyed");
     const m = this.manifest;
     const { bytes, lanes } = hostBytes(m, input);
@@ -200,6 +209,7 @@ export class Machine {
  */
 export class Batch {
   readonly slabs: readonly Slab[];
+  private readonly lock = new Lock();
 
   constructor(
     readonly device: GPUDevice,
@@ -257,8 +267,12 @@ export class Batch {
     pass.end();
   }
 
-  /** Read the first `lanes` lanes (default: all). */
-  async read(o: { lanes?: number } = {}): Promise<MachineResult> {
+  /** Read the first `lanes` lanes (default: all). Concurrent reads of one batch run one after the other. */
+  read(o: { lanes?: number } = {}): Promise<MachineResult> {
+    return this.lock.run(() => this.readNow(o));
+  }
+
+  private async readNow(o: { lanes?: number }): Promise<MachineResult> {
     const m = this.manifest;
     const lanes = o.lanes ?? this.capacity;
     const H = m.memory.hostBytesPerLane;

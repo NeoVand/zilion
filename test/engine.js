@@ -83,6 +83,23 @@ await test("0.2 facade: chunked runs equal one dispatch (dispatch-bound: 3 workg
   return notes.join("; ");
 });
 
+await test("concurrent runs on one instance (Promise.all), as 0.2 allowed: facade and machine", async () => {
+  const z = await Z.Zilion.create({ memBytes: 64 });
+  const sets = [0, 1, 2, 3].map((k) => Array.from({ length: 300 + 100 * k }, (_, i) => randomBytes(64, 10_000 * k + i)));
+  const alone = [];
+  for (const p of sets) alone.push(await z.run(p, { steps: 100 }));
+  const together = await Promise.all(sets.map((p) => z.run(p, { steps: 100 })));
+  together.forEach((r, k) => equalArrays(r.memory, alone[k].memory, `facade set ${k}`));
+  z.destroy();
+  const m = await engine.machine({ isa: Z.z80, world: { memory: { kind: "ring", bytes: 40 }, init: { random: {} } } });
+  const ins = [0, 1, 2].map((k) => randomBytes((500 + 300 * k) * 40, 50 + k));
+  const a = [];
+  for (const x of ins) a.push(await m.run(x, { budget: 100, seed: 3 }));
+  const b = await Promise.all(ins.map((x) => m.run(x, { budget: 100, seed: 3 })));
+  b.forEach((r, k) => equalArrays(r.record, a[k].record, `machine set ${k}`));
+  m.destroy();
+});
+
 await test("0.2 facade: an invalid fetchHook rejects at create with the compiler's line", async () => {
   try {
     await Z.Zilion.create({ fetchHook: "op ==== 1u" });

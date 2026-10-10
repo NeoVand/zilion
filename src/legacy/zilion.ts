@@ -1,5 +1,6 @@
 import { maxLanesPerChunk, planChunks } from "../engine/chunks.js";
 import { createKernel } from "../engine/gpu.js";
+import { Lock } from "../engine/lock.js";
 import { deviceLimits, LaneRunner, type Slab } from "../engine/runner.js";
 import { legacyMachine } from "./manifest.js";
 import { REG_FIELDS, REGS_PER_PROGRAM } from "./shader.js";
@@ -75,6 +76,7 @@ export class Zilion {
   readonly device: GPUDevice;
   private readonly runner: LaneRunner;
   private slab: Slab | null = null;
+  private readonly lock = new Lock();
   private ownsDevice: boolean;
   private destroyed = false;
 
@@ -116,7 +118,15 @@ export class Zilion {
    * instance's memory (zero-padded / truncated to `memBytes`). Returns the
    * final memory and registers of every program.
    */
-  async run(
+  run(
+    programs: ArrayLike<number>[] | Uint8Array[],
+    opts: RunOptions,
+  ): Promise<RunResult> {
+    // Buffers are reused, so concurrent runs on one instance (safe in 0.2) run one after the other.
+    return this.lock.run(() => this.runNow(programs, opts));
+  }
+
+  private async runNow(
     programs: ArrayLike<number>[] | Uint8Array[],
     opts: RunOptions,
   ): Promise<RunResult> {
