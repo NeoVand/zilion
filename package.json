@@ -21,6 +21,8 @@
 	},
 	"files": [
 		"dist",
+		"!dist/cores/m6502",
+		"!dist/cores/bff",
 		"README.md",
 		"LICENSE"
 	],
@@ -32,7 +34,8 @@
 		"test:unit": "npm run build && node test/unit.mjs",
 		"test:world": "npm run build && node test/world/run.mjs",
 		"test:algocell": "npm run build && node test/world/algocell.mjs",
-		"test": "npm run build && node test/unit.mjs && node scripts/check-byte-identity.mjs && node test/world/run.mjs"
+		"test": "npm run build && node test/unit.mjs && node scripts/check-byte-identity.mjs && node test/world/run.mjs",
+		"export": "node scripts/export-machines.mjs"
 	},
 	"keywords": [
 		"z80",

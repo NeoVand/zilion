@@ -218,7 +218,8 @@ r.steps[i]; r.haltReasonOf(i); r.stateOf(i).sp; r.writesOf(i); r.fetchedOf(i); r
 - **Batches** of any size; `m.batch(n)` keeps lanes resident on the GPU and encodes into your own command
   encoder.
 - **Python and other hosts** read the manifest (bindings, params offsets, memory and record layouts, SHA-256
-  provenance); `test/world/gpu_runner.py` is a complete wgpu-py host driven only by it.
+  provenance); `node scripts/export-machines.mjs worlds.json --out shaders/` writes the WGSL and manifest for
+  each named world, and `test/world/gpu_runner.py` is a complete wgpu-py host driven only by the manifest.
 - **More than the Z80.** The contract is validated against two deliberately different skeleton cores, a 6502 and
   BFF; see [docs/ADDING_A_CORE.md](docs/ADDING_A_CORE.md). They are not exported and not for results.
 

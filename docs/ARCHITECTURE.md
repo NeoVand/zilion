@@ -212,7 +212,9 @@ owns, so a host may run several lanes in one invocation (tested).
 fields; halt reasons; the ablation layout; budget and init flags; provenance (`zilion`, `hostContract`, core
 id/version/status/variant/compat/hooks, SHA-256 of the WGSL, the core text, the world JSON and the options).
 `test/world/gpu_runner.py` is a complete Python host that reads nothing else. `legacyMachine(memBytes)`
-describes 0.2's `buildComputeShader` kernel the same way.
+describes 0.2's `buildComputeShader` kernel the same way. Codegen stays in TypeScript:
+`node scripts/export-machines.mjs worlds.json --out shaders/` writes `<name>.wgsl` and `<name>.manifest.json`
+for each named spec, and `--check` verifies files already on disk (for CI).
 
 ## L2: the engine
 
