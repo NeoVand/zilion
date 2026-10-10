@@ -1,6 +1,8 @@
 """Headless port of test/conformance.js.
 
-The vectors and their check functions stay in test/conformance.js (single source of truth). This module:
+The vectors and their check functions stay in test/conformance.js (single source of truth). This module, for each
+Z80 core configuration (by default every emitted one: compat 0.2 = the unchanged 0.2 kernel; compat 0.3 classic and
+zilog-nmos = the same kernel with that core substituted, see tools/build-wgsl.mjs):
   1. compiles the shaders tools/build-wgsl.mjs emitted with the public `buildComputeShader(256, {fetchHook})`;
   2. runs every vector through `run_batch`, a Python twin of `Zilion.run` (src/zilion.ts): same memory packing,
      same register defaults (all 0, SP = 0xFFFF), same Params {count, mem_bytes, steps, 0}, same bindings and
@@ -49,13 +51,27 @@ def run_batch(device, pipeline, layout, programs: list[list[int]], steps: int, m
     return out_regs, out_mem
 
 
-def run(art: Artifacts, out_dir: Path) -> int:
+def run(art: Artifacts, out_dir: Path, *, variant: str | None = None, compat: str | None = None) -> int:
     gpu = G.get_gpu()
     plan = art.json(art.manifest["conformance"]["plan"])
+    configs = plan.get("configs") or {"z80@0.2": {"variant": "classic", "compat": "0.2", "shaders": plan["shaders"]}}
+    chosen = {k: c for k, c in configs.items()
+              if (variant is None or c["variant"] == variant) and (compat is None or c["compat"] == compat)}
+    if not chosen:
+        raise G.HarnessError(f"no conformance configuration with variant {variant!r} and compat {compat!r}")
+    status = 0
+    for key, cfg in chosen.items():
+        print(f"== {key}: compat {cfg['compat']}, variant {cfg['variant']} ({cfg.get('kernel', 'buildComputeShader')})")
+        status = max(status, _run_config(art, gpu, plan, cfg["shaders"], out_dir / key.replace("@", "-")))
+        print()
+    return status
+
+
+def _run_config(art: Artifacts, gpu, plan: dict, shaders: list, out_dir: Path) -> int:
     mem_bytes = plan["memBytes"]
     pipes = [
         G.compile_pipeline(gpu.device, art.text(s), BINDINGS, label=f"conformance shader-{i}")
-        for i, s in enumerate(plan["shaders"])
+        for i, s in enumerate(shaders)
     ]
     vectors = []
     for v in plan["vectors"]:
@@ -80,5 +96,5 @@ def run(art: Artifacts, out_dir: Path) -> int:
     p = report["parallel"]
     print(f"\n{'PASS' if p['ok'] else 'FAIL'}  {p['count']:,} parallel in {p['ms']:.1f} ms")
     print(f"\n{report['passed']}/{report['total']} vectors passed on {gpu.summary()}"
-          f" (zilion {art.version}, z80 core {art.manifest['cores']['z80']['sha256'][:12]})")
+          f" (zilion {art.version}, shader-0 SHA-256 {shaders[0]['sha256'][:12]})")
     return r.returncode

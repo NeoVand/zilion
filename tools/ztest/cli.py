@@ -16,6 +16,13 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-emit", action="store_true", help="reuse the emitted WGSL instead of running tools/build-wgsl.mjs")
 
 
+def _semantics(p: argparse.ArgumentParser, what: str) -> None:
+    p.add_argument("--compat", choices=["0.3", "0.2"],
+                   help=f"Z80 semantics of the core {what}: 0.3 (the default) or 0.2 (the frozen 0.2.0 core)")
+    p.add_argument("--variant", choices=["classic", "zilog-nmos"],
+                   help=f"Z80 variant of the core {what} (default classic; zilog-nmos needs compat 0.3)")
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="zt.py", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -23,6 +30,7 @@ def main(argv: list[str]) -> int:
     c = sub.add_parser("conformance", help="run test/conformance.js headlessly")
     _common(c)
     c.add_argument("--out", type=Path, default=REPO / "build" / "test", help="results directory")
+    _semantics(c, "to run (default: every emitted configuration)")
 
     v = sub.add_parser("vectors", help="run per-instruction vectors and write the divergence ledger")
     _common(v)
@@ -45,6 +53,7 @@ def main(argv: list[str]) -> int:
     v.add_argument("--show", type=int, default=20, help="unexpected classes to print")
     v.add_argument("--dump-wgsl", type=Path, help="write the composed test shader (host + glue + core) here")
     v.add_argument("--core", type=Path, help="use this core WGSL instead of the emitted one (experiments; recorded by SHA-256)")
+    _semantics(v, "to test (recorded in the run's provenance, --run-json, and the report)")
 
     t = sub.add_parser("selftest", help="harness self-tests on the GPU")
     _common(t)
@@ -62,7 +71,7 @@ def main(argv: list[str]) -> int:
             from . import conformance
 
             art = artifacts.load(a.wgsl_dir, do_emit=not a.no_emit)
-            return conformance.run(art, a.out)
+            return conformance.run(art, a.out, variant=a.variant, compat=a.compat)
         if a.cmd == "vectors":
             return _vectors(a)
     except HarnessError as e:
@@ -75,7 +84,7 @@ def _vectors(a) -> int:
     from .vectors import report, session
     from .vectors.ledger import canonical_json
 
-    art = artifacts.load(a.wgsl_dir, do_emit=not a.no_emit)
+    art = artifacts.load(a.wgsl_dir, do_emit=not a.no_emit).select(a.isa, variant=a.variant, compat=a.compat)
     if a.core:
         art = artifacts.with_core(art, a.isa, a.core.read_text(encoding="utf-8"), str(a.core))
     ledger, info = session.run(

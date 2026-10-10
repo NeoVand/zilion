@@ -3,13 +3,16 @@
 State record (one u32 per field, vector JSON keys): pc sp a b c d e f h l i r ix iy af_ bc_ de_ hl_ iff1 iff2 im
 ei p wz q, plus the host-only `halted`.
 
-Mapping into the core (WGSL `var<private>` names of src/z80-core.wgsl.ts):
+Mapping into the core (WGSL `var<private>` names of src/cores/z80/core.wgsl.ts):
   * registers, I, R, IFF1/IFF2 load into and store from the core's variables;
   * af_ bc_ de_ hl_ are split into cpu_a2/cpu_f2 ...;
   * wz, im, q are mapped to cpu_wz, cpu_im, cpu_q when the core declares them; otherwise (0.2.0) they are
     passed through unchanged and reported in their own ledger columns as "not modelled";
   * ei and p (the EI-delay and LD A,I/R latches of interrupt acceptance) are always passed through;
-  * per-instruction state (cpu_halted, idx_mode, idx_disp, idx_uses_mem) is cleared before the step.
+  * per-instruction state (cpu_halted, idx_mode, idx_disp, idx_uses_mem) is cleared before the step; a core that
+    defines z80_reset() (compat '0.3') is reset first, so every latch and internal starts at 0;
+  * a core generated with the io hooks calls io_in/io_out; the glue routes them to the host's vector ports
+    (io_read/io_write). The 0.2.0 core never calls them (IN reads 0).
 
 One test = one call of z80_step(), the core's step: one instruction including its prefixes, one iteration of a
 block instruction, or one wasted DD/FD prefix.
@@ -57,7 +60,7 @@ IDX = {f.name: i for i, f in enumerate(FIELDS)}
 # Fields the core may model under these variable names; passed through when the core does not declare them.
 OPTIONAL_VARS = {"wz": "cpu_wz", "im": "cpu_im", "q": "cpu_q"}
 ALWAYS_PASSTHROUGH = ("ei", "p")
-GROUPS = ("base", "CB", "ED", "DD", "FD", "DDCB", "FDCB", "wasted-prefix")
+GROUPS = ("base", "CB", "ED", "DD", "FD", "DDCB", "FDCB", "wasted-prefix", "probe")
 
 
 def code_only(wgsl: str) -> str:
@@ -102,6 +105,8 @@ class Z80Adapter:
     @staticmethod
     def group(key: str) -> str:
         t = key.split()
+        if t and t[0] in ("wz", "r"):
+            return "probe"  # analytic R and WZ probes (tools/z80-probe-vectors.py)
         if len(t) == 2 and t[0] in ("dd", "fd") and t[1] in ("dd", "fd", "ed"):
             return "wasted-prefix"  # analytic vectors (tools/z80-analytic-vectors.py)
         if len(t) >= 2 and t[0] in ("dd", "fd") and t[1] == "cb":
@@ -159,6 +164,8 @@ class Z80Adapter:
             S.append(f"    zt_state_out[b + {i}u] = {expr};" + (f" // {note}" if note else ""))
 
         w = lambda name: f"zt_state_in[b + {IDX[name]}u]"  # noqa: E731
+        if defines_fn(core, "z80_reset"):  # a core with a world reset: every register, latch and internal to 0 first
+            ld("z80_reset();")
         for n in ("pc", "sp", "ix", "iy"):
             ld(f"cpu_{n} = {w(n)} & 0xffffu;")
             st(IDX[n], f"cpu_{n}")
@@ -187,6 +194,11 @@ class Z80Adapter:
         hooks = []
         if calls_fn(core, "on_fetch_opcode") and not defines_fn(core, "on_fetch_opcode"):
             hooks.append("fn on_fetch_opcode(prefix: u32, op: u32) -> bool { return false; } // no ablation")
+        # The host-contract-v2 port hooks, when the core was generated with them: the vector's ports (host.py).
+        if calls_fn(core, "io_in") and not defines_fn(core, "io_in"):
+            hooks.append("fn io_in(port: u32) -> u32 { return io_read(port); } // the vector's port reads")
+        if calls_fn(core, "io_out") and not defines_fn(core, "io_out"):
+            hooks.append("fn io_out(port: u32, val: u32) { io_write(port, val); } // logged, compared with the vector's writes")
         return "\n".join(
             hooks
             + ["fn zt_load_state(b: u32) {", *L, "}", "fn zt_store_state(b: u32) {", *S, "}"]

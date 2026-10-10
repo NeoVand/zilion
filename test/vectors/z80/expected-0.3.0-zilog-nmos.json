@@ -1,0 +1,11 @@
+{
+ "isa": "z80",
+ "core": "@neovand/zilion 0.3.0 Z80, compat '0.3', variant 'zilog-nmos', io hooks on (z80.wgsl({ variant: 'zilog-nmos', hooks: { io: true } }))",
+ "core_sha256": "3bc7dc8cf95265f31c29f1927563887f390bae1e54441ce474c03b533e569f51",
+ "passthrough": ["ei", "p"],
+ "rules": [
+  {"id": "EI-P", "files": ["*"], "fields": ["ei", "p"],
+   "reason": "The interrupt-acceptance latches (EI delay; LD A,I/R parity bug) are not modelled: Zilion has no interrupts. Passed through.",
+   "source": "SingleStepTests/z80 README (fields ei, p)"}
+ ]
+}

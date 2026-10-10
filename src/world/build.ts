@@ -148,7 +148,7 @@ export function buildMachine(spec: MachineSpec): BuiltMachine {
 
   const mem = planMemory(world.memory);
   const P = mem.P;
-  const fields = isa.state;
+  const { state: fields, internals } = isa.stateFor?.({ variant, compat }) ?? isa;
   const fieldByName = new Map<string, { f: StateField; k: number }>(fields.map((f, k) => [f.name, { f, k }]));
   const field = (name: string, what: string) => {
     const e = fieldByName.get(name);
@@ -439,7 +439,7 @@ ${indent(raw.onReset)}}`);
   // lane lifecycle
   const resetLines = [
     ...fields.map((f) => `    ${f.wgsl} = ${hex(f.reset ?? 0)};`),
-    ...isa.internals.map((x) => `    ${x} = 0u;`),
+    ...internals.map((x) => `    ${x} = 0u;`),
   ];
   const fns: string[] = [`// === World (L1): lane lifecycle ===
 fn zil_reset() {   // the world reset: every state field at its reset value

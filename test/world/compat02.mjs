@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Recorded-output test for `compat: '0.2'` (design §5.5). Run after `npm run build`:
 //
-//   node test/world/compat02.mjs [--python <exe>] [--record] [--lanes N]
+//   node test/world/compat02.mjs [--python <exe>] [--record] [--lanes N] [--compat <c>] [--variant <v>]
 //
 // 100,000 random programs on each of six Algocell-shaped worlds (a pair [L, L] on a ring of P = 2L bytes for
 // P = 32, 38, 40, 64, 100, 128; stack top at the last byte; 128 steps; write counts) were run once through the
@@ -14,7 +14,9 @@
 // shader).
 //
 // --record rewrites the data file. Do that only from a build whose compat '0.2' core is the 0.2.0 core; the
-// recording is not meant to follow later changes (that is the point of the test).
+// recording is not meant to follow later changes (that is the point of the test). --compat / --variant run the same
+// check on another semantics, as a negative control (compat '0.3' must fail: its BIT n,(HL) flags and wasted-prefix
+// R differ); the state fields compared are always the recorded ones, taken by name.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -29,6 +31,9 @@ const args = process.argv.slice(2);
 const opt = (n, d) => (args.includes(n) ? args[args.indexOf(n) + 1] : d);
 const python = opt("--python", process.env.ZILION_PYTHON ?? "python3");
 const record = args.includes("--record");
+const compat = opt("--compat", "0.2");
+const variant = opt("--variant", undefined);
+if (record && (compat !== "0.2" || variant)) throw new Error("--record needs compat '0.2'");
 const DATA = join(here, "compat-0.2.0.json");
 
 /** SHA-256 of the 0.2.0 core text (Z80_CORE_WGSL of the published @neovand/zilion 0.2.0). */
@@ -78,10 +83,11 @@ if (sha256(Z.Z80_CORE_WGSL) !== CORE_0_2_0_SHA256) {
   process.exit(1);
 }
 
+const want = record ? null : JSON.parse(readFileSync(DATA, "utf8"));
 const dir = mkdtempSync(join(tmpdir(), "zilion-compat02-"));
 const jobs = WORLDS.map(([L, P], i) => {
-  const m = Z.buildMachine({ isa: Z.z80, compat: "0.2", world: world(L, P) });
-  if (!m.wgsl.includes(Z.Z80_CORE_WGSL)) throw new Error(`P=${P}: the compat '0.2' shader does not embed the 0.2.0 core verbatim`);
+  const m = Z.buildMachine({ isa: Z.z80, compat, ...(variant ? { variant } : {}), world: world(L, P) });
+  if (compat === "0.2" && !m.wgsl.includes(Z.Z80_CORE_WGSL)) throw new Error(`P=${P}: the compat '0.2' shader does not embed the 0.2.0 core verbatim`);
   writeFileSync(join(dir, `m${i}.wgsl`), m.wgsl);
   writeFileSync(join(dir, `m${i}.manifest.json`), JSON.stringify(m.manifest));
   writeFileSync(join(dir, `j${i}.in`), programs(seedOf(P), LANES * 2 * L));
@@ -101,7 +107,8 @@ if (py.status !== 0) {
 process.stderr.write(py.stderr);
 
 // The digested words, by name, so that record fields added later (a trap cause, say) do not change the digest:
-// steps, haltReason, every state field of the 0.2 record in its order, the write counters.
+// steps, haltReason, every state field of the 0.2 record in its order (when verifying: the recorded items, by name),
+// the write counters.
 const RECORDED = ["steps", "haltReason", "state", "writeCounts"];
 const results = jobs.map((j) => {
   const mem = new Uint8Array(readFileSync(join(dir, j.out_memory)));
@@ -109,14 +116,19 @@ const results = jobs.map((j) => {
   const rec = new Uint32Array(recBuf.buffer, recBuf.byteOffset, recBuf.byteLength / 4);
   const H = 2 * j.L;
   const R = j.recordWords;
+  const recorded = want?.worlds.find((w) => w.P === j.P && w.L === j.L)?.recordFields;
   const layout = RECORDED.map((n) => {
     const f = j.recordFields.find((x) => x.name === n);
     if (!f) throw new Error(`P=${j.P}: the record has no field '${n}'`);
-    return f;
+    const items = recorded?.find((x) => x.name === n)?.items ?? f.items;
+    const idx = items
+      ? items.map((it) => { const k = f.items.indexOf(it); if (k < 0) throw new Error(`P=${j.P}: record field ${n} has no item '${it}'`); return k; })
+      : Array.from({ length: f.words }, (_, k) => k);
+    return { name: n, offset: f.offset, idx, words: idx.length, items };
   });
   const lane = (i) => {
     const r = rec.subarray(i * R, (i + 1) * R);
-    return { record: Uint32Array.from(layout.flatMap((f) => Array.from(r.subarray(f.offset, f.offset + f.words)))),
+    return { record: Uint32Array.from(layout.flatMap((f) => f.idx.map((k) => r[f.offset + k]))),
       memory: mem.subarray(i * H, (i + 1) * H) };
   };
   const digests = [];
@@ -156,7 +168,6 @@ if (record) {
   process.exit(0);
 }
 
-const want = JSON.parse(readFileSync(DATA, "utf8"));
 let fail = 0;
 for (const r of results) {
   const w = want.worlds.find((x) => x.P === r.P && x.L === r.L);
@@ -183,5 +194,5 @@ for (const r of results) {
     console.log(`  ok    P=${r.P} L=${r.L}: ${r.lanes.toLocaleString("en")} programs, ${r.digests.length} chunk digests identical (halts ${JSON.stringify(r.halts)})`);
   }
 }
-console.log(fail === 0 ? `compat '0.2' reproduces the recorded 0.2.0 outputs (${WORLDS.length} worlds, ${((Date.now() - t0) / 1000).toFixed(1)} s)` : `${fail} world(s) FAILED`);
+console.log(fail === 0 ? `compat '${compat}'${variant ? ` ${variant}` : ""} reproduces the recorded 0.2.0 outputs (${WORLDS.length} worlds, ${((Date.now() - t0) / 1000).toFixed(1)} s)` : `${fail} world(s) FAILED`);
 process.exit(fail === 0 ? 0 : 1);
