@@ -251,7 +251,7 @@ in two corners: where p · 2³² is exactly k + ½ (p an odd multiple of 2⁻³�
 to even; and for p in [1 − 1.5·2⁻³², 1), bff.py's `halt_q` is 0xFFFFFFFF, its "always" (or 2³², which its kernel
 cannot take), while the world's clamped threshold 2³² − 1 lets the draw 0xFFFFFFFF continue. The mapping above closes
 both (it passes `halt_q / 2³²`, and the as-chip halt for `halt_q` ≥ 0xFFFFFFFF); the harness checks the generated
-WGSL against bff.py's `halt_q` for twelve probabilities, these corners included.
+WGSL against bff.py's `halt_q` for thirteen probabilities, these corners included.
 
 ## L1: the world spec
 

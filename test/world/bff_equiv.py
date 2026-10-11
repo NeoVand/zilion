@@ -18,9 +18,14 @@ bff.py's GPU kernel (BFF.execute) and bff.py's CPU reference (reference_execute)
    bytes (the soup's initial condition), odd batches are op-rich (55% instruction bytes of the variant's alphabet,
    15% zero bytes, 30% uniform), so brackets loop, heads cross into the partner and literal pushes fire. Batch b uses
    the same pairs (for the same alphabet) and roll_seed 1 + b in every variant, so variants can be compared pair by pair.
-2. Non-vacuity: per variant the report counts how the encounters ended (budget, left the tape, unmatched bracket), how
-   many entered the partner, wrote into it or changed memory; for the dials, how many lanes drew both outcomes (their
-   result differs from both the always-halt and the never-halt runs of the same pairs).
+   Five edge configurations follow (EDGES: bff_soup.py's density map with the literal push, the two selections
+   bff_machine.mjs normalises, a custom table with byte 0 -> '[' and lit_rep 0, lit_rep 5 with a dial), with the CPU
+   reference on EDGE_CPU of each batch.
+2. Non-vacuity gates (vacuity_gates, part of the exit status): every configuration must run some encounters to the
+   budget, enter and write into the partner, leave the tape unless the pointer wraps (and never when it does), halt
+   on unmatched brackets when bff.py's halt_q > 0 (and never otherwise), run literal pushes when the switch is on
+   (fetch map != start map) and never otherwise, and, for a dial (0 < halt_q < 0xFFFFFFFF), have lanes that drew both
+   outcomes (their result differs from bff.py's always-halt and never-halt kernels on the same pairs).
 3. Negative controls: mutated Zilion machines (a forward scan that skips a byte, a backward scan that ignores nesting, a
    literal push that writes its bytes swapped, a wrap to 0 instead of mod P, a dial salt of 1, a run seed off by one)
    must disagree with bff.py. (Every mutant must still terminate: a scan that can run past position 0 would hang the GPU.)
@@ -28,8 +33,10 @@ bff.py's GPU kernel (BFF.execute) and bff.py's CPU reference (reference_execute)
    and on reference_execute.
 5. The dial hash: the world's draw zil_draw(0) read back from the GPU (a raw hook writes it into memory) against
    bff.py's hash32(p*0x9E3779B1 ^ (s+1)*0x85EBCA77 ^ roll_seed) and bracket_halts, over lanes, steps and seeds; and
-   the dial threshold in the generated WGSL against bff.py's halt_q.
-Exit status 0 only if every comparison is identical and every negative control is caught.
+   what the generated WGSL does on an unmatched bracket against bff.py's halt_q, for thirteen probabilities including
+   the half-to-even ties (both parities) and halt_q of 2^32 - 1 and 2^32.
+Exit status 0 only if every comparison is identical, every gate holds and every negative control is caught. The CPU
+reference is part of every comparison, so --cpu must be in (0, 1].
 """
 from __future__ import annotations
 
@@ -221,7 +228,7 @@ def run_variants(a, bffpy, alphabets, machines, pool) -> tuple[list[dict], bool]
         amap = g.alphabet
         wgsl, manifest = machines[name]
         z = Machine(wgsl, manifest)
-        dial = 0.0 < kw.get("halt_p", 1.0) < 1.0 and not kw.get("nohalt")
+        dial = 0 < halt_q_of(kw) < 0xFFFFFFFF
         if dial:  # bff.py's always-halt and never-halt kernels on the same pairs, for the both-outcomes count
             g_hi = bffpy.BFF(max_pairs=a.batch, steps=STEPS, **{**kw, "halt_p": 1.0})
             g_lo = bffpy.BFF(max_pairs=a.batch, steps=STEPS, **{**kw, "nohalt": True})
@@ -307,10 +314,18 @@ def run_variants(a, bffpy, alphabets, machines, pool) -> tuple[list[dict], bool]
     return rows, ok
 
 
+def halt_q_of(kw: dict) -> int:
+    """bff.py's effective halt_q for these arguments: 0 never halts (nohalt, or a threshold of 0), 0xFFFFFFFF and above always."""
+    if kw.get("nohalt"):
+        return 0
+    p = kw.get("halt_p", 1.0)
+    return 0xFFFFFFFF if p >= 1.0 else int(round(p * 4294967296.0))
+
+
 def vacuity_gates(kw: dict, amap: np.ndarray, acc: dict) -> list[str]:
     """What a configuration must exercise for its comparison to mean something; the names of the gates that fail."""
     n = acc["pairs"]
-    halts = not kw.get("nohalt") and kw.get("halt_p", 1.0) > 0
+    halts = halt_q_of(kw) > 0
     literal_on = bool(kw.get("literal")) and bool((np.asarray(amap) == 11).any())
     want = {
         "some encounters ran the budget out": acc["budget"] > 0,
@@ -488,7 +503,7 @@ def check_thresholds(bffpy, machines, ps) -> tuple[dict, bool]:
         if not good:
             print(f"  FAIL  dial threshold for halt_p = {p!r}: bff.py halt_q {q:#x}, Zilion {z}")
     print(f"  {'ok  ' if ok else 'FAIL'}  dial thresholds: bff.py's halt_q = the generated WGSL's for {sum(v['equal'] for v in out.values())}/{len(ps)} "
-          "probabilities (including the half-to-even and 2^32 corners)", flush=True)
+          "probabilities (including half-to-even ties of both parities and the 2^32 corners)", flush=True)
     return out, ok
 
 
@@ -608,6 +623,8 @@ def main() -> int:
         a.pairs, a.batch = min(a.pairs, 1 << 13), min(a.batch, 1 << 12)
     if a.pairs % a.batch:
         ap.error("--pairs must be a multiple of --batch")
+    if not 0 < a.cpu <= 1:
+        ap.error("--cpu must be in (0, 1]: the CPU reference is part of every comparison")
     skip = set(filter(None, a.skip.split(",")))
     bff_path = a.algocell / "experiments" / "micro" / "bff.py"
     if not bff_path.exists():
@@ -646,7 +663,8 @@ def main() -> int:
                 c["salt"] = salt
             configs.append(c)
         # the dial thresholds: the probabilities used, and the corners (half-to-even rounding, halt_q of 2^32 - 1 and 2^32)
-        ps = [0.5, 0.3, 0.1, 0.03, 0.01, 0.7, 0.5 + 2 ** -33, 0.25 + 2 ** -33, 0.75 + 2 ** -33, 1 - 2 ** -32, 1 - 2 ** -33, 0.0]
+        ps = [0.5, 0.3, 0.1, 0.03, 0.01, 0.7, 0.5 + 2 ** -33, 0.25 + 2 ** -33, 0.75 + 2 ** -33, 0.5 + 3 * 2 ** -33,
+              1 - 2 ** -32, 1 - 2 ** -33, 0.0]
         configs += [cfg_of(f"thr{p}", {"halt_p": p}) for p in ps]
         configs.append({"name": "probe", "probe": True})
         machines = build_machines(configs, tmp)

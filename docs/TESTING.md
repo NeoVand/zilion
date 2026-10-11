@@ -460,7 +460,7 @@ What it does, all on the same pairs for the three implementations (the Zilion ma
    test module's `BFF` by a subclass mirroring every `execute` on Zilion and on `reference_execute`.
 5. **The dial hash**: a probe machine writes `zil_draw(0)` into memory through a raw `on_instruction_start` hook, so
    the world's draw is read back for any lane, seed and step base and compared with bff.py's `hash32` and
-   `bracket_halts`; what the generated WGSL does on an unmatched bracket is compared with bff.py's `halt_q` for twelve
+   `bracket_halts`; what the generated WGSL does on an unmatched bracket is compared with bff.py's `halt_q` for thirteen
    probabilities, including the half-to-even and 2³² corners.
 
 Exit status 0 only if every comparison is identical and every negative control is caught. The full baseline

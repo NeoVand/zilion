@@ -23,7 +23,8 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
   kernel and library modes; raw hooks as an escape hatch.
 - The engine: `createEngine`, `Machine.run` (any batch size), resident `Batch`es, typed `MachineResult`s,
   `ZilionShaderError` with the offending source lines, `legacyMachine` (a manifest for the 0.2 kernel).
-- Skeleton 6502 (NMOS) and BFF cores that validate the contract (not exported; not for results).
+- Skeleton 6502 (NMOS) and BFF cores that validate the contract (not exported; not for results). BFF is now a full
+  core (see "The BFF core" below).
 - Provenance: `ZILION_VERSION`, `HOST_CONTRACT`, SHA-256 of the WGSL, core text, world and options in every
   manifest and shader header.
 - Docs: `docs/ARCHITECTURE.md`, `docs/ADDING_A_CORE.md`; the README options table now lists `fetchHook`.
@@ -42,7 +43,7 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
   (`notApplicable: 'no stack' | 'per-lane state'`). The defaults that remain are listed in docs/ARCHITECTURE.md.
 - The lane record carries `trapCause` (word 2; 0 when the lane did not halt on a trap), from the descriptor's
   `symbols.trapCause`; codes in `manifest.trapCauses`. The skeletons gain a `trap` state field.
-- Core parameters: a descriptor may declare `params` (u32, bool, enum); a machine selects them with
+- Core parameters: a descriptor may declare `params` (u32, bool, enum; `table` came with the BFF core); a machine selects them with
   `core: { isa, params }`; the builder validates them, emits `ZIL_PARAM_*` constants ahead of the core text and
   records them in `manifest.core.params`.
 - Resumable runs: a 64-bit `stepBase` in the params reaches every dial draw (`zil_draw`, CPU mirror `zilDraw`), and
@@ -79,6 +80,23 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
   on all three semantics; self-test mutants for each fix (the 0.2 behaviour of each must be caught) and for the Q
   latch; `npm run test:compat` (design §5.5: 600,000 random programs against outputs recorded from 0.2.0);
   `test/world/cases_z80.mjs`.
+
+**The BFF core (milestone M2; branch `m2/bff`; docs/ARCHITECTURE.md, "The BFF core")**
+
+- *Added:* the full BFF core (`status: 'stable'`, `coreVersion` 1.0.0; still not exported from the package): bracket
+  matching by op id (scans inside [0, P), never fetched, one step), the literal push (op 11), trap `bounds` (ignore
+  = bff.py's `ip_wrap`) and trap `unmatched` (ignore = `nohalt`, a dial = `halt_p`). Params `alphabet` (a 256-entry
+  table, default `BFF_ASCII`; `BFF_ASCII_LITERAL`, `bffAsciiMap`), `literal`, `lit_rep`, with cross-parameter rules
+  that refuse silent no-ops. Replaces the skeleton (its `unimplemented` trap is gone; variant `cubff`, compat
+  `'bff.py'`).
+- *Added (contract):* the `table` core-parameter type (`{ type: 'table', length, max, default }`), emitted as a
+  `const array<u32, N>`, recorded whole in `manifest.core.params` and the options hash; the input type
+  `CoreParamInput` (tables as arrays or typed arrays). Core parameters are now u32, bool, enum and table.
+- *Validation:* bit-identical to Algocell's `experiments/micro/bff.py`, its GPU kernel and its CPU reference, on
+  1,048,576 pairs in each of the paper's configurations and more (`test/world/bff_equiv.py`, `npm run test:bff`;
+  baseline `test/baselines/bff-equivalence.md`), with non-vacuity gates, negative controls, bff.py's own kernel tests
+  mirrored and the dial hash read back from the GPU; world tests for brackets, policies, the dial, the literal push,
+  tables, ablation, the 64 + 64 pair, padding and resumed runs (k = 1, 2, 7).
 
 **Fixed (0.2 API, same results)**
 
