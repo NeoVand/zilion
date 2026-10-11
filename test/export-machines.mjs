@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/export-machines.mjs end to end (no GPU). Run after `npm run build`:  node test/export-machines.mjs
 // The canonical spec shape ({ name, core: { isa, compat?, variant?, params? }, world }), cores found by id in the
-// build (z80, m6502, bff), byte-identity with the machine presets, --check, and the errors a vendoring script
+// build (z80, m6502, bff; a BFF alphabet table through JSON), byte-identity with the machine presets, --check, and the errors a vendoring script
 // relies on (a Z80 without compat, an unknown core, an undeclared param), plus the earlier object-by-name shape.
 
 import { spawnSync } from "node:child_process";
@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as Z from "../dist/index.js";
+import { BFF_ASCII_LITERAL } from "../dist/cores/bff/index.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const script = join(root, "scripts", "export-machines.mjs");
@@ -43,6 +44,9 @@ const canonical = [
   { name: "z80_nmos", core: { isa: "z80", compat: "0.3", variant: "zilog-nmos" }, world: { ...pairWorld, outputs: { writeCounts: true, fetchMap: true } } },
   { name: "m6502_pair", core: { isa: "m6502" }, world: { ...pairWorld, init: { stack: { firstPushAt: "lastByte" } } } },
   { name: "bff_pair", core: { isa: "bff" }, world: { memory: pairWorld.memory, budget: { unit: "steps", value: 64 } } },
+  // a table param through JSON: bff.py's ascii_map(True) with the literal push
+  { name: "bff_lit", core: { isa: "bff", params: { alphabet: [...BFF_ASCII_LITERAL], literal: true, lit_rep: 2 } },
+    world: { memory: pairWorld.memory, budget: { unit: "steps", value: 64 } } },
 ];
 
 test("--list-cores finds z80, m6502 and bff in the build by descriptor id", () => {
@@ -54,19 +58,20 @@ test("--list-cores finds z80, m6502 and bff in the build by descriptor id", () =
 });
 
 const out = join(dir, "out");
-test("canonical specs: z80 (compat 0.2 and 0.3 zilog-nmos), m6502 and bff export; variant and compat pass through", () => {
+test("canonical specs: z80 (compat 0.2 and 0.3 zilog-nmos), m6502 and bff export; variant, compat and params pass through", () => {
   const r = run(canonical, "--out", out);
   if (r.status !== 0) throw new Error(r.stderr);
-  // the full 6502 core (experimental) exports without a note; the BFF skeleton is flagged as not for results
-  if (/m6502_pair: m6502 is a skeleton core/.test(r.stderr) || !/note {2}bff_pair: bff is a skeleton core/.test(r.stderr)) {
-    throw new Error(`skeleton notes wrong: ${r.stderr}`);
-  }
+  // the full 6502 (experimental) and BFF (stable) cores export without a skeleton note
+  if (/is a skeleton core/.test(r.stderr)) throw new Error(`a skeleton note: ${r.stderr}`);
   const man = (n) => JSON.parse(read(out, `${n}.manifest.json`)).core;
   const pick = (c) => [c.id, c.compat, c.variant, c.coreVersion];
   const got = canonical.map((s) => pick(man(s.name)));
   const want = [["z80", "0.2", "classic", "0.2.0"], ["z80", "0.3", "zilog-nmos", "0.3.0"],
-    ["m6502", "0.3", "nmos", "0.3.0"], ["bff", "skeleton", "ascii", "0.0.0-skeleton"]];
+    ["m6502", "0.3", "nmos", "0.3.0"], ["bff", "bff.py", "cubff", "1.0.0"], ["bff", "bff.py", "cubff", "1.0.0"]];
   if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`${JSON.stringify(got)} != ${JSON.stringify(want)}`);
+  const lit = man("bff_lit").params;
+  if (JSON.stringify(lit) !== JSON.stringify({ alphabet: [...BFF_ASCII_LITERAL], literal: true, lit_rep: 2 })) throw new Error(`bff_lit params ${JSON.stringify(lit)}`);
+  if (!read(out, "bff_lit.wgsl").includes("const ZIL_PARAM_LIT_REP: u32 = 2u;")) throw new Error("bff_lit: the params did not reach the WGSL");
 });
 
 test("the exported compat '0.2' machine is byte-identical to buildMachine(algocellPairMachine(...)) and runs the 0.2.0 core", () => {

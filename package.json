@@ -37,6 +37,7 @@
 		"test:unit": "npm run build && node test/unit.mjs",
 		"test:world": "npm run build && node test/world/run.mjs",
 		"test:algocell": "npm run build && node test/world/algocell.mjs",
+		"test:bff": "npm run build && ${ZILION_PYTHON:-python3} -I test/world/bff_equiv.py --pairs 131072 --cpu 0.0625",
 		"test:compat": "npm run build && node test/world/compat02.mjs",
 		"test:export": "npm run build && node test/export-machines.mjs",
 		"test": "npm run build && node test/unit.mjs && node test/engine-mock.mjs && node test/export-machines.mjs && node scripts/check-byte-identity.mjs && node test/world/run.mjs && node test/world/compat02.mjs",

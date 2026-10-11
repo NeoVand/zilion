@@ -1,0 +1,1241 @@
+{
+ "generated": "2026-10-10 18:53:58 CDT",
+ "ok": true,
+ "zilion": {
+  "commit": "77797b9",
+  "dirty": false,
+  "core": "1.0.0"
+ },
+ "bffpy": {
+  "sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+  "commit": "406d69f",
+  "dirty": false
+ },
+ "adapter": "Apple M4 (Metal, IntegratedGPU)",
+ "python": "3.12.12",
+ "numpy": "2.5.3",
+ "wgpu": "0.32.0",
+ "pairs_per_variant": 1048576,
+ "batch": 65536,
+ "batches": 16,
+ "cpu_fraction": 1.0,
+ "thresholds": {
+  "0.5": {
+   "halt_q": 2147483648,
+   "zilion": 2147483648,
+   "equal": true
+  },
+  "0.3": {
+   "halt_q": 1288490189,
+   "zilion": 1288490189,
+   "equal": true
+  },
+  "0.1": {
+   "halt_q": 429496730,
+   "zilion": 429496730,
+   "equal": true
+  },
+  "0.03": {
+   "halt_q": 128849019,
+   "zilion": 128849019,
+   "equal": true
+  },
+  "0.01": {
+   "halt_q": 42949673,
+   "zilion": 42949673,
+   "equal": true
+  },
+  "0.7": {
+   "halt_q": 3006477107,
+   "zilion": 3006477107,
+   "equal": true
+  },
+  "0.5000000001164153": {
+   "halt_q": 2147483648,
+   "zilion": 2147483648,
+   "equal": true
+  },
+  "0.2500000001164153": {
+   "halt_q": 1073741824,
+   "zilion": 1073741824,
+   "equal": true
+  },
+  "0.7500000001164153": {
+   "halt_q": 3221225472,
+   "zilion": 3221225472,
+   "equal": true
+  },
+  "0.9999999997671694": {
+   "halt_q": 4294967295,
+   "zilion": "as-chip halt",
+   "equal": true
+  },
+  "0.9999999998835847": {
+   "halt_q": 4294967296,
+   "zilion": "as-chip halt",
+   "equal": true
+  },
+  "0.0": {
+   "halt_q": 0,
+   "zilion": "never",
+   "equal": true
+  }
+ },
+ "variants": [
+  {
+   "variant": "std",
+   "bffpy_args": {},
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 619.5,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "9c71b49f3c191dd3de295d36c5e4d197c6b8396c555692f0f678b7b224c93f6e",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 159282,
+   "bounds": 357333,
+   "unmatched": 531964,
+   "running_other": 0,
+   "entered": 490096,
+   "writesB_pos": 310154,
+   "mem_changed": 699694,
+   "partner_changed": 283658,
+   "steps_sum": 1464335516,
+   "writesB_sum": 48974047,
+   "fetch_eq_start": 1048576,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 0,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    483168,
+    319021,
+    53731,
+    33374,
+    159282
+   ]
+  },
+  {
+   "variant": "stdlit",
+   "bffpy_args": {
+    "literal": true
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 347.3,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "f580993d56b3b147fe86c65c3f259f329e89a2269b81a20b510175a941ae99d0",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 137908,
+   "bounds": 397866,
+   "unmatched": 512805,
+   "running_other": 0,
+   "entered": 530585,
+   "writesB_pos": 556057,
+   "mem_changed": 785150,
+   "partner_changed": 543562,
+   "steps_sum": 1293704227,
+   "writesB_sum": 55056949,
+   "fetch_eq_start": 593019,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 6670,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    600181,
+    193122,
+    86422,
+    30943,
+    137908
+   ]
+  },
+  {
+   "variant": "stdlit_r2",
+   "bffpy_args": {
+    "literal": true,
+    "lit_rep": 2
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 262.4,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "173ed07de76a271959b5162a16661f6e224c1f813ee86681043ab53051332f2b",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 134758,
+   "bounds": 404127,
+   "unmatched": 509695,
+   "running_other": 0,
+   "entered": 534168,
+   "writesB_pos": 561530,
+   "mem_changed": 785235,
+   "partner_changed": 550212,
+   "steps_sum": 1253795656,
+   "writesB_sum": 53939299,
+   "fetch_eq_start": 592970,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 6683,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    601899,
+    193160,
+    95068,
+    23691,
+    134758
+   ]
+  },
+  {
+   "variant": "stdlit_r3",
+   "bffpy_args": {
+    "literal": true,
+    "lit_rep": 3
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 190.6,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "fd4e4b10858dc699b71bbdea13f6218d4f2d217941f373811520cf91a56e08bc",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 132536,
+   "bounds": 409215,
+   "unmatched": 506830,
+   "running_other": 0,
+   "entered": 536508,
+   "writesB_pos": 561838,
+   "mem_changed": 785236,
+   "partner_changed": 550590,
+   "steps_sum": 1229747897,
+   "writesB_sum": 53940002,
+   "fetch_eq_start": 592895,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 7104,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    604482,
+    193212,
+    96198,
+    22148,
+    132536
+   ]
+  },
+  {
+   "variant": "nohalt",
+   "bffpy_args": {
+    "nohalt": true
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 539.1,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "56572b247a9f202df71d0b7167ac8ce438c7780174854dd7fdaf22464438b351",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 374010,
+   "bounds": 674571,
+   "unmatched": 0,
+   "running_other": 0,
+   "entered": 814030,
+   "writesB_pos": 509128,
+   "mem_changed": 862896,
+   "partner_changed": 480225,
+   "steps_sum": 3340175936,
+   "writesB_sum": 138928554,
+   "fetch_eq_start": 1048576,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 0,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    22403,
+    481617,
+    98989,
+    71557,
+    374010
+   ]
+  },
+  {
+   "variant": "std_hp0.5",
+   "bffpy_args": {
+    "halt_p": 0.5
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 477.4,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "8a7a1144bca041df6eeeb5cb11866baa84daec3a3fc691322c5ccfeee2d5f2f4",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 225514,
+   "bounds": 463185,
+   "unmatched": 359881,
+   "running_other": 0,
+   "entered": 600997,
+   "writesB_pos": 386614,
+   "mem_changed": 773117,
+   "partner_changed": 357745,
+   "steps_sum": 2048546192,
+   "writesB_sum": 76151777,
+   "fetch_eq_start": 1048576,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 0,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    314941,
+    390054,
+    72344,
+    45723,
+    225514
+   ],
+   "dial_both_outcomes": 94304
+  },
+  {
+   "variant": "std_d2",
+   "bffpy_args": {
+    "alphabet": "d2"
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 449.9,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "319ae8c250ced4f94667e01cfe43c5c1b77b4efe280af3a51c4235b4ed9d1d59",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 195988,
+   "bounds": 247588,
+   "unmatched": 605006,
+   "running_other": 0,
+   "entered": 404389,
+   "writesB_pos": 376095,
+   "mem_changed": 757808,
+   "partner_changed": 343701,
+   "steps_sum": 1804678016,
+   "writesB_sum": 52413927,
+   "fetch_eq_start": 1048576,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 0,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    545710,
+    193509,
+    62345,
+    51024,
+    195988
+   ]
+  },
+  {
+   "variant": "std_d4",
+   "bffpy_args": {
+    "alphabet": "d4"
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 643.2,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "f41ff0044d2e05c8ca69bc96fb4db4ad5b6885c39f3f7e93227a679408ec15af",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 246007,
+   "bounds": 138064,
+   "unmatched": 664506,
+   "running_other": 0,
+   "entered": 292273,
+   "writesB_pos": 421325,
+   "mem_changed": 770346,
+   "partner_changed": 389832,
+   "steps_sum": 2253965079,
+   "writesB_sum": 65123796,
+   "fetch_eq_start": 1048576,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 0,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    580976,
+    70556,
+    79657,
+    71380,
+    246007
+   ]
+  },
+  {
+   "variant": "wrap",
+   "bffpy_args": {
+    "ip_wrap": true
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 982.5,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "33e12a27bb52ab46a0f4d7a3808adcbff1dcfb161f03cf33dc0453ca298d45a2",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 450900,
+   "bounds": 0,
+   "unmatched": 597683,
+   "running_other": 0,
+   "entered": 490104,
+   "writesB_pos": 385061,
+   "mem_changed": 722219,
+   "partner_changed": 356532,
+   "steps_sum": 3964721322,
+   "writesB_sum": 69041802,
+   "fetch_eq_start": 1048576,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 0,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    480276,
+    898,
+    50447,
+    66055,
+    450900
+   ]
+  },
+  {
+   "variant": "wraplit",
+   "bffpy_args": {
+    "ip_wrap": true,
+    "literal": true
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 919.3,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "98e59a2245513e0dcbbde53e39da06a1453e5a6daadae13732e31598c96bcbf7",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 459078,
+   "bounds": 0,
+   "unmatched": 589504,
+   "running_other": 0,
+   "entered": 530603,
+   "writesB_pos": 605900,
+   "mem_changed": 798596,
+   "partner_changed": 592392,
+   "steps_sum": 4011333383,
+   "writesB_sum": 107253938,
+   "fetch_eq_start": 721571,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 2102,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    468100,
+    654,
+    59742,
+    61002,
+    459078
+   ]
+  },
+  {
+   "variant": "wraplitnh",
+   "bffpy_args": {
+    "ip_wrap": true,
+    "literal": true,
+    "nohalt": true
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 1823.5,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "3f1fcdafcb5a969a4e3e9782e1fb1dcb3b7ea6a6438121f058eb6090b4a6c6cb",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 1048576,
+   "bounds": 0,
+   "unmatched": 0,
+   "running_other": 0,
+   "entered": 866586,
+   "writesB_pos": 830051,
+   "mem_changed": 953749,
+   "partner_changed": 816800,
+   "steps_sum": 8589934592,
+   "writesB_sum": 361993263,
+   "fetch_eq_start": 707831,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 4345,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    0,
+    0,
+    0,
+    0,
+    1048576
+   ]
+  },
+  {
+   "variant": "wraplit_hp0.3",
+   "bffpy_args": {
+    "ip_wrap": true,
+    "literal": true,
+    "halt_p": 0.3
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 996.6,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "17d4865b376673a0e1f14efdeb1ba40f045bbf370ebf4e1b517919945371b10a",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 597419,
+   "bounds": 0,
+   "unmatched": 451158,
+   "running_other": 0,
+   "entered": 721090,
+   "writesB_pos": 736584,
+   "mem_changed": 901384,
+   "partner_changed": 722715,
+   "steps_sum": 5180810088,
+   "writesB_sum": 178980355,
+   "fetch_eq_start": 624782,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 5884,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    202540,
+    539,
+    175367,
+    72711,
+    597419
+   ],
+   "dial_both_outcomes": 275038
+  },
+  {
+   "variant": "wraplit_hp0.1",
+   "bffpy_args": {
+    "ip_wrap": true,
+    "literal": true,
+    "halt_p": 0.1
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 1215.2,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "a2984307aef746f17688d2fadb44f745e4d573d6744c0d2129da73ddf369e331",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 700973,
+   "bounds": 0,
+   "unmatched": 347607,
+   "running_other": 0,
+   "entered": 810924,
+   "writesB_pos": 786903,
+   "mem_changed": 935906,
+   "partner_changed": 773487,
+   "steps_sum": 6143701939,
+   "writesB_sum": 241446816,
+   "fetch_eq_start": 612759,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 6814,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    78339,
+    257,
+    142516,
+    126491,
+    700973
+   ],
+   "dial_both_outcomes": 288631
+  },
+  {
+   "variant": "wraplit_hp0.03",
+   "bffpy_args": {
+    "ip_wrap": true,
+    "literal": true,
+    "halt_p": 0.03
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 1397.5,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "7e02738f74f0065c736365e2f27a328dbde757057dd4e7358ef49dce2815eba9",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 808558,
+   "bounds": 0,
+   "unmatched": 240025,
+   "running_other": 0,
+   "entered": 848882,
+   "writesB_pos": 810749,
+   "mem_changed": 948647,
+   "partner_changed": 797664,
+   "steps_sum": 7145560346,
+   "writesB_sum": 296675732,
+   "fetch_eq_start": 643983,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 6032,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    24864,
+    90,
+    66996,
+    148068,
+    808558
+   ],
+   "dial_both_outcomes": 222446
+  },
+  {
+   "variant": "wraplit_hp0.01",
+   "bffpy_args": {
+    "ip_wrap": true,
+    "literal": true,
+    "halt_p": 0.01
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 1513.9,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 1.0,
+   "wgsl_sha256": "7c1dc31897951ce2b00548f499d6fe7f1c1fe15b1295a521db6da43468f41cb9",
+   "pairs": 1048576,
+   "cpu_pairs": 1048576,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 1048576,
+   "gpu_vs_cpu": 1048576,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 914473,
+   "bounds": 0,
+   "unmatched": 134106,
+   "running_other": 0,
+   "entered": 860493,
+   "writesB_pos": 821658,
+   "mem_changed": 952225,
+   "partner_changed": 808586,
+   "steps_sum": 7881642107,
+   "writesB_sum": 330490036,
+   "fetch_eq_start": 675730,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 5189,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    8452,
+    28,
+    26608,
+    99015,
+    914473
+   ],
+   "dial_both_outcomes": 128195
+  },
+  {
+   "variant": "std_d2_lit",
+   "bffpy_args": {
+    "alphabet": "d2lit",
+    "literal": true
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 32.5,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 0.0625,
+   "wgsl_sha256": "ba82648096545a028892e9217b7d0379e25ee408c1a3a59ea6ede35b0b0876f1",
+   "pairs": 1048576,
+   "cpu_pairs": 65536,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 65536,
+   "gpu_vs_cpu": 65536,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 172835,
+   "bounds": 290015,
+   "unmatched": 585731,
+   "running_other": 0,
+   "entered": 445049,
+   "writesB_pos": 569782,
+   "mem_changed": 808011,
+   "partner_changed": 552950,
+   "steps_sum": 1617012466,
+   "writesB_sum": 59014240,
+   "fetch_eq_start": 623877,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 5713,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    613871,
+    116954,
+    96636,
+    48280,
+    172835
+   ]
+  },
+  {
+   "variant": "edge_literal_no_op11",
+   "bffpy_args": {
+    "alphabet": "d4",
+    "literal": true,
+    "lit_rep": 3
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 41.8,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 0.0625,
+   "wgsl_sha256": "f41ff0044d2e05c8ca69bc96fb4db4ad5b6885c39f3f7e93227a679408ec15af",
+   "pairs": 1048576,
+   "cpu_pairs": 65536,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 65536,
+   "gpu_vs_cpu": 65536,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 246007,
+   "bounds": 138064,
+   "unmatched": 664506,
+   "running_other": 0,
+   "entered": 292273,
+   "writesB_pos": 421325,
+   "mem_changed": 770346,
+   "partner_changed": 389832,
+   "steps_sum": 2253965079,
+   "writesB_sum": 65123796,
+   "fetch_eq_start": 1048576,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 0,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    580976,
+    70556,
+    79657,
+    71380,
+    246007
+   ]
+  },
+  {
+   "variant": "edge_op11_no_literal",
+   "bffpy_args": {
+    "alphabet": "asciilit"
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 31.5,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 0.0625,
+   "wgsl_sha256": "9c71b49f3c191dd3de295d36c5e4d197c6b8396c555692f0f678b7b224c93f6e",
+   "pairs": 1048576,
+   "cpu_pairs": 65536,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 65536,
+   "gpu_vs_cpu": 65536,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 157266,
+   "bounds": 360288,
+   "unmatched": 531025,
+   "running_other": 0,
+   "entered": 498158,
+   "writesB_pos": 310490,
+   "mem_changed": 699732,
+   "partner_changed": 284343,
+   "steps_sum": 1452831887,
+   "writesB_sum": 46148573,
+   "fetch_eq_start": 1048576,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 0,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    480975,
+    319341,
+    55934,
+    35060,
+    157266
+   ]
+  },
+  {
+   "variant": "edge_table_rep0",
+   "bffpy_args": {
+    "alphabet": "custom",
+    "literal": true,
+    "lit_rep": 0,
+    "ip_wrap": true,
+    "halt_p": 0.5000000001164153
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 92.9,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 0.0625,
+   "wgsl_sha256": "3e9f7a70da53d33a5883c7d2ee3859c16a56158dfc7dadeef6c74155654bd1b0",
+   "pairs": 1048576,
+   "cpu_pairs": 65536,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 65536,
+   "gpu_vs_cpu": 65536,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 609011,
+   "bounds": 0,
+   "unmatched": 439567,
+   "running_other": 0,
+   "entered": 537574,
+   "writesB_pos": 387240,
+   "mem_changed": 723121,
+   "partner_changed": 354056,
+   "steps_sum": 5297535284,
+   "writesB_sum": 70166125,
+   "fetch_eq_start": 424699,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 9087,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    266571,
+    589,
+    102866,
+    69539,
+    609011
+   ],
+   "dial_both_outcomes": 169703
+  },
+  {
+   "variant": "edge_rep5_hp0.7",
+   "bffpy_args": {
+    "ip_wrap": true,
+    "literal": true,
+    "lit_rep": 5,
+    "halt_p": 0.7
+   },
+   "ok": true,
+   "gates_failed": [],
+   "seconds": 78.7,
+   "settings": {
+    "pairs": 1048576,
+    "batch": 65536,
+    "cpu": 1.0,
+    "steps": 8192
+   },
+   "bffpy_sha256": "e4772ef6156712f159c119b32290888203d65f2e109535a5474a49369c685ed2",
+   "cpu_fraction": 0.0625,
+   "wgsl_sha256": "3b6db26b127aab087e226b704b16520dee378a66af93150ad0e9c6d41d8d40a0",
+   "pairs": 1048576,
+   "cpu_pairs": 65536,
+   "z_vs_gpu": 1048576,
+   "z_vs_cpu": 65536,
+   "gpu_vs_cpu": 65536,
+   "mem_eq": 1048576,
+   "field_eq": {
+    "executed": 1048576,
+    "entered": 1048576,
+    "max_pc": 1048576,
+    "writesB": 1048576
+   },
+   "budget": 520459,
+   "bounds": 0,
+   "unmatched": 528122,
+   "running_other": 0,
+   "entered": 604591,
+   "writesB_pos": 661802,
+   "mem_changed": 839837,
+   "partner_changed": 649027,
+   "steps_sum": 4474433648,
+   "writesB_sum": 644396025,
+   "fetch_eq_start": 727143,
+   "fetch_entered_differs": 0,
+   "fetch_maxpc_differs": 4997,
+   "start_subset_fetch": 1048576,
+   "steps_hist": [
+    376631,
+    811,
+    102927,
+    47748,
+    520459
+   ],
+   "dial_both_outcomes": 128420
+  }
+ ],
+ "mutants": [
+  {
+   "mutant": "forward scan skips a byte",
+   "base": "std",
+   "pairs": 65536,
+   "differ": 1250,
+   "caught": true
+  },
+  {
+   "mutant": "backward scan ignores nested ']'",
+   "base": "std",
+   "pairs": 65536,
+   "differ": 9016,
+   "caught": true
+  },
+  {
+   "mutant": "literal push writes its bytes swapped",
+   "base": "stdlit",
+   "pairs": 65536,
+   "differ": 33934,
+   "caught": true
+  },
+  {
+   "mutant": "ip wraps to 0 instead of mod P",
+   "base": "wraplit",
+   "pairs": 65536,
+   "differ": 601,
+   "caught": true
+  },
+  {
+   "mutant": "dial salt 1 instead of 0",
+   "base": "wraplit_hp0.1",
+   "pairs": 65536,
+   "differ": 27457,
+   "caught": true
+  },
+  {
+   "mutant": "run seed = roll_seed + 1",
+   "base": "wraplit_hp0.1",
+   "pairs": 65536,
+   "differ": 27408,
+   "caught": true
+  }
+ ],
+ "kernel_tests": {
+  "file": "experiments/tests/test_bff.py",
+  "pytest_exit": 0,
+  "passed": 15,
+  "failed": 0,
+  "execute_calls": 25,
+  "pairs": 2501,
+  "configs": 15,
+  "z_vs_gpu": 2501,
+  "z_vs_cpu": 2501,
+  "gpu_vs_cpu": 2501
+ },
+ "dial_probe": {
+  "draws": 4718592,
+  "equal": 4718592,
+  "seeds": [
+   0,
+   1,
+   3735928559,
+   4294967295
+  ],
+  "steps": [
+   0,
+   1,
+   4096,
+   8191,
+   2147483653,
+   4294967295
+  ],
+  "lane_bases": [
+   0,
+   1048576,
+   4294901760
+  ],
+  "lanes_per_run": 65536,
+  "bracket_halts": {
+   "0.5": {
+    "checked": 196608,
+    "equal": 196608,
+    "halt_fraction": 0.5013
+   },
+   "0.3": {
+    "checked": 196608,
+    "equal": 196608,
+    "halt_fraction": 0.3022
+   },
+   "0.1": {
+    "checked": 196608,
+    "equal": 196608,
+    "halt_fraction": 0.1004
+   },
+   "0.03": {
+    "checked": 196608,
+    "equal": 196608,
+    "halt_fraction": 0.0307
+   },
+   "0.01": {
+    "checked": 196608,
+    "equal": 196608,
+    "halt_fraction": 0.0099
+   }
+  }
+ }
+}

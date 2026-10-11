@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import * as Z from "../dist/index.js";
 import { m6502 } from "../dist/cores/m6502/index.js";
 import * as M6502 from "../dist/cores/m6502/index.js";
-import { bff } from "../dist/cores/bff/index.js";
+import { bff, BFF_ASCII, BFF_ASCII_LITERAL, bffAsciiMap } from "../dist/cores/bff/index.js";
 import { fakeCore } from "./world/fake_core.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -424,7 +424,7 @@ test("trapCause: a record word after haltReason, codes in the manifest, from eac
   // full 6502 raises only 'illegal' (JAM): no opcode is left unimplemented
   eq(Object.keys(m6502.conventions.traps), ["illegal"]);
   for (const trap of [false, true]) if (m6502.wgsl({ hooks: { trap } }).includes("ZIL_TRAP_UNIMPLEMENTED")) throw new Error("m6502 raises 'unimplemented'");
-  for (const [core, causes] of [[m6502, ["ILLEGAL"]], [bff, ["BOUNDS", "UNIMPLEMENTED"]]]) {
+  for (const [core, causes] of [[m6502, ["ILLEGAL"]], [bff, ["BOUNDS", "UNMATCHED"]]]) {
     for (const trap of [false, true]) {
       const text = core.wgsl({ hooks: { trap } });
       for (const c of causes) if (!text.includes(`_trap = ZIL_TRAP_${c};`)) throw new Error(`${core.id} (trap hook ${trap}): ${c} does not set the cause`);
@@ -437,9 +437,10 @@ test("core params (test-only fake core): validation, WGSL constants ahead of the
   const w = bare(4);
   const fb = (params, extra = {}) => Z.buildMachine({ core: { isa: fakeCore, params }, world: w, ...extra });
   const d = fb(undefined);
-  eq(d.manifest.core.params, { scale: 1, skip_zero: false, mode: "add" });
+  const identity = Array.from({ length: 256 }, (_, i) => i);
+  eq(d.manifest.core.params, { scale: 1, skip_zero: false, mode: "add", remap: identity });
   const m = fb({ scale: 3, mode: "xor", skip_zero: true });
-  eq(m.manifest.core.params, { scale: 3, skip_zero: true, mode: "xor" });
+  eq(m.manifest.core.params, { scale: 3, skip_zero: true, mode: "xor", remap: identity });
   const consts = [
     "const ZIL_PARAM_SCALE: u32 = 3u;",
     "const ZIL_PARAM_SKIP_ZERO: bool = true;",
@@ -455,7 +456,7 @@ test("core params (test-only fake core): validation, WGSL constants ahead of the
   eq(Z.coreParamConstant("skip_zero"), "ZIL_PARAM_SKIP_ZERO");
   eq(Z.coreParamConstant("mode", "xor"), "ZIL_PARAM_MODE_XOR");
   // errors: unknown name, wrong type, out of range, enum value not declared, params on a core that declares none
-  throws(() => fb({ scal: 3 }), /fake has no param 'scal' \(params: scale, skip_zero, mode\)/);
+  throws(() => fb({ scal: 3 }), /fake has no param 'scal' \(params: scale, skip_zero, mode, remap\)/);
   throws(() => fb({ scale: "3" }), /param 'scale' must be a u32/);
   throws(() => fb({ scale: 2 ** 32 }), /param 'scale' must be a u32/);
   throws(() => fb({ scale: 1.5 }), /param 'scale' must be a u32/);
@@ -480,6 +481,82 @@ test("core params (test-only fake core): validation, WGSL constants ahead of the
   throws(bad({ m: { type: "enum", default: "a", values: ["a", "a"] } }), /repeats a value/);
   throws(bad({ m: { type: "enum", default: "a_b", values: ["a_b"] }, m_a: { type: "enum", default: "b", values: ["b"] } }), /both emit ZIL_PARAM_M_A_B/);
   throws(bad({ k: { type: "float", default: 1 } }), /unknown type 'float'/);
+});
+
+test("core params, tables: validation, typed arrays, a frozen copy in the manifest, one WGSL constant, the options hash", () => {
+  const w = bare(4);
+  const fb = (params) => Z.buildMachine({ core: { isa: fakeCore, params }, world: w });
+  const rev = Array.from({ length: 256 }, (_, i) => 255 - i);
+  const given = Uint8Array.from(rev);
+  const m = fb({ remap: given });
+  eq(m.manifest.core.params.remap, rev);
+  if (!Array.isArray(m.manifest.core.params.remap) || !Object.isFrozen(m.manifest.core.params.remap)) throw new Error("a table does not resolve to a frozen plain array");
+  given[0] = 7; // the machine keeps its own copy
+  eq(m.manifest.core.params.remap[0], 255);
+  // one constant, every entry, ahead of the core text; a different table changes the options hash, an equal one does not
+  const decl = m.wgsl.match(/const ZIL_PARAM_REMAP: array<u32, 256> = array<u32, 256>\(([^;]*)\);/);
+  if (!decl) throw new Error("no table constant");
+  eq(decl[1].split(",").map((x) => x.trim()).filter(Boolean).map((x) => Number(x.replace(/u$/, ""))), rev);
+  if (!(m.wgsl.indexOf("const ZIL_PARAM_REMAP") < m.wgsl.indexOf("// === Core (L0)"))) throw new Error("the table does not precede the core text");
+  eq(fb({ remap: rev }).manifest.sha256.options, m.manifest.sha256.options);
+  if (fb(undefined).manifest.sha256.options === m.manifest.sha256.options) throw new Error("the options hash does not cover the table");
+  // values
+  throws(() => fb({ remap: rev.slice(1) }), /param 'remap' must have 256 entries \(got 255\)/);
+  throws(() => fb({ remap: [...rev.slice(1), 256] }), /param 'remap' entry 255 must be an integer in 0\.\.255 \(got 256\)/);
+  throws(() => fb({ remap: [...rev.slice(1), -1] }), /entry 255 must be an integer in 0\.\.255/);
+  throws(() => fb({ remap: [...rev.slice(1), 1.5] }), /entry 255 must be an integer/);
+  throws(() => fb({ remap: [...rev.slice(1), "1"] }), /entry 255 must be an integer/);
+  throws(() => fb({ remap: new Array(256) }), /entry 0 must be an integer/);
+  throws(() => fb({ remap: "abc" }), /param 'remap' must be an array of 256 integers/);
+  throws(() => fb({ remap: { length: 256 } }), /must be an array/);
+  throws(() => fb({ remap: new DataView(new ArrayBuffer(256)) }), /must be an array/);
+  eq(fb({ remap: Uint32Array.from(rev) }).manifest.core.params.remap, rev);
+  // declarations
+  const bad = (params) => () => Z.buildMachine({ core: { isa: { ...fakeCore, params } }, world: w });
+  throws(bad({ t: { type: "table", length: 0, max: 1, default: [] } }), /table param 't' needs an integer length in 1\.\.65536/);
+  throws(bad({ t: { type: "table", length: 1.5, max: 1, default: [0] } }), /needs an integer length/);
+  throws(bad({ t: { type: "table", length: 2, max: -1, default: [0, 0] } }), /needs a u32 max/);
+  throws(bad({ t: { type: "table", length: 2, default: [0, 0] } }), /needs a u32 max/);
+  throws(bad({ t: { type: "table", length: 2, max: 3, default: [0] } }), /the default of param 't' must have 2 entries/);
+  throws(bad({ t: { type: "table", length: 2, max: 3, default: [0, 4] } }), /the default of param 't' entry 1 must be an integer in 0\.\.3/);
+  // a table's default is copied, not aliased, into the manifest
+  const def = [1, 2];
+  const own = Z.buildMachine({ core: { isa: { ...fakeCore, params: { ...fakeCore.params, t: { type: "table", length: 2, max: 3, default: def } } } }, world: w });
+  if (own.manifest.core.params.t === def) throw new Error("the manifest aliases the descriptor's default");
+  eq(own.manifest.core.params.t, [1, 2]);
+  if (!own.wgsl.includes("const ZIL_PARAM_T: array<u32, 2> = array<u32, 2>(\n    1u, 2u,\n);")) throw new Error("table constant format");
+});
+
+// --- the BFF core ----------------------------------------------------------------------------------------------------
+test("BFF: params (alphabet table, literal, lit_rep) with bff.py's ASCII maps; the cross-parameter rules; traps", () => {
+  const w = bare(128);
+  const fb = (params) => Z.buildMachine({ core: { isa: bff, params }, world: w });
+  // bff.py's ascii_map: < > { } + - . , [ ] are op ids 1..10; ascii_map(True) adds 'P' (0x50) -> 11; nothing else
+  const expected = new Array(256).fill(0);
+  [..."<>{}+-.,[]"].forEach((c, i) => (expected[c.charCodeAt(0)] = i + 1));
+  eq(BFF_ASCII, expected);
+  eq(BFF_ASCII_LITERAL, expected.map((v, b) => (b === 0x50 ? 11 : v)));
+  eq(bffAsciiMap(true), [...BFF_ASCII_LITERAL]);
+  eq(fb(undefined).manifest.core.params, { alphabet: expected, literal: false, lit_rep: 1 });
+  eq(fb({ alphabet: BFF_ASCII_LITERAL, literal: true, lit_rep: 3 }).manifest.core.params, { alphabet: [...BFF_ASCII_LITERAL], literal: true, lit_rep: 3 });
+  const lit = fb({ alphabet: BFF_ASCII_LITERAL, literal: true }).wgsl;
+  for (const t of ["const ZIL_PARAM_LITERAL: bool = true;", "const ZIL_PARAM_LIT_REP: u32 = 1u;", "const ZIL_PARAM_ALPHABET: array<u32, 256>", "return ZIL_PARAM_ALPHABET[b & 0xffu];"]) {
+    if (!lit.includes(t)) throw new Error(`missing: ${t}`);
+  }
+  // inconsistent selections are refused (bff.py would silently run the literal off or never)
+  throws(() => fb({ literal: true }), /'literal' is on but the alphabet maps no byte to op 11/);
+  throws(() => fb({ alphabet: BFF_ASCII_LITERAL }), /maps a byte to op 11 \(the literal push\) but param 'literal' is off/);
+  throws(() => fb({ lit_rep: 2 }), /'lit_rep' \(2\) applies only with literal: true/);
+  throws(() => fb({ alphabet: expected.map((v, b) => (b === 7 ? 12 : v)) }), /param 'alphabet' entry 7 must be an integer in 0\.\.11/);
+  // the traps the core raises, with the chip's decisions; the vector policy does not exist; no stack
+  eq(bff.conventions.traps, { bounds: "halt", unmatched: "halt" });
+  throws(() => Z.buildMachine({ isa: bff, world: bare(32, { halting: { traps: { bounds: "vector" } } }) }), /no vector for trap 'bounds'/);
+  throws(() => Z.buildMachine({ isa: bff, world: bare(32, { halting: { traps: { unimplemented: "halt" } } }) }), /never raises trap 'unimplemented'/);
+  eq([bff.status, bff.conventions.stackTop, bff.conventions.firstPushAt], ["stable", null, null]);
+  // the bracket scans never call on_fetch: the only fetches are the op byte and the literal's two operands
+  const text = bff.wgsl({ hooks: { fetch: true, instructionStart: true, trap: true }, params: { alphabet: BFF_ASCII_LITERAL, literal: true, lit_rep: 1 } });
+  eq((text.match(/on_fetch\(/g) ?? []).length, 3);
+  eq((text.match(/zil_trap\(ZIL_TRAP_(\w+)\)/g) ?? []).sort(), ["zil_trap(ZIL_TRAP_BOUNDS)", "zil_trap(ZIL_TRAP_UNMATCHED)"]);
 });
 
 // --- decision 5: the step base -------------------------------------------------------------------------------------

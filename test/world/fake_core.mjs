@@ -1,11 +1,12 @@
 // A test-only core that exists to exercise IsaCore.params (compile-time core parameters) end to end. It is not an
 // instruction set: a ring-native accumulator machine whose step reads the byte under its pointer and folds it into
-// `acc`, shaped by three parameters of the three kinds:
+// `acc`, shaped by four parameters of the four kinds:
 //   scale     u32  (default 1)        the byte is multiplied by it
 //   skip_zero bool (default false)    a zero byte is skipped (the step still advances the pointer)
 //   mode      enum add | xor (add)    acc = (acc << 1) + b·scale, or (acc << 1) ^ b·scale
+//   remap     table of 256 entries in 0..255 (default: the identity)   the byte is first replaced by remap[byte]
 // The core text uses only the builder's constants (ZIL_PARAM_SCALE, ZIL_PARAM_SKIP_ZERO, ZIL_PARAM_MODE,
-// ZIL_PARAM_MODE_ADD, ZIL_PARAM_MODE_XOR), so the test shows that the values reach the core as constants.
+// ZIL_PARAM_MODE_ADD, ZIL_PARAM_MODE_XOR, ZIL_PARAM_REMAP), so the test shows that the values reach the core as constants.
 
 export const fakeCore = {
   id: "fake",
@@ -41,6 +42,7 @@ export const fakeCore = {
     scale: { type: "u32", default: 1, description: "multiplier of each byte" },
     skip_zero: { type: "bool", default: false, description: "skip zero bytes" },
     mode: { type: "enum", default: "add", values: ["add", "xor"], description: "how a byte is folded in" },
+    remap: { type: "table", length: 256, max: 255, default: Array.from({ length: 256 }, (_, i) => i), description: "byte substitution (indexed at run time)" },
   },
   wgsl() {
     return /* wgsl */ `
@@ -49,7 +51,7 @@ var<private> fake_acc: u32;
 var<private> fake_halted: u32;
 var<private> fake_trap: u32;
 fn fake_step() {
-    let b = mem_read(fake_pc);
+    let b = ZIL_PARAM_REMAP[mem_read(fake_pc)];
     fake_pc = (fake_pc + 1u) % ZIL_MEM_P;
     if (ZIL_PARAM_SKIP_ZERO && b == 0u) { return; }
     if (ZIL_PARAM_MODE == ZIL_PARAM_MODE_XOR) { fake_acc = (fake_acc << 1u) ^ (b * ZIL_PARAM_SCALE); }

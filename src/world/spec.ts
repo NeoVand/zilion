@@ -2,7 +2,7 @@
 // names no register and no opcode; it talks to the core only through the descriptor and the host-contract hooks.
 
 import type { TrapCause, TrapDecision } from "../contract/host.js";
-import type { CoreParamValue, IsaCore } from "../contract/isa.js";
+import type { CoreParamInput, IsaCore } from "../contract/isa.js";
 
 /** One named stretch of the ring that the host loads and stores (a tape, a genome, a program). */
 export interface Segment {
@@ -169,7 +169,7 @@ export interface CoreSelection {
    */
   readonly compat?: string;
   /** Values of the parameters the core declares (`isa.params`); undeclared names are errors, omitted ones take the declared default. */
-  readonly params?: Readonly<Record<string, CoreParamValue>>;
+  readonly params?: Readonly<Record<string, CoreParamInput>>;
 }
 
 /**
