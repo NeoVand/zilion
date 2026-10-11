@@ -223,8 +223,11 @@ const r2 = await m.run(r.memory, { seed: 1, ablation: masks, budget: 64, stepBas
 - **Batches** of any size; `m.batch(n)` keeps lanes resident on the GPU and encodes into your own command
   encoder.
 - **Python and other hosts** read the manifest (bindings, params offsets, memory and record layouts, SHA-256
-  provenance); `node scripts/export-machines.mjs worlds.json --out shaders/` writes the WGSL and manifest for
-  each named world, and `test/world/gpu_runner.py` is a complete wgpu-py host driven only by the manifest.
+  provenance); `node scripts/export-machines.mjs machines.json --out shaders/` writes the WGSL and manifest for
+  each machine of `[{ "name", "core": { "isa": "z80", "compat": "0.2" }, "world": { … } }, …]`, and
+  `test/world/gpu_runner.py` is a complete wgpu-py host driven only by the manifest.
+- **Presets.** `algocellPairWorld` and `compat02World` are worlds; `algocellPairMachine` and `compat02Machine` are the
+  machines that ran in them (the Z80 with compat `'0.2'`): `buildMachine(algocellPairMachine({ L: 16, P: 32, steps: 128 }))`.
 - **More than the Z80.** The contract is validated against two deliberately different skeleton cores, a 6502 and
   BFF; see [docs/ADDING_A_CORE.md](docs/ADDING_A_CORE.md). They are not exported and not for results.
 

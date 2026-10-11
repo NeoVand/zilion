@@ -281,41 +281,50 @@ test("no silent defaults: a world without budget (or its unit or value) or, on a
   eq(build(ring(32, { budget: { unit: "steps", value: 77 } })).manifest.budget, { unit: "steps", perLane: false, default: 77 });
   eq(build(ring(32, { budget: { unit: "fetchBytes", value: "perLane" } })).manifest.budget, { unit: "fetchBytes", perLane: true, default: null });
 });
-test("presets supply the stack, the budget and the Z80 compat explicitly: compat02World (0.2's Zilion.run world) and algocellPairWorld", () => {
-  eq(Z.compat02World({ memBytes: 256, steps: 50 }), { memory: { kind: "mask", bytes: 256 }, init: { stack: { topAliases: "lastByte" } }, budget: { unit: "steps", value: 50 }, compat: { z80: "0.2" } });
+test("presets supply the stack and the budget explicitly: compat02World (0.2's Zilion.run world) and algocellPairWorld", () => {
+  eq(Z.compat02World({ memBytes: 256, steps: 50 }), { memory: { kind: "mask", bytes: 256 }, init: { stack: { topAliases: "lastByte" } }, budget: { unit: "steps", value: 50 } });
   eq(Z.compat02World({ memBytes: 64, steps: 9, registers: "perLane" }).init, { state: "perLane" });
   eq(Z.legacyMachine(64).manifest.init.stack, { notApplicable: "per-lane state" });
   // 0.2's default SP = 0xFFFF: the stack pointer aliases the last byte of a power-of-two memory
   if (!build(Z.compat02World({ memBytes: 256, steps: 1 }), { compat: "0.2" }).wgsl.includes("cpu_sp = 0xffffu;")) throw new Error("compat02: SP is not 0xFFFF");
   eq(Z.algocellPairWorld({ L: 16, P: 37, steps: 128 }), {
     memory: { kind: "segments", segments: [{ bytes: 16, name: "A" }, { bytes: 16, name: "B" }], ring: 37 },
-    init: { stack: { topAliases: "lastByte" } }, budget: { unit: "steps", value: 128 }, outputs: { writeCounts: true }, compat: { z80: "0.2" } });
+    init: { stack: { topAliases: "lastByte" } }, budget: { unit: "steps", value: 128 }, outputs: { writeCounts: true } });
   if (!build(Z.algocellPairWorld({ L: 16, P: 37, steps: 128 })).wgsl.includes("cpu_sp = 0xfff1u;")) throw new Error("Algocell pair: SP0 is not 0xFFF1");
   throws(() => Z.compat02World({ memBytes: 48, steps: 1 }), /power of two/);
   throws(() => Z.algocellPairWorld({ L: 16, P: 31, steps: 1 }), /smaller than the pair/);
   eq(Z.presets.algocellPair, Z.algocellPairWorld);
 });
 
-test("the Z80 needs its compat named (no default through 0.3.x); a world may state it; manifests report the semantics that ran", () => {
+test("the Z80 needs its compat named in the core selection (no default through 0.3.x); manifests report the semantics that ran", () => {
   const w = { memory: { kind: "ring", bytes: 32 }, budget: STEPS, init: { stack: LAST } };
-  throws(() => Z.buildMachine({ isa: Z.z80, world: w }), /z80 needs its compat named \(no default\): give compat '0\.3' or '0\.2'/);
+  throws(() => Z.buildMachine({ isa: Z.z80, world: w }), /z80 needs its compat named \(no default\): give compat '0\.3' or '0\.2' in the core selection/);
   throws(() => Z.buildMachine({ core: { isa: Z.z80 }, world: w }), /compat/);
   throws(() => Z.buildMachine({ isa: Z.z80, variant: "zilog-nmos", world: w }), /needs its compat named/);
+  // worlds carry no core semantics: a world preset alone does not name it
+  throws(() => Z.buildMachine({ isa: Z.z80, world: Z.algocellPairWorld({ L: 16, P: 32, steps: 128 }) }), /needs its compat named/);
   const m = (spec) => Z.buildMachine(spec).manifest.core;
   eq([m({ isa: Z.z80, compat: "0.3", world: w }).compat, m({ isa: Z.z80, compat: "0.3", world: w }).coreVersion], ["0.3", "0.3.0"]);
   eq([m({ core: { isa: Z.z80, compat: "0.2" }, world: w }).compat, m({ core: { isa: Z.z80, compat: "0.2" }, world: w }).coreVersion], ["0.2", "0.2.0"]);
-  // a world that states its semantics (the presets do); the core selection takes precedence when it names one
-  const pair = Z.algocellPairWorld({ L: 16, P: 32, steps: 128 });
-  eq([m({ isa: Z.z80, world: pair }).compat, m({ isa: Z.z80, world: pair }).coreVersion], ["0.2", "0.2.0"]);
-  eq([m({ isa: Z.z80, compat: "0.3", world: pair }).compat, m({ isa: Z.z80, compat: "0.3", world: pair }).coreVersion], ["0.3", "0.3.0"]);
-  eq(m({ isa: Z.z80, world: { ...w, compat: { z80: "0.3" } } }).compat, "0.3");
-  if (!Z.buildMachine({ isa: Z.z80, world: pair }).wgsl.includes(Z.Z80_CORE_WGSL)) throw new Error("the preset world does not run the 0.2.0 core");
-  if (!/\/\/ core {4}z80 0\.2\.0 \(/.test(Z.buildMachine({ isa: Z.z80, world: pair }).wgsl)) throw new Error("shader header does not name 0.2.0");
-  throws(() => Z.buildMachine({ isa: Z.z80, world: { ...w, compat: { z80: "0.1" } } }), /no compat '0\.1'/);
-  throws(() => Z.buildMachine({ isa: Z.z80, world: { ...w, compat: "0.2" } }), /world\.compat must map ISA ids/);
-  // other ISAs ignore the Z80's entry and keep their own default
-  eq(Z.buildMachine({ isa: m6502, world: pair }).manifest.core.compat, "skeleton");
-  eq(Z.buildMachine({ isa: bff, world: { ...pair, init: undefined } }).manifest.core.compat, "skeleton");
+  if (!/\/\/ core {4}z80 0\.2\.0 \(/.test(Z.buildMachine({ core: { isa: Z.z80, compat: "0.2" }, world: w }).wgsl)) throw new Error("shader header does not name 0.2.0");
+  // other ISAs keep their own default
+  eq(Z.buildMachine({ isa: m6502, world: w }).manifest.core.compat, "skeleton");
+});
+
+test("machine presets: a world preset with the core selection it ran with (the Z80, compat '0.2')", () => {
+  const a = Z.algocellPairMachine({ L: 16, P: 37, steps: 128 });
+  eq(a.core.isa === Z.z80 && a.core.compat, "0.2");
+  eq(a.world, Z.algocellPairWorld({ L: 16, P: 37, steps: 128 }));
+  const c = Z.compat02Machine({ memBytes: 64, steps: 100, registers: "perLane" });
+  eq([c.core.isa === Z.z80, c.core.compat, c.world], [true, "0.2", Z.compat02World({ memBytes: 64, steps: 100, registers: "perLane" })]);
+  const built = Z.buildMachine(a);
+  eq([built.manifest.core.compat, built.manifest.core.coreVersion], ["0.2", "0.2.0"]);
+  if (!built.wgsl.includes(Z.Z80_CORE_WGSL)) throw new Error("the Algocell machine does not run the 0.2.0 core");
+  // a condition added to the world, and the same world under the fixes, by spreading
+  eq(Z.buildMachine({ ...a, world: { ...a.world, halting: { lethal: { firstUnit: 0 } } } }).manifest.core.hooks, ["instructionStart"]);
+  eq(Z.buildMachine({ ...a, core: { ...a.core, compat: "0.3" } }).manifest.core.coreVersion, "0.3.0");
+  eq(Z.machinePresets.algocellPair, Z.algocellPairMachine);
+  throws(() => Z.algocellPairMachine({ L: 16, P: 31, steps: 1 }), /smaller than the pair/);
 });
 
 test("covering the stack fields with init.set or init.random counts as giving the stack; the manifest records how the stack was set", () => {

@@ -101,10 +101,10 @@ descriptor's `wgsl` calls it). Two semantics:
 | `compat` | Text | State record | Use |
 |---|---|---|---|
 | `'0.3'` (`coreVersion` 0.3.0) | the current core (`core.wgsl.ts`) | the 25 fields of 0.2, then `wz` (16 bits) and `im` (2); `zilog-nmos` adds `q` (8) | new work |
-| `'0.2'` (`coreVersion` 0.2.0) | the frozen 0.2 generator (`core-0.2.wgsl.ts`); with every hook off the 0.2.0 core **byte for byte** (`Z80_CORE_WGSL`) | the 25 fields of 0.2.0 | registered work, Algocell's executors, the presets |
+| `'0.2'` (`coreVersion` 0.2.0) | the frozen 0.2 generator (`core-0.2.wgsl.ts`); with every hook off the 0.2.0 core **byte for byte** (`Z80_CORE_WGSL`) | the 25 fields of 0.2.0 | registered work, Algocell's executors, the machine presets |
 
 A Z80 machine **names its compat**: through 0.3.x the descriptor has no default (`compatRequired`), so a build that
-names none fails, as a world without a stack or a budget does; the presets state `'0.2'` (see Core selection). The
+names none fails, as a world without a stack or a budget does; the machine presets name `'0.2'` (see Core selection). The
 manifest reports the semantics that ran: `core.compat`, and `core.coreVersion` 0.2.0 under `'0.2'` (the package that
 generated the shader stays in `zilion`).
 
@@ -196,13 +196,19 @@ that the prefix-resolution anchor is unchanged:
 `buildMachine({ core: { isa, variant?, compat?, params? }, world, … })`, returns
 `{ wgsl, manifest }` (`src/world/spec.ts`, `src/world/build.ts`).
 
-**Core selection.** `variant` defaults to the descriptor's; `compat` is taken from the core selection, else from the
-world (`world.compat`, the semantics the world was written for, per ISA id: `{ z80: '0.2' }`; entries for other ISAs
-are ignored), else the descriptor's first entry, except for a core with `compatRequired` (the Z80 through 0.3.x),
-whose build then fails with a message naming the field and its choices. A selection that names a compat takes
-precedence over the world's, so a study can rerun a preset world under the fixes by naming `'0.3'`. The manifest
-records the world as given (with its `compat`), the resolved `core.compat` and the `core.coreVersion` of that
-semantics (`coreVersionFor`).
+**Core selection.** The core and its semantics belong to the machine, never to the world: a world spec carries no
+core choice, so one world runs unchanged on every ISA. `variant` defaults to the descriptor's; `compat` to the
+descriptor's first entry, except for a core with `compatRequired` (the Z80 through 0.3.x), whose build fails without
+one, with a message naming the field and its choices. The manifest records the resolved `core.compat`, `core.variant`
+and the `core.coreVersion` of the semantics that ran (`coreVersionFor`); the package that generated the shader is in
+`zilion`.
+
+**Machine presets** (`src/machine-presets.ts`) pair a world preset with the core selection it ran with:
+`compat02Machine({ memBytes, steps, registers? })` and `algocellPairMachine({ L, P, steps })` return
+`{ core: { isa: z80, compat: '0.2' }, world }`, ready for `buildMachine` or `engine.machine`. Add a condition by
+spreading the world (`{ ...m, world: { ...m.world, halting } }`), or rerun the same world under the fixes with
+`{ ...m, core: { ...m.core, compat: '0.3' } }`. The JSON form of a machine (for `scripts/export-machines.mjs`) is the
+same with the ISA named by id: `{ "name", "core": { "isa": "z80", "compat": "0.2" }, "world" }`.
 
 ### Memory models and the seam
 
@@ -253,11 +259,12 @@ or `{ notApplicable: 'no stack', given: <init.stack as given> }` on an ISA witho
 `{ notApplicable: 'per-lane state' }`. The generated `zil_init_state` carries the same as a comment, and the world as
 given (with its `init.stack`) is in `manifest.world` and its hash.
 
-**Presets** (`src/world/presets.ts`) write the old worlds out with both conventions explicit, and the Z80 semantics
-they were written for (`compat: { z80: '0.2' }`, see Core selection below): `compat02World({ memBytes, steps,
-registers? })` is 0.2's `Zilion.run` world (mask memory, `topAliases: 'lastByte'`, which is 0.2's SP = 0xFFFF, or
-per-lane registers), and `algocellPairWorld({ L, P, steps })` is Algocell's pair (tapes A and B on a ring of P,
-`topAliases: 'lastByte'`, a steps budget, writes counted).
+**World presets** (`src/world/presets.ts`) write the old worlds out with both conventions explicit:
+`compat02World({ memBytes, steps, registers? })` is 0.2's `Zilion.run` world (mask memory, `topAliases: 'lastByte'`,
+which is 0.2's SP = 0xFFFF, or per-lane registers), and `algocellPairWorld({ L, P, steps })` is Algocell's pair (tapes A
+and B on a ring of P, `topAliases: 'lastByte'`, a steps budget, writes counted). They are worlds only; the machines
+that ran in them (the Z80 with compat `'0.2'`) are the machine presets `compat02Machine` and `algocellPairMachine`
+(see Core selection above).
 
 ### Budgets
 
@@ -392,8 +399,12 @@ Schema 2 changed the record (`trapCause` at word 2 moved every later field by on
 padded worlds) and the params (`stepBase` and `resume` at bytes 16..31, so the ablation table moved from 16 to 32).
 `test/world/gpu_runner.py` is a complete Python host that reads nothing else. `legacyMachine(memBytes)`
 describes 0.2's `buildComputeShader` kernel the same way. Codegen stays in TypeScript:
-`node scripts/export-machines.mjs worlds.json --out shaders/` writes `<name>.wgsl` and `<name>.manifest.json`
-for each named spec, and `--check` verifies files already on disk (for CI).
+`node scripts/export-machines.mjs machines.json --out shaders/` writes `<name>.wgsl` and `<name>.manifest.json`
+for each machine of an array of `{ "name", "core": { "isa", "compat"?, "variant"?, "params"? }, "world", "mode"?,
+"workgroupSize"?, "bindingNames"? }` (the Z80 needs `core.compat`), and `--check` verifies files already on disk
+(for CI). `core.isa` is any core id in the build: the script finds the descriptors in `dist/cores/*/index.js` and the
+package root by id (`--list-cores`); skeleton cores export with a note. The earlier object-by-name form, with the
+`isa` shorthand, is still read.
 
 ## L2: the engine
 
@@ -437,6 +448,7 @@ b.encode(encoder, { budget: 64, stepBase: 128, resume: true });   // continue th
 | Command | What |
 |---|---|
 | `npm run check:bytes` | byte identity of the 0.2 configuration against the v0.2.0 tag (built from source) and the published 0.2.0 package; the compat `'0.2'` text of all 16 hook combinations against their recorded SHA-256; anchors in all 48 core texts (3 semantics × 16 hook combinations) |
+| `npm run test:export` | `scripts/export-machines.mjs` end to end (no GPU): the canonical spec shape, cores found by id (z80, m6502, bff), byte-identity with the machine presets, `--check`, the errors (a Z80 without compat, an unknown core, an undeclared param, a duplicate name), the earlier shape |
 | `npm run test:compat` | design §5.5: compat `'0.2'` reproduces outputs recorded from the 0.2.0 core on 100,000 random programs at each of P = 32, 38, 40, 64, 100, 128 (per-chunk SHA-256 digests, `test/world/compat-0.2.0.json`); `--compat 0.3` is its negative control |
 | `npm run test:unit` | address math, hash, SHA-256, validation, hook minimality, manifest invariants, chunk planner, packing, ISA neutrality; the required budget and stack and their error messages, presets, `firstPushAt` mappings, the trap-cause plumbing, core-param validation and constants (test-only core), the step base and resumability |
 | `npm run test:world` | the world spec on the GPU through `gpu_runner.py` (Python wgpu): hand-computed cases for odd and padded rings, the seam, stack conventions (`firstPushAt` on the Z80 and the 6502), budgets, halt and trap policies with trap causes, dials, ablation, maps, init, io hooks; ring = mask, hook neutrality, library = kernel, chunk invariance, 0.2 kernel = the `compat:'0.2'` preset; resumable runs (k = 1, 2, 7 dispatches = one, Z80 and BFF, with a negative control; the step base across 2³²; a hand-built record; library `zil_resume`); core params on a test-only core; the 6502 and BFF skeletons and one world on three ISAs; the Z80 semantics (`test/world/cases_z80.mjs`: §5.2's R programs and BIT n,(HL) from WZ under both compats, the state record per selection, the Q latch, LDIR repeat flags, `z80_run`/`z80_reset`/frozen host halts in a raw host, every hook combination of every semantics compiled and run, resumed runs keeping WZ and Q). Set `ZILION_PYTHON` to an interpreter with `wgpu` and `numpy`. |
@@ -472,8 +484,9 @@ The first architecture review left six questions open. Decided as follows; all s
    as giving the stack (both given: convention first, both recorded in `manifest.init.stack`); a stackless ISA
    accepts `init.stack`, does not apply it and lists it as `notApplicable: 'no stack'`; the defaults outside this
    decision are listed under "Defaults that remain". Extended to the Z80's semantics (2026-10-10, with the Z80 fixes):
-   a Z80 machine names its compat, or runs a world that states it (the presets state `'0.2'`), through 0.3.x; the
-   manifest reports the version of the semantics that ran (see Core selection and The Z80 core).
+   a Z80 machine names its compat in its core selection through 0.3.x (worlds carry no core semantics; the machine
+   presets name `'0.2'`); the manifest reports the version of the semantics that ran (see Core selection and The Z80
+   core).
 4. **Core parameters are a contract feature, not a BFF special case.** A descriptor may declare `params`
    (name → `{ type: 'u32' | 'bool' | 'enum', default, values? }`); a world selects them with
    `core: { isa, params }`; the builder emits them as WGSL constants ahead of the core text and records them in
@@ -513,7 +526,7 @@ manifest (the world as given, `core`, `init`, `budget`, `record`, the options ha
 | trap dial `salt` | 0 | |
 | `world.ablation` | none | |
 | `variant` | `isa.defaultVariant`: Z80 `classic`, 6502 `nmos`, BFF `ascii` | recorded in `manifest.core` |
-| `compat` | the world's `compat[isa.id]` if it states one, else `isa.compat[0]` (6502 and BFF `'skeleton'`). **Exception: the Z80 has no default through 0.3.x** (`compatRequired`): a Z80 machine that names none, directly or through its world, fails to build | recorded in `manifest.core`, with the version of the semantics that ran (`coreVersion`) |
+| `compat` | `isa.compat[0]` (6502 and BFF `'skeleton'`). **Exception: the Z80 has no default through 0.3.x** (`compatRequired`): a Z80 machine whose core selection names none fails to build | recorded in `manifest.core`, with the version of the semantics that ran (`coreVersion`) |
 | core `params` | each declared parameter's `default` | recorded in `manifest.core.params` |
 | `mode` | `'kernel'` | |
 | `workgroupSize` | 64 | |

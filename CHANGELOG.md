@@ -71,11 +71,15 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
   `stateFor({ variant, compat })` (the state record per selection), used by the builder.
 - *Fixed:* the 0.2 kernel's manifest (`legacyMachine`) hashes the core it embeds (`Z80_CORE_WGSL`) and reports
   `coreVersion` 0.2.0.
-- *Breaking (0.3-dev API), follow-up decisions:* a Z80 machine must name its compat (`'0.3'` or `'0.2'`) in the core
-  selection or run a world that states it; there is no default through 0.3.x (descriptor `compatRequired`). Worlds
-  may state the semantics they were written for (`world.compat: { z80: '0.2' }`); the presets `compat02World` and
-  `algocellPairWorld` state `'0.2'`, and a core selection that names a compat takes precedence. Manifests report the
-  semantics that ran: `core.coreVersion` is 0.2.0 under compat `'0.2'` (descriptor `coreVersionFor`). A host halt in
+- *Breaking (0.3-dev API), follow-up decisions:* a Z80 machine must name its compat (`'0.3'` or `'0.2'`) in its core
+  selection; there is no default through 0.3.x (descriptor `compatRequired`). Worlds carry no core semantics: the
+  world presets stay worlds, and the machine presets `compat02Machine` and `algocellPairMachine` return
+  `{ core: { isa: z80, compat: '0.2' }, world }`. Manifests report the semantics that ran: `core.coreVersion` is 0.2.0
+  under compat `'0.2'` (descriptor `coreVersionFor`).
+- `scripts/export-machines.mjs` takes an array of `{ name, core: { isa, compat?, variant?, params? }, world, … }`
+  (the earlier object-by-name form and the `isa` shorthand still work), finds every core of the build by id
+  (z80, m6502, bff; `--list-cores`), and names the machine in every error (a Z80 without `core.compat` among them).
+  Tested end to end by `npm run test:export`. A host halt in
   `zilog-nmos` leaves Q as it was (the halting step executes no instruction); a skipped unit clears it.
 - *Validation:* SingleStepTests/z80 (1,604,000 tests) plus 384 wasted-prefix vectors and 86 R/WZ probes: 0
   unexpected with only the rules Q, Q-XY (not modelled by `classic`) and EI-P (no interrupts); `zilog-nmos`: 0 unexpected with EI-P only; `--compat 0.2` reproduces the

@@ -175,17 +175,11 @@ export function buildMachine(spec: MachineSpec): BuiltMachine {
   if (!Number.isInteger(wg) || wg < 1 || wg > 1024) fail(`workgroupSize must be an integer in 1..1024 (got ${wg})`);
   const variant = sel.variant ?? isa.defaultVariant;
   if (!(variant in isa.variants)) fail(`${isa.id} has no variant '${variant}'`);
-  const worldCompat = world.compat;
-  if (worldCompat !== undefined && (worldCompat === null || typeof worldCompat !== "object" || Array.isArray(worldCompat) ||
-    Object.values(worldCompat).some((v) => typeof v !== "string"))) {
-    fail("world.compat must map ISA ids to compat names, e.g. { z80: '0.2' }");
-  }
-  const named = sel.compat ?? worldCompat?.[isa.id];
-  if (named === undefined && isa.compatRequired) {
+  if (sel.compat === undefined && isa.compatRequired) {
     fail(`${isa.id} needs its compat named (no default): give compat ${isa.compat.map((c) => `'${c}'`).join(" or ")} in the ` +
-      `core selection (core: { isa, compat } or compat beside isa), or a world that states it (world.compat.${isa.id}, as the presets do)`);
+      `core selection (core: { isa, compat }, or compat beside isa)`);
   }
-  const compat = named ?? isa.compat[0];
+  const compat = sel.compat ?? isa.compat[0];
   if (!isa.compat.includes(compat)) fail(`${isa.id} has no compat '${compat}' (known: ${isa.compat.join(", ")})`);
   const coreVersion = isa.coreVersionFor?.({ variant, compat }) ?? isa.coreVersion;
   const coreParams: Record<string, CoreParamValue> = attempt(() => resolveCoreParams(isa, sel.params));

@@ -62,6 +62,8 @@ export {
   compat02World,
   algocellPairWorld,
 } from "./world/index.js";
+// Machine presets: a world preset with the core selection it ran with (the Z80 names its compat)
+export { compat02Machine, algocellPairMachine, machinePresets } from "./machine-presets.js";
 export type {
   BuiltMachine,
   WorldSpec,

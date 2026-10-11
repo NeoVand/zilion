@@ -613,7 +613,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       });
       return [
         addJob(Z.legacyMachine(64), legacyLanes, { budget: 100 }),
-        addJob({ isa: Z.z80, compat: "0.2", world: Z.compat02World({ memBytes: 64, steps: 100, registers: "perLane" }) }, worldLanes),
+        addJob(Z.compat02Machine({ memBytes: 64, steps: 100, registers: "perLane" }), worldLanes),
       ];
     },
     check: ([a, b]) => {

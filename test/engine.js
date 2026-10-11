@@ -315,7 +315,7 @@ await test("engine: a world with a broken raw hook rejects with the offending li
 
 await test("0.2 facade = engine mask world with per-lane state (2048 random programs, random registers)", async () => {
   const z = await Z.Zilion.create({ memBytes: 64, device: engine.device });
-  const m = await engine.machine({ isa: Z.z80, compat: "0.2", world: Z.compat02World({ memBytes: 64, steps: 100, registers: "perLane" }) });
+  const m = await engine.machine(Z.compat02Machine({ memBytes: 64, steps: 100, registers: "perLane" }));
   const n = 2048;
   const progs = Array.from({ length: n }, (_, i) => randomBytes(64, 1000 + i));
   const rnd = randomBytes(n * 24, 3);
