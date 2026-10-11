@@ -48,6 +48,18 @@ export { coreParamConstant, resolveCoreParams, checkCoreParamDecls } from "./con
 export { ringPos, highestAlias, lowestAlias, seamOffset } from "./contract/address.js";
 export { z80, z80CoreText } from "./cores/z80/index.js";
 export type { Z80Hooks, Z80Semantics } from "./cores/z80/index.js";
+// The NMOS 6502 (status experimental: complete and validated per instruction; see docs/ARCHITECTURE.md)
+export {
+  m6502,
+  m6502CoreText,
+  m6502FirstPushAt,
+  M6502_CORE_WGSL,
+  M6502_DECODE,
+  M6502_JAM_OPCODES,
+  M6502_OPCODES,
+  M6502_UNSTABLE,
+} from "./cores/m6502/index.js";
+export type { M6502Hooks, M6502Mode } from "./cores/m6502/index.js";
 
 // L1: worlds and the machine builder
 export {

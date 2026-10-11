@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as Z from "../dist/index.js";
 import { m6502 } from "../dist/cores/m6502/index.js";
+import * as M6502 from "../dist/cores/m6502/index.js";
 import { bff } from "../dist/cores/bff/index.js";
 import { fakeCore } from "./world/fake_core.mjs";
 
@@ -308,7 +309,7 @@ test("the Z80 needs its compat named in the core selection (no default through 0
   eq([m({ core: { isa: Z.z80, compat: "0.2" }, world: w }).compat, m({ core: { isa: Z.z80, compat: "0.2" }, world: w }).coreVersion], ["0.2", "0.2.0"]);
   if (!/\/\/ core {4}z80 0\.2\.0 \(/.test(Z.buildMachine({ core: { isa: Z.z80, compat: "0.2" }, world: w }).wgsl)) throw new Error("shader header does not name 0.2.0");
   // other ISAs keep their own default
-  eq(Z.buildMachine({ isa: m6502, world: w }).manifest.core.compat, "skeleton");
+  eq(Z.buildMachine({ isa: m6502, world: w }).manifest.core.compat, "0.3"); // the full 6502 core's own default (no compat required)
 });
 
 test("machine presets: a world preset with the core selection it ran with (the Z80, compat '0.2')", () => {
@@ -419,8 +420,11 @@ test("trapCause: a record word after haltReason, codes in the manifest, from eac
     /conventions\.firstPushAt must be a function, or null/);
   throws(() => Z.buildMachine({ isa: { ...Z.z80, conventions: { ...Z.z80.conventions, firstPushAt: null } }, compat: "0.3", world: ring(32) }),
     /must both be functions or both be null/);
-  // every trap cause a skeleton raises sets its state field before halting (both with and without the trap hook)
-  for (const [core, causes] of [[m6502, ["ILLEGAL", "UNIMPLEMENTED"]], [bff, ["BOUNDS", "UNIMPLEMENTED"]]]) {
+  // every trap cause a core raises sets its state field before halting (both with and without the trap hook); the
+  // full 6502 raises only 'illegal' (JAM): no opcode is left unimplemented
+  eq(Object.keys(m6502.conventions.traps), ["illegal"]);
+  for (const trap of [false, true]) if (m6502.wgsl({ hooks: { trap } }).includes("ZIL_TRAP_UNIMPLEMENTED")) throw new Error("m6502 raises 'unimplemented'");
+  for (const [core, causes] of [[m6502, ["ILLEGAL"]], [bff, ["BOUNDS", "UNIMPLEMENTED"]]]) {
     for (const trap of [false, true]) {
       const text = core.wgsl({ hooks: { trap } });
       for (const c of causes) if (!text.includes(`_trap = ZIL_TRAP_${c};`)) throw new Error(`${core.id} (trap hook ${trap}): ${c} does not set the cause`);
@@ -529,6 +533,37 @@ test("resumable machines: a steps budget, the state and the memory stored; the p
   eq(lib({ memory: "m", out: "o" }).resumable, true);
   if (!lib({ memory: "m", out: "o" }).functions.includes("zil_resume(lane, seed, step_base: vec2<u32>, o)")) throw new Error("zil_resume not listed");
   eq(lib({ memory: "m" }).resumable, false);
+});
+
+// --- the 6502 is exported (experimental) ----------------------------------------------------------------------
+test("6502 exports: the root and the ./m6502 subpath give the same descriptor; the package ships it", () => {
+  eq(Z.m6502 === m6502, true);
+  eq(Z.m6502.status, "experimental");
+  eq(typeof Z.m6502CoreText, "function");
+  eq(Z.m6502FirstPushAt(32, 31), { s: 0xff });
+  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  eq(pkg.files.includes("!dist/cores/m6502"), false);
+  eq(pkg.exports["./m6502"].import, "./dist/cores/m6502/index.js");
+});
+
+// --- the 6502 opcode table ----------------------------------------------------------------------------------------
+test("6502 table: 151 documented, 85 stable undocumented, 8 unstable, 12 JAM; decode words agree with the table", () => {
+  const t = m6502.table();
+  eq(t.length, 256);
+  const count = {};
+  for (const e of t) count[e.families[0]] = (count[e.families[0]] ?? 0) + 1;
+  eq(Object.entries(count).sort(), [["documented", 151], ["jam", 12], ["undocumented", 85], ["unstable", 8]]);
+  eq(t.filter((e) => e.families[0] === "jam").map((e) => e.key), [0x02, 0x12, 0x22, 0x32, 0x42, 0x52, 0x62, 0x72, 0x92, 0xb2, 0xd2, 0xf2]);
+  eq(t.filter((e) => e.families[0] === "unstable").map((e) => e.key), [0x8b, 0x93, 0x9b, 0x9c, 0x9e, 0x9f, 0xab, 0xbb]);
+  eq([t[0x00], t[0x20], t[0x6c], t[0xea], t[0xeb], t[0x1a]].map((e) => `${e.mnemonic}/${e.length}/${e.families[0]}`),
+    ["BRK/2/documented", "JSR/3/documented", "JMP/3/documented", "NOP/1/documented", "SBC/2/undocumented", "NOP/1/undocumented"]);
+  // the decode word: addressing mode in bits 0-3, a read for every memory-operand load, two writes only for RMW
+  const { M6502_DECODE } = M6502;
+  eq(M6502_DECODE[0xad] & 0x1f, 0x15); // LDA abs: abs (5) + READ
+  eq(M6502_DECODE[0xee] & 0x3f, 0x35); // INC abs: abs + READ + RMW
+  eq(M6502_DECODE[0x9d] & 0xff, 0x86); // STA abs,X: abs,X (6) + STORE, no READ
+  eq(M6502_DECODE[0xea], 0);           // NOP: nothing
+  eq((M6502_DECODE[0x02] >> 20) & 15, 12); // JAM: control class 12
 });
 
 // --- engine chunk planner ---------------------------------------------------------------------------------------

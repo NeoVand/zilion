@@ -90,6 +90,29 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
   latch; `npm run test:compat` (design §5.5: 600,000 random programs against outputs recorded from 0.2.0);
   `test/world/cases_z80.mjs`.
 
+**The NMOS 6502 core (branch `m2/6502`; docs/ARCHITECTURE.md, The 6502 core)**
+
+- `src/cores/m6502/`: all 256 opcodes (151 documented, 85 stable undocumented, 8 unstable, 12 JAM), core 0.3.0,
+  status `experimental`, variant `nmos`, compat `'0.3'`. NMOS decimal mode, JMP ($xxFF), zero-page and pointer
+  wraps in page 0, B on PHP/BRK, BRK's vector at 0xFFFE read after its pushes, JSR's high operand byte fetched after
+  its pushes, read-modify-write instructions writing the old value then the new one (two writes in `writeCounts`),
+  the unstable opcodes with the vectors' constants (ANE and LXA magic 0xEE; SHA/SHX/SHY/TAS `& (H + 1)`), JAM through
+  trap `illegal`. World reset P = 0x20 (was 0x24 in the skeleton). `m6502.table()`: mnemonic, length and family.
+- Validated against SingleStepTests/65x02 `6502/v1`: 2,560,000 tests, zero divergences, zero expected-divergence
+  rules (`test/baselines/6502-v0.3.0-dev.md`). 18 planted 6502 bugs in the harness self-test, all caught.
+- Harness: the 6502 adapter (`tools/zt.py vectors 6502`), an optional bus-write log compared against the vectors'
+  `cycles` (the `bus` field), `npm run test:vectors:6502`, `ZILION_6502_VECTORS`. With the bus-write log off the Z80
+  test-host WGSL is unchanged byte for byte, and so are the three Z80 ledgers (0.3, zilog-nmos, compat 0.2); a
+  regenerated Z80 Markdown report gains one line listing the convention mappings applied (HALT-PC).
+- Decimal mode exhaustively: Bruce Clark's published NMOS algorithm (6502.org, "Decimal Mode", Appendix A),
+  transcribed step by step, agrees with all 310,000 ADC/SBC/RRA/ISC vector tests, and the core agrees with it on all
+  1,310,720 inputs of ADC #, SBC # (E9, EB), RRA zp and ISC zp in both modes (`tools/zt.py decimal6502`, a gate of
+  `npm run test:harness`; `test/baselines/6502-decimal-clark.md`).
+- Exported: `m6502`, `m6502CoreText`, `m6502FirstPushAt`, `M6502_*` from the root and `@neovand/zilion/m6502`; the
+  package ships `dist/cores/m6502` (status experimental).
+- `test/world/cases_m6502.mjs`: the 6502 on rings of 32, 33 and 64 bytes, with a self-copier under the soup's init.
+- `test/bench/bench-cores.mjs`: Z80 and 6502 throughput on random 32-byte pairs.
+
 **Fixed (0.2 API, same results)**
 
 - `Zilion.run` no longer fails above 4,194,240 programs (the dispatch limit) or 128 MiB of lane memory: batches

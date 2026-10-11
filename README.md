@@ -228,8 +228,9 @@ const r2 = await m.run(r.memory, { seed: 1, ablation: masks, budget: 64, stepBas
   `test/world/gpu_runner.py` is a complete wgpu-py host driven only by the manifest.
 - **Presets.** `algocellPairWorld` and `compat02World` are worlds; `algocellPairMachine` and `compat02Machine` are the
   machines that ran in them (the Z80 with compat `'0.2'`): `buildMachine(algocellPairMachine({ L: 16, P: 32, steps: 128 }))`.
-- **More than the Z80.** The contract is validated against two deliberately different skeleton cores, a 6502 and
-  BFF; see [docs/ADDING_A_CORE.md](docs/ADDING_A_CORE.md). They are not exported and not for results.
+- **More than the Z80.** A full NMOS 6502 core (every opcode, validated against 2,560,000 SingleStepTests vectors;
+  experimental; `@neovand/zilion/m6502`) and a BFF skeleton run in the same worlds; see
+  [docs/ADDING_A_CORE.md](docs/ADDING_A_CORE.md).
 
 The design and its layers are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

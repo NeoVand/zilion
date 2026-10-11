@@ -3,7 +3,8 @@
 A core is WGSL text plus an `IsaCore` descriptor (`src/contract/isa.ts`). The world (`buildMachine`) and the
 engine use nothing else, so a core that satisfies this checklist runs in every world: rings of any size,
 padded pairs, budgets, dials, ablation, fetch and start maps, the Python host. Read `docs/ARCHITECTURE.md`
-first. The two skeletons in `src/cores/m6502/` and `src/cores/bff/` are short, complete examples of the shape.
+first. The BFF skeleton (`src/cores/bff/`) is a short, complete example of the shape; the 6502 (`src/cores/m6502/`)
+is a full core, validated per instruction, and the section on it below lists what that took.
 
 ## Checklist
 
@@ -43,7 +44,19 @@ first. The two skeletons in `src/cores/m6502/` and `src/cores/bff/` are short, c
   `ZIL_PARAM_<NAME>` (and `ZIL_PARAM_<NAME>_<VALUE>` for enum values; see docs/ARCHITECTURE.md, Core parameters).
   They are compile-time constants, so branching on them costs nothing. Never turn one into a uniform.
 - Use the prelude constants (`ZIL_*`), never their numeric values. Stay inside the WGSL subset a CPU twin can
-  transpile (u32/i32/bool, `select`, `switch`, `if`/`for`/`loop`, private scalars and arrays).
+  transpile (u32/i32/bool, `select`, `switch`, `if`/`for`/`loop`, private scalars and arrays, module-scope
+  `const` arrays).
+- **Keep the order of bus accesses inside an instruction.** On a small ring many addresses alias, so the order of
+  one instruction's fetches, reads and writes is observable (a 6502 JSR whose push lands on its own high operand
+  byte; a BRK whose pushes land on its vector). Do what the chip does, and write a world test for each such case:
+  per-instruction vectors use 64 KiB of distinct addresses and cannot see it.
+- **Make every write the chip makes**, including writes whose value does not survive (the 6502's read-modify-write
+  writes the old value, then the new one): worlds count writes. Dummy *reads* can be left out, because a read
+  has no effect in a world.
+- **Mind divergence.** Random programs put a different opcode on nearly every lane, and a `switch` over opcodes
+  runs its cases one after another for a SIMD group. A step written as a fixed sequence of short phases (operands,
+  address, read, ALU, store, control) driven by a per-opcode decode word was 2.7 times faster on random code for
+  the 6502 than a switch per opcode. Measure with `test/bench/bench-cores.mjs`.
 
 ### 2. Descriptor
 
@@ -74,39 +87,41 @@ existing cause fits; the list is shared by every ISA.
   expectations, including the trap cause of every trap path. Add the core to the `firstPushAt` case (the first
   push lands on the last byte on rings of 32 and 33 bytes and on a padded pair) and to the "one world, three ISAs"
   case, and run a split run (`stepChunks`, k = 1, 2, 7) against one dispatch: it catches state the record misses.
-- **Conformance vectors** (separate work item: the generic per-instruction runner): data-only vectors with a
-  divergence ledger; the state record and `zil_load_state`/`zil_store_state` are generated from the
-  descriptor, so the adapter only maps field names.
+- **Conformance vectors** through the generic per-instruction runner (`tools/ztest/vectors/`, docs/TESTING.md):
+  an adapter maps the vector's fields onto the core's variables, and the ledger must end with zero unexpected
+  divergences. When the vectors record bus cycles, set the adapter's `write_cap` so the sequence of writes is
+  compared too (the `bus` field), not only the final memory. A halt the vectors do not encode can be given an
+  expectation per opcode (the 6502 adapter's `halted`). Then plant bugs in the core (the self-test's mutants) and
+  check that each one is caught.
 - **Conventions document**: step, reset state, stack-top rule, halting, illegal opcodes and traps, skip
   semantics, unstable opcodes.
 
-## What the 6502 (NMOS) still needs
+## The 6502 (NMOS): what a full core took
 
-The skeleton runs LDA/LDX/LDY #, STA zp/abs, INX, PHA, PLA, JMP abs, NOP, BRK and the 12 JAM opcodes, and traps
-`unimplemented` on everything else. Its tests pass on the GPU, including the page-1 stack convention, a BRK
-vector read through positions 65534 mod P and 65535 mod P, and JAM re-policied as a no-op. The contract needed
-**no change** for it. A full core needs:
+The skeleton became a full core (all 256 opcodes; `test/baselines/6502-v0.3.0-dev.md`: 2,560,000 SingleStepTests
+vectors, zero divergences, zero expected-divergence rules) with **no change to the contract** beyond decisions 1
+and 2 (`firstPushAt` and the `trap` field), which the skeleton had already prompted. What it needed:
 
-1. **The instruction set**: all 151 documented opcodes and every addressing mode, with the NMOS address
-   quirks inside the core: zero-page indexed modes and the `(zp,X)` / `(zp),Y` pointer fetch wrap within page 0;
-   `JMP ($xxFF)` reads its high byte from `$xx00`; page crossings change no result. Decimal-mode ADC/SBC with
-   NMOS flag behaviour. `PHP`/`BRK` push B and bit 5 set; `PLP`/`RTI` ignore them.
-2. **Undocumented opcodes**: the stable ones (LAX, SAX, DCP, ISC, SLO, RLA, SRE, RRA, ANC, ALR, ARR, SBX, the
-   multi-byte NOPs) and the unstable ones (ANE/XAA, LXA, SHA, SHX, SHY, TAS) with their magic constant pinned as
-   a named variant; the vectors decide.
-3. **A `cmos` variant** (65C02): undefined opcodes are NOPs of defined lengths (trap `illegal` as-chip `ignore`
-   with the right length), BRK clears D, the `JMP ($xxFF)` fix, the new opcodes.
-4. **Conformance**: SingleStepTests/65x02 through the generic vector runner (needs a `sparse` memory model,
-   not in this milestone; state I/O already comes from the descriptor).
-5. **Points found by the skeleton**:
-   - *Stack-top meaning* (resolved, decision 1): `init.stack.firstPushAt: t` makes the first push land at t on
-     every ISA; the 6502's `m6502FirstPushAt` is the same S as its `stackTop`, the Z80's is one above. The full
-     core keeps `m6502FirstPushAt` as is.
-   - *Halt-cause detail* (resolved, decision 2): the record's `trapCause` says `illegal` for JAM and
-     `unimplemented` for an opcode the skeleton lacks. The full core keeps the `trap` state field and sets it in
-     every trap path (`symbols.trapCause: "m6502_trap"`).
-   - *Decimal mode* is a candidate core parameter (decision 4).
-   - *Cycle budgets* (M4) need a per-opcode table including page-crossing penalties.
+1. **The harness**, not the contract: a bus-write log in the vector host (the reference's `cycles` writes against
+   every `mem_write`, in order: the only way to see a read-modify-write's old-value write, which leaves the final
+   memory unchanged), an expectation for the halt state per opcode (JAM halts, nothing else does), and a JAM-PC
+   mapping (Zilion parks PC on JAM; the vectors leave it one past), counted in the ledger.
+2. **The unstable constants from the vectors**: ANE and LXA magic 0xEE, the unique fit over each file's 10,000
+   tests; SHA/SHX/SHY/TAS with `& (H + 1)` and the high-byte replacement on a page crossing. They are constants of
+   the `nmos` variant (`M6502_UNSTABLE`).
+3. **World tests for what vectors cannot see**: the bus order of JSR and BRK on small rings, the page-1 stack and
+   zero-page wraps that only show on rings whose size does not divide 256, the vector bytes at positions 65534 and
+   65535 mod P, write counts of read-modify-write instructions, and a self-copier under the soup's init.
+4. **A structure for random code** (see Mind divergence above): 2.7 times faster.
+
+Still open for the 6502:
+
+- **A `cmos` variant** (65C02): undefined opcodes are NOPs of defined lengths (trap `illegal` as-chip `ignore` with
+  the right length), BRK clears D, the `JMP ($xxFF)` fix, the new opcodes. SingleStepTests has the vectors.
+- **Core parameters** (decision 4): decimal mode on/off (the 2A03 has none) and the unstable constants are natural
+  `params`; today they are fixed in the `nmos` variant.
+- **Cycle budgets** (M4) need a per-opcode cycle table including page-crossing penalties; the vectors' `cycles`
+  lists give it.
 
 ## What BFF still needs
 

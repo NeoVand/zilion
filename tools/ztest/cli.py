@@ -34,7 +34,7 @@ def main(argv: list[str]) -> int:
 
     v = sub.add_parser("vectors", help="run per-instruction vectors and write the divergence ledger")
     _common(v)
-    v.add_argument("isa", choices=["z80"])
+    v.add_argument("isa", choices=["z80", "6502"])
     v.add_argument("dirs", type=Path, nargs="+", help="vector directories (SingleStepTests layout, .json or .json.gz)")
     v.add_argument("--files", nargs="*", help="only these opcode keys (fnmatch patterns, e.g. 'ed b?' 'cb 4?')")
     v.add_argument("--test", nargs="*", help="only these test names (e.g. 'ed 70 0123')")
@@ -58,15 +58,35 @@ def main(argv: list[str]) -> int:
     t = sub.add_parser("selftest", help="harness self-tests on the GPU")
     _common(t)
     t.add_argument("--vectors", type=Path, help="Z80 vector directory for the mutant, invariance and determinism tests")
+    t.add_argument("--vectors-6502", type=Path, help="6502 vector directory for the 6502 mutant, invariance and determinism tests")
     t.add_argument("--limit-per-file", type=int, default=50, help="tests per file for invariance and determinism")
+
+    d = sub.add_parser("decimal6502", help="the 6502's decimal mode against Clark's published NMOS algorithm, exhaustively")
+    _common(d)
+    d.add_argument("vectors", type=Path, help="SingleStepTests 6502/v1 directory (step 1 checks the transcription against it)")
+    d.add_argument("--md", type=Path, help="write the report here (test/baselines/6502-decimal-clark.md)")
+    d.add_argument("--json", type=Path, help="write the results as JSON here")
 
     a = ap.parse_args(argv)
     try:
+        if a.cmd == "decimal6502":
+            from . import decimal6502
+            from .vectors.ledger import canonical_json
+
+            art = artifacts.load(a.wgsl_dir, do_emit=not a.no_emit)
+            ok, doc = decimal6502.run(art, a.vectors)
+            if a.md:
+                a.md.parent.mkdir(parents=True, exist_ok=True)
+                a.md.write_text(decimal6502.markdown(doc), encoding="utf-8")
+            if a.json:
+                a.json.parent.mkdir(parents=True, exist_ok=True)
+                a.json.write_text(canonical_json(doc), encoding="utf-8")
+            return 0 if ok else 1
         if a.cmd == "selftest":
             from . import selftest
 
             art = artifacts.load(a.wgsl_dir, do_emit=not a.no_emit)
-            return selftest.run(art, a.vectors, a.limit_per_file)
+            return selftest.run(art, a.vectors, a.limit_per_file, vectors_6502=a.vectors_6502)
         if a.cmd == "conformance":
             from . import conformance
 
