@@ -57,14 +57,15 @@ const out = join(dir, "out");
 test("canonical specs: z80 (compat 0.2 and 0.3 zilog-nmos), m6502 and bff export; variant and compat pass through", () => {
   const r = run(canonical, "--out", out);
   if (r.status !== 0) throw new Error(r.stderr);
-  if (!/note {2}m6502_pair: m6502 is a skeleton core/.test(r.stderr) || !/note {2}bff_pair: bff is a skeleton core/.test(r.stderr)) {
-    throw new Error(`no skeleton notes: ${r.stderr}`);
+  // the full 6502 core (experimental) exports without a note; the BFF skeleton is flagged as not for results
+  if (/m6502_pair: m6502 is a skeleton core/.test(r.stderr) || !/note {2}bff_pair: bff is a skeleton core/.test(r.stderr)) {
+    throw new Error(`skeleton notes wrong: ${r.stderr}`);
   }
   const man = (n) => JSON.parse(read(out, `${n}.manifest.json`)).core;
   const pick = (c) => [c.id, c.compat, c.variant, c.coreVersion];
   const got = canonical.map((s) => pick(man(s.name)));
   const want = [["z80", "0.2", "classic", "0.2.0"], ["z80", "0.3", "zilog-nmos", "0.3.0"],
-    ["m6502", "skeleton", "nmos", "0.0.0-skeleton"], ["bff", "skeleton", "ascii", "0.0.0-skeleton"]];
+    ["m6502", "0.3", "nmos", "0.3.0"], ["bff", "skeleton", "ascii", "0.0.0-skeleton"]];
   if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`${JSON.stringify(got)} != ${JSON.stringify(want)}`);
 });
 
