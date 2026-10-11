@@ -1,7 +1,7 @@
 {
  "isa": "z80",
  "core": "@neovand/zilion 0.3.0 Z80, compat '0.3', variant 'zilog-nmos', io hooks on (z80.wgsl({ variant: 'zilog-nmos', hooks: { io: true } }))",
- "core_sha256": "ef0922fdfd1d6f486dcacb2c9bfe9ee0aa430aaa68d3cc86d010a3aa88eac612",
+ "core_sha256": "15699854c1554d964cd0315e52e064a5c0e3213c07190826287c06f9c1b99184",
  "passthrough": ["ei", "p"],
  "rules": [
   {"id": "EI-P", "files": ["*"], "fields": ["ei", "p"],

@@ -163,7 +163,10 @@ export interface CoreSelection {
   readonly isa: IsaCore;
   /** One of `isa.variants` (default `isa.defaultVariant`). */
   readonly variant?: string;
-  /** One of `isa.compat` (default: its first entry). */
+  /**
+   * One of `isa.compat`. When omitted: `isa.compat[0]`, except for a core with `compatRequired` (the Z80 through
+   * 0.3.x), whose build then fails. Worlds carry no core semantics; the machine presets name it.
+   */
   readonly compat?: string;
   /** Values of the parameters the core declares (`isa.params`); undeclared names are errors, omitted ones take the declared default. */
   readonly params?: Readonly<Record<string, CoreParamInput>>;

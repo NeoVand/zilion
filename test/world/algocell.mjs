@@ -85,7 +85,7 @@ const CASES = [
 
 const dir = mkdtempSync(join(tmpdir(), "zilion-algocell-"));
 const plan = CASES.map((c, i) => {
-  const m = Z.buildMachine({ isa: Z.z80, compat: "0.2", world: c.world }); // Algocell's executors are 0.2.0
+  const m = Z.buildMachine({ ...Z.algocellPairMachine({ L: c.L, P: 2 * c.L, steps: STEPS }), world: c.world }); // the Z80, compat '0.2' (Algocell's executors are 0.2.0)
   writeFileSync(join(dir, `m${i}.wgsl`), m.wgsl);
   writeFileSync(join(dir, `m${i}.manifest.json`), JSON.stringify(m.manifest));
   return { name: c.name, L: c.L, source: c.source, derive: c.derive ?? null, masks: c.masks ?? null,

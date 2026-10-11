@@ -92,7 +92,7 @@ await test("concurrent runs on one instance (Promise.all), as 0.2 allowed: facad
   const together = await Promise.all(sets.map((p) => z.run(p, { steps: 100 })));
   together.forEach((r, k) => equalArrays(r.memory, alone[k].memory, `facade set ${k}`));
   z.destroy();
-  const m = await engine.machine({ isa: Z.z80, world: { memory: { kind: "ring", bytes: 40 }, budget: { unit: "steps", value: 100 }, init: { stack: { topAliases: "lastByte" }, random: {} } } });
+  const m = await engine.machine({ isa: Z.z80, compat: "0.3", world: { memory: { kind: "ring", bytes: 40 }, budget: { unit: "steps", value: 100 }, init: { stack: { topAliases: "lastByte" }, random: {} } } });
   const ins = [0, 1, 2].map((k) => randomBytes((500 + 300 * k) * 40, 50 + k));
   const a = [];
   for (const x of ins) a.push(await m.run(x, { budget: 100, seed: 3 }));
@@ -142,7 +142,7 @@ await test("0.2 lifecycle: no buffer outlives a run; destroy() racing run() reso
 });
 
 await test("Batch.read() is a snapshot at call time: read, run, read; run then upload", async () => {
-  const m = await engine.machine({ isa: Z.z80, world: { memory: { kind: "ring", bytes: 64 }, budget: { unit: "steps", value: 50 }, init: { stack: { topAliases: "lastByte" } }, outputs: { writeCounts: true } } });
+  const m = await engine.machine({ isa: Z.z80, compat: "0.3", world: { memory: { kind: "ring", bytes: 64 }, budget: { unit: "steps", value: 50 }, init: { stack: { topAliases: "lastByte" } }, outputs: { writeCounts: true } } });
   const input = randomBytes(500 * 64, 99);
   const once = await m.run(input, { budget: 50 });
   const twice = await m.run(once.memory, { budget: 50 });
@@ -167,7 +167,7 @@ await test("Batch.read() is a snapshot at call time: read, run, read; run then u
 });
 
 await test("Machine: destroy() racing run() lets queued runs finish; later runs reject", async () => {
-  const m = await engine.machine({ isa: Z.z80, world: { memory: { kind: "ring", bytes: 40 }, budget: { unit: "steps", value: 80 }, init: { stack: { topAliases: "lastByte" } } } });
+  const m = await engine.machine({ isa: Z.z80, compat: "0.3", world: { memory: { kind: "ring", bytes: 40 }, budget: { unit: "steps", value: 80 }, init: { stack: { topAliases: "lastByte" } } } });
   const ins = [randomBytes(700 * 40, 1), randomBytes(300 * 40, 2)];
   const ref = [await m.run(ins[0]), await m.run(ins[1])];
   const ps = ins.map((x) => m.run(x));
@@ -191,7 +191,7 @@ await test("0.2 facade: an invalid fetchHook rejects at create with the compiler
 });
 
 await test("engine: typed results for the P=33 seam case (A=0xC3, PC=1, fetched {0,1,2,30})", async () => {
-  const m = await engine.machine({ isa: Z.z80, world: { memory: { kind: "ring", bytes: 33 }, budget: { unit: "steps", value: 2 }, init: { stack: { firstPushAt: "lastByte" } }, outputs: { fetchMap: true, startMap: true } } });
+  const m = await engine.machine({ isa: Z.z80, compat: "0.3", world: { memory: { kind: "ring", bytes: 33 }, budget: { unit: "steps", value: 2 }, init: { stack: { firstPushAt: "lastByte" } }, outputs: { fetchMap: true, startMap: true } } });
   const mem = new Uint8Array(33);
   mem.set([0xc3, 0xff, 0xff]);
   mem[30] = 0x3e;
@@ -208,7 +208,7 @@ await test("engine: chunking (333 and 1000 lanes per dispatch, lane base) is inv
   const world = { memory: { kind: "segments", segments: [{ bytes: 16 }, { bytes: 16 }], ring: 37 }, budget: { unit: "steps", value: 100 },
     init: { stack: { topAliases: "lastByte" }, random: { fields: ["ix", "iy", "a"] } },
     halting: { lethal: { firstUnit: 0, probability: 0.1 } }, outputs: { writeCounts: true, fetchMap: true } };
-  const m = await engine.machine({ isa: Z.z80, world });
+  const m = await engine.machine({ isa: Z.z80, compat: "0.3", world });
   const input = randomBytes(5000 * 32, 5);
   const a = await m.run(input, { budget: 100, seed: 9 });
   const b = await m.run(input, { budget: 100, seed: 9, maxLanesPerChunk: 333 });
@@ -225,7 +225,7 @@ await test("engine: chunking (333 and 1000 lanes per dispatch, lane base) is inv
 
 await test("engine: resident batch over 4 slabs; a second run continues from the resident memory", async () => {
   const world = { memory: { kind: "ring", bytes: 64 }, budget: { unit: "steps", value: 64 }, init: { stack: { topAliases: "lastByte" } }, outputs: { writeCounts: true } };
-  const m = await engine.machine({ isa: Z.z80, world });
+  const m = await engine.machine({ isa: Z.z80, compat: "0.3", world });
   const input = randomBytes(1000 * 64, 77);
   const once = await m.run(input, { budget: 64 });
   const twice = await m.run(once.memory, { budget: 64 });
@@ -252,7 +252,7 @@ await test("engine: a run split into k = 1, 2, 7 resumed dispatches (stepBase, r
   const world = { ...Z.algocellPairWorld({ L: 16, P: 37, steps: 128 }), init: { stack: { topAliases: "lastByte" }, random: { fields: ["a", "ix"] } },
     halting: { lethal: { firstUnit: 0, probability: 0.05 }, traps: { "halt-insn": { halt: { probability: 0.3 } } } },
     outputs: { writeCounts: true, fetchMap: true, startMap: true } };
-  const m = await engine.machine({ isa: Z.z80, world });
+  const m = await engine.machine({ isa: Z.z80, compat: "0.3", world });
   assert(m.manifest.resumable, "not resumable");
   const n = 3000;
   const input = randomBytes(n * 32, 4242);
@@ -291,7 +291,7 @@ await test("engine: a run split into k = 1, 2, 7 resumed dispatches (stepBase, r
 });
 
 await test("engine: per-lane budgets and per-lane state", async () => {
-  const m = await engine.machine({ isa: Z.z80, world: { memory: { kind: "ring", bytes: 32 }, budget: { unit: "steps", value: "perLane" }, init: { state: "perLane" } } });
+  const m = await engine.machine({ isa: Z.z80, compat: "0.3", world: { memory: { kind: "ring", bytes: 32 }, budget: { unit: "steps", value: "perLane" }, init: { state: "perLane" } } });
   const S = m.manifest.state.length;
   const st = new Uint32Array(4 * S);
   const kA = m.manifest.state.findIndex((f) => f.name === "a");
@@ -304,7 +304,7 @@ await test("engine: per-lane budgets and per-lane state", async () => {
 
 await test("engine: a world with a broken raw hook rejects with the offending line", async () => {
   try {
-    await engine.machine({ isa: Z.z80, world: { memory: { kind: "ring", bytes: 32 }, budget: { unit: "steps", value: 1 }, init: { stack: { topAliases: "lastByte" } }, ablation: { expr: "prefix === 0u" } } });
+    await engine.machine({ isa: Z.z80, compat: "0.3", world: { memory: { kind: "ring", bytes: 32 }, budget: { unit: "steps", value: 1 }, init: { stack: { topAliases: "lastByte" } }, ablation: { expr: "prefix === 0u" } } });
   } catch (e) {
     assert(e instanceof Z.ZilionShaderError, `not a ZilionShaderError: ${e}`);
     assert(e.message.includes("prefix === 0u") && e.messages.length > 0, e.message);
@@ -315,7 +315,7 @@ await test("engine: a world with a broken raw hook rejects with the offending li
 
 await test("0.2 facade = engine mask world with per-lane state (2048 random programs, random registers)", async () => {
   const z = await Z.Zilion.create({ memBytes: 64, device: engine.device });
-  const m = await engine.machine({ isa: Z.z80, compat: "0.2", world: Z.compat02World({ memBytes: 64, steps: 100, registers: "perLane" }) });
+  const m = await engine.machine(Z.compat02Machine({ memBytes: 64, steps: 100, registers: "perLane" }));
   const n = 2048;
   const progs = Array.from({ length: n }, (_, i) => randomBytes(64, 1000 + i));
   const rnd = randomBytes(n * 24, 3);

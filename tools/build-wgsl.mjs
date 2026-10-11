@@ -6,6 +6,8 @@
 //   2. import the built package and write, into the output directory (default build/wgsl/):
 //        manifest.json              provenance: package version, git commit, core SHA-256s, toolchain
 //        z80-core*.wgsl             the Z80 core of each configuration the vector harness runs (below)
+//        m6502-core.wgsl            HOST_CONTRACT_PRELUDE_WGSL + M6502_CORE_WGSL (the 6502 core, every hook off)
+//        m6502-core-hooks.wgsl      the same with the fetch, instruction-start and trap hooks on (self-test)
 //        conformance/plan.json      the vectors of test/conformance.js (programs, steps, hook index)
 //        conformance/shader-N.wgsl  buildComputeShader(memBytes, { fetchHook }) for each distinct hook (the 0.2 API)
 //        conformance/<config>/shader-N.wgsl  the same kernels with the core of a 0.3 configuration substituted
@@ -71,7 +73,26 @@ const coreConfigs = {
     key, export: ex, variant, compat, hooks, coreVersion: compat === "0.2" ? "0.2.0" : zilion.z80.coreVersion, ...write(file, text),
   })),
 };
-const cores = { z80: coreConfigs.z80[0] };
+// The 6502 (key "6502", the harness's ISA name). Its text uses the host-contract constants (ZIL_HALT_TRAP, ...),
+// so each file is the prelude followed by the core.
+const m6502 = await import(pathToFileURL(join(root, "dist", "cores", "m6502", "index.js")).href);
+const M6502_HOOKS = { fetch: true, instructionStart: true, trap: true };
+coreConfigs["6502"] = [
+  { key: "6502", export: "HOST_CONTRACT_PRELUDE_WGSL + M6502_CORE_WGSL", core: "m6502", variant: "nmos", compat: "0.3",
+    hooks: [], coreVersion: m6502.m6502.coreVersion,
+    ...write("m6502-core.wgsl", zilion.HOST_CONTRACT_PRELUDE_WGSL + m6502.M6502_CORE_WGSL) },
+];
+const cores = {
+  z80: coreConfigs.z80[0],
+  6502: coreConfigs["6502"][0],
+  // The 6502 with every hook it can call enabled (the text worlds with maps, dials or trap policies run): the
+  // self-test runs the whole vector set on it with neutral hooks. Not a configuration of its own: same semantics.
+  "6502-hooks": {
+    key: "6502-hooks", export: "HOST_CONTRACT_PRELUDE_WGSL + m6502CoreText({ fetch: true, instructionStart: true, trap: true })",
+    core: "m6502", variant: "nmos", compat: "0.3", hooks: Object.keys(M6502_HOOKS), coreVersion: m6502.m6502.coreVersion,
+    ...write("m6502-core-hooks.wgsl", zilion.HOST_CONTRACT_PRELUDE_WGSL + m6502.m6502CoreText(M6502_HOOKS)),
+  },
+};
 
 // --- conformance plan (test/conformance.js, run headlessly) ------------------
 const hooks = [];
@@ -152,5 +173,5 @@ write("manifest.json", JSON.stringify(manifest, null, 2) + "\n");
 console.error(
   `[build-wgsl] ${pkg.name}@${pkg.version} z80 cores ` +
     coreConfigs.z80.map((c) => `${c.key} ${c.sha256.slice(0, 12)}`).join(", ") +
-    ` -> ${relative(process.cwd(), outDir) || "."}`,
+    `; 6502 core ${cores[6502].sha256.slice(0, 12)} -> ${relative(process.cwd(), outDir) || "."}`,
 );

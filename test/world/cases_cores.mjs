@@ -1,6 +1,7 @@
-// Contract tests on the 6502 SKELETON and the BFF core: the same world code runs a page-stack CPU and a ring-native
-// tape machine. Expectations are hand-computed; the 6502 skeleton implements only the opcodes used here. (BFF is also
-// checked bit for bit against Algocell's bff.py by test/world/bff_equiv.py.)
+// Contract tests on the 6502 and the BFF core: the same world code runs a page-stack CPU and a ring-native tape
+// machine. Expectations are hand-computed. The 6502's own world tests (zero page, stack page, vectors, JAM, budgets,
+// a self-copier) are in cases_m6502.mjs; BFF is also checked bit for bit against Algocell's bff.py by
+// test/world/bff_equiv.py.
 
 import { m6502 } from "../../dist/cores/m6502/index.js";
 import { bff, BFF_ASCII, BFF_ASCII_LITERAL } from "../../dist/cores/bff/index.js";
@@ -24,18 +25,18 @@ const upTo = (n) => range(0, n);
 
 const CASES = [
   {
-    name: "6502 skeleton: LDA #, STA abs, NOP, JAM (trap 'illegal' halts as-chip, PC on the JAM)",
+    name: "6502: LDA #, STA abs, NOP, JAM (trap 'illegal' halts as-chip, PC on the JAM)",
     setup: ({ addJob }) =>
       addJob({ isa: m6502, world: ring(64, { init: { stack: FIRST }, outputs: { ...maps, writeCounts: true } }) }, [
         { mem: mem(64, { 0: [0xa9, 0x42, 0x8d, 0x20, 0x00, 0xea, 0x02] }),
-          expect: { steps: 4, halt: "trap", trap: "illegal", state: { a: 0x42, pc: 6, p: 0x24, halted: 3, trap: 1 }, mem: { 32: 0x42 }, writes: [1],
+          expect: { steps: 4, halt: "trap", trap: "illegal", state: { a: 0x42, pc: 6, p: 0x20, halted: 3, trap: 1 }, mem: { 32: 0x42 }, writes: [1],
             fetched: [0, 1, 2, 3, 4, 5, 6], starts: [0, 2, 5, 6] } },
-        // an opcode the skeleton does not implement (ADC #) traps as 'unimplemented'
-        { mem: mem(64, { 0: [0x69, 0x01] }), expect: { steps: 1, halt: "trap", trap: "unimplemented", state: { pc: 0, trap: 8 } } },
+        // ADC #1 (P reset 0x20: C = 0), then JAM: the full core has no 'unimplemented' trap
+        { mem: mem(64, { 0: [0x69, 0x01, 0x02] }), expect: { steps: 2, halt: "trap", trap: "illegal", state: { a: 1, pc: 2, trap: 1 } } },
       ]),
   },
   {
-    name: "6502 skeleton: page-1 stack convention on ring 40 (S0 = 0xDF: 0x1DF mod 40 = 39); PHA lands on 39",
+    name: "6502: page-1 stack convention on ring 40 (S0 = 0xDF: 0x1DF mod 40 = 39); PHA lands on 39",
     // 0x100 + S ≡ 39 (mod 40) with S ≤ 0xFF: 479 = 0x1DF → S = 0xDF (519 would need S = 263).
     setup: ({ addJob }) =>
       addJob({ isa: m6502, world: ring(40, { init: { stack: { topAliases: "lastByte" } } }) }, [
@@ -44,18 +45,18 @@ const CASES = [
       ]),
   },
   {
-    name: "6502 skeleton: BRK pushes PC+2 and P|0x30 on page 1, vectors through 0xFFFE/0xFFFF = positions 30/31",
-    // Ring 32, stack top at 20: S0 = 0xF4 (0x1F4 = 500 ≡ 20). BRK: PCH 0x00 → 20, PCL 0x02 → 19, P|0x30 = 0x34 → 18;
+    name: "6502: BRK pushes PC+2 and P|0x30 on page 1, vectors through 0xFFFE/0xFFFF = positions 30/31",
+    // Ring 32, stack top at 20: S0 = 0xF4 (0x1F4 = 500 ≡ 20). BRK: PCH 0x00 → 20, PCL 0x02 → 19, P|0x30 = 0x30 → 18;
     // PC = mem[30] | mem[31] << 8 = 0x0010; JAM there. The vector bytes are reads, not instruction fetches.
     setup: ({ addJob }) =>
       addJob({ isa: m6502, world: ring(32, { init: { stack: { topAliases: 20 } }, outputs: maps }) }, [
         { mem: mem(32, { 0: [0x00, 0xea], 16: [0x02], 20: [0xee], 30: [0x10, 0x00] }),
-          expect: { steps: 2, halt: "trap", state: { pc: 0x10, s: 0xf1, p: 0x24 }, mem: { 20: 0x00, 19: 0x02, 18: 0x34 },
+          expect: { steps: 2, halt: "trap", state: { pc: 0x10, s: 0xf1, p: 0x24 }, mem: { 20: 0x00, 19: 0x02, 18: 0x30 },
             fetched: [0, 1, 16], starts: [0, 16] } },
       ]),
   },
   {
-    name: "6502 skeleton: world policies — JAM ignored, lethal first unit 0xEA, ablation of LDA # (on_decode)",
+    name: "6502: world policies — JAM ignored, lethal first unit 0xEA, ablation of LDA # (on_decode)",
     setup: ({ addJob }) => {
       const abl = new Uint32Array(8);
       abl[0xa9 >> 5] |= 1 << (0xa9 & 31);
@@ -240,10 +241,10 @@ const CASES = [
     name: `init.stack.firstPushAt ${JSON.stringify(at)}, ${label}: the first byte pushed lands on position ${t} on the Z80 and the 6502`,
     setup: ({ Z, addJob }) => {
       const w = { ...world, init: { stack: { firstPushAt: at } } };
-      const n = Z.buildMachine({ isa: Z.z80, world: w }).manifest.memory.hostBytesPerLane;
+      const n = Z.buildMachine({ isa: Z.z80, compat: "0.3", world: w }).manifest.memory.hostBytesPerLane;
       return [
         // Z80: LD BC,0x1234; PUSH BC; HALT. PUSH writes B (0x12) first, at SP0 - 1, then C (0x34) below it.
-        addJob({ isa: Z.z80, world: w }, [{ mem: mem(n, { 0: [0x01, 0x34, 0x12, 0xc5, 0x76] }),
+        addJob({ isa: Z.z80, compat: "0.3", world: w }, [{ mem: mem(n, { 0: [0x01, 0x34, 0x12, 0xc5, 0x76] }),
           expect: { steps: 3, halt: "halt-insn", state: { sp: (sp0 - 2) & 0xffff }, mem: { [t]: 0x12, [t - 1]: 0x34 } } }]),
         // 6502: LDA #$12; PHA; LDA #$34; PHA; JAM: 0x12 at 0x0100|S0, then 0x34 below it.
         addJob({ isa: m6502, world: w }, [{ mem: mem(n, { 0: [0xa9, 0x12, 0x48, 0xa9, 0x34, 0x48, 0x02] }),

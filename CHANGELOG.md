@@ -57,8 +57,8 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
 
 **Z80 fixes (work item 3; branch `m1/z80-fixes`; docs/ARCHITECTURE.md, "The Z80 core")**
 
-- *Behaviour changes (the Z80 of `buildMachine`; `compat: '0.2'` restores 0.2.0 exactly):* the default Z80 is now
-  `compat: '0.3'` (`coreVersion` 0.3.0): a Z80 world that names no `compat` gets the new semantics. A wasted DD/FD prefix adds 1 to R (0.2: 2). MEMPTR (WZ) is modelled in
+- *Behaviour changes (the Z80 of `buildMachine`; `compat: '0.2'` restores 0.2.0 exactly):* the current Z80 is
+  `compat: '0.3'` (`coreVersion` 0.3.0), which a machine names explicitly (see below). A wasted DD/FD prefix adds 1 to R (0.2: 2). MEMPTR (WZ) is modelled in
   full and `BIT n,(HL)` takes F3/F5 from it. IM is modelled. A repeating block instruction takes X/Y from its own
   address (INxR/OTxR also adjust H and P/V) and sets WZ = PC + 1. `OUT (C),r` and `OUT (C),0` exist without the io
   hooks. A lane halted by the host is frozen (0.2 kept adding 1 to R per further step). The state record gains
@@ -72,6 +72,16 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
   `stateFor({ variant, compat })` (the state record per selection), used by the builder.
 - *Fixed:* the 0.2 kernel's manifest (`legacyMachine`) hashes the core it embeds (`Z80_CORE_WGSL`) and reports
   `coreVersion` 0.2.0.
+- *Breaking (0.3-dev API), follow-up decisions:* a Z80 machine must name its compat (`'0.3'` or `'0.2'`) in its core
+  selection; there is no default through 0.3.x (descriptor `compatRequired`). Worlds carry no core semantics: the
+  world presets stay worlds, and the machine presets `compat02Machine` and `algocellPairMachine` return
+  `{ core: { isa: z80, compat: '0.2' }, world }`. Manifests report the semantics that ran: `core.coreVersion` is 0.2.0
+  under compat `'0.2'` (descriptor `coreVersionFor`).
+- `scripts/export-machines.mjs` takes an array of `{ name, core: { isa, compat?, variant?, params? }, world, … }`
+  (the earlier object-by-name form and the `isa` shorthand still work), finds every core of the build by id
+  (z80, m6502, bff; `--list-cores`), and names the machine in every error (a Z80 without `core.compat` among them).
+  Tested end to end by `npm run test:export`. A host halt in
+  `zilog-nmos` leaves Q as it was (the halting step executes no instruction); a skipped unit clears it.
 - *Validation:* SingleStepTests/z80 (1,604,000 tests) plus 384 wasted-prefix vectors and 86 R/WZ probes: 0
   unexpected with only the rules Q, Q-XY (not modelled by `classic`) and EI-P (no interrupts); `zilog-nmos`: 0 unexpected with EI-P only; `--compat 0.2` reproduces the
   0.2.0 ledger byte for byte. 86 hand-derived R and WZ probes (`tools/z80-probe-vectors.py`). Baselines
@@ -80,6 +90,29 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
   on all three semantics; self-test mutants for each fix (the 0.2 behaviour of each must be caught) and for the Q
   latch; `npm run test:compat` (design §5.5: 600,000 random programs against outputs recorded from 0.2.0);
   `test/world/cases_z80.mjs`.
+
+**The NMOS 6502 core (branch `m2/6502`; docs/ARCHITECTURE.md, The 6502 core)**
+
+- `src/cores/m6502/`: all 256 opcodes (151 documented, 85 stable undocumented, 8 unstable, 12 JAM), core 0.3.0,
+  status `experimental`, variant `nmos`, compat `'0.3'`. NMOS decimal mode, JMP ($xxFF), zero-page and pointer
+  wraps in page 0, B on PHP/BRK, BRK's vector at 0xFFFE read after its pushes, JSR's high operand byte fetched after
+  its pushes, read-modify-write instructions writing the old value then the new one (two writes in `writeCounts`),
+  the unstable opcodes with the vectors' constants (ANE and LXA magic 0xEE; SHA/SHX/SHY/TAS `& (H + 1)`), JAM through
+  trap `illegal`. World reset P = 0x20 (was 0x24 in the skeleton). `m6502.table()`: mnemonic, length and family.
+- Validated against SingleStepTests/65x02 `6502/v1`: 2,560,000 tests, zero divergences, zero expected-divergence
+  rules (`test/baselines/6502-v0.3.0-dev.md`). 18 planted 6502 bugs in the harness self-test, all caught.
+- Harness: the 6502 adapter (`tools/zt.py vectors 6502`), an optional bus-write log compared against the vectors'
+  `cycles` (the `bus` field), `npm run test:vectors:6502`, `ZILION_6502_VECTORS`. With the bus-write log off the Z80
+  test-host WGSL is unchanged byte for byte, and so are the three Z80 ledgers (0.3, zilog-nmos, compat 0.2); a
+  regenerated Z80 Markdown report gains one line listing the convention mappings applied (HALT-PC).
+- Decimal mode exhaustively: Bruce Clark's published NMOS algorithm (6502.org, "Decimal Mode", Appendix A),
+  transcribed step by step, agrees with all 310,000 ADC/SBC/RRA/ISC vector tests, and the core agrees with it on all
+  1,310,720 inputs of ADC #, SBC # (E9, EB), RRA zp and ISC zp in both modes (`tools/zt.py decimal6502`, a gate of
+  `npm run test:harness`; `test/baselines/6502-decimal-clark.md`).
+- Exported: `m6502`, `m6502CoreText`, `m6502FirstPushAt`, `M6502_*` from the root and `@neovand/zilion/m6502`; the
+  package ships `dist/cores/m6502` (status experimental).
+- `test/world/cases_m6502.mjs`: the 6502 on rings of 32, 33 and 64 bytes, with a self-copier under the soup's init.
+- `test/bench/bench-cores.mjs`: Z80 and 6502 throughput on random 32-byte pairs.
 
 **The BFF core (milestone M2; branch `m2/bff`; docs/ARCHITECTURE.md, "The BFF core")**
 

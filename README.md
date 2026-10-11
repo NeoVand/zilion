@@ -196,6 +196,7 @@ import { createEngine, z80 } from "@neovand/zilion";
 const engine = await createEngine();
 const m = await engine.machine({
   isa: z80,
+  compat: "0.3", // the Z80's semantics, named (no default through 0.3.x); "0.2" reproduces Zilion 0.2.0
   world: {
     // tapes A and B (16 bytes each) on a 37-byte ring: 5 bytes of padding, zeroed every run, never stored
     memory: { kind: "segments", segments: [{ bytes: 16, name: "A" }, { bytes: 16, name: "B" }], ring: 37 },
@@ -222,11 +223,15 @@ const r2 = await m.run(r.memory, { seed: 1, ablation: masks, budget: 64, stepBas
 - **Batches** of any size; `m.batch(n)` keeps lanes resident on the GPU and encodes into your own command
   encoder.
 - **Python and other hosts** read the manifest (bindings, params offsets, memory and record layouts, SHA-256
-  provenance); `node scripts/export-machines.mjs worlds.json --out shaders/` writes the WGSL and manifest for
-  each named world, and `test/world/gpu_runner.py` is a complete wgpu-py host driven only by the manifest.
-- **More than the Z80.** The contract is validated against a 6502 skeleton (not for results) and a full BFF core, a
-  ring-native tape machine bit-identical to Algocell's `bff.py` in every configuration it has; see
-  [docs/ADDING_A_CORE.md](docs/ADDING_A_CORE.md). Neither is exported from the package yet.
+  provenance); `node scripts/export-machines.mjs machines.json --out shaders/` writes the WGSL and manifest for
+  each machine of `[{ "name", "core": { "isa": "z80", "compat": "0.2" }, "world": { … } }, …]`, and
+  `test/world/gpu_runner.py` is a complete wgpu-py host driven only by the manifest.
+- **Presets.** `algocellPairWorld` and `compat02World` are worlds; `algocellPairMachine` and `compat02Machine` are the
+  machines that ran in them (the Z80 with compat `'0.2'`): `buildMachine(algocellPairMachine({ L: 16, P: 32, steps: 128 }))`.
+- **More than the Z80.** A full NMOS 6502 core (every opcode, validated against 2,560,000 SingleStepTests vectors;
+  experimental; `@neovand/zilion/m6502`) and a full BFF core (a ring-native tape machine, bit-identical to Algocell's
+  `bff.py` in every configuration it has; not exported yet) run in the same worlds; see
+  [docs/ADDING_A_CORE.md](docs/ADDING_A_CORE.md).
 
 The design and its layers are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -247,7 +252,7 @@ Emulator bugs hide in undocumented corners, so Zilion's Z80 core was developed a
 
 The core implements the full documented instruction set, the **CB**, **ED**, **DD/FD (IX/IY)**, and **DDCB/FDCB** prefix pages (including the undocumented DDCB register-copy side effect and the CPI/CPD undocumented-flag quirk), shadow registers, and `EXX`/`EX AF,AF'`.
 
-> **Scope & honesty:** Zilion is a batch execution core, not a cycle-accurate machine emulator. There are no interrupts and no I/O ports (`IN` reads 0, `OUT` is a no-op), and time is counted in instructions, not T-states — every instruction advances the step counter by one. The `R` refresh register increments per M1 (opcode/prefix) fetch and `HALT` idles correctly (re-executing itself until the step budget runs out, matching a real Z80's PC/R behavior). Two documented simplifications in 0.2.0, kept byte for byte by the 0.2 API (`Zilion`, `buildComputeShader`, `Z80_CORE_WGSL`) and by `compat: '0.2'`: the internal `WZ`/`memptr` register isn't modeled, so the _undocumented_ F3/F5 flag bits of `BIT n,(HL)` come from the operand rather than the memory address (this never affects control flow); and a wasted `DD`/`FD` prefix (one followed by `DD`, `FD` or `ED`) adds 2 to `R` instead of 1. The 0.3.0-dev Z80 of `buildMachine` (`compat: '0.3'`, the default) fixes both and also models IM and the block-repeat flags; variant `zilog-nmos` adds the Q latch (see docs/ARCHITECTURE.md, "The Z80 core"). Everything else — the full documented instruction set across the base, CB, ED, and DD/FD/DDCB/FDCB pages — is differential-tested against a real-Z80 reference to zero divergence in documented behavior. If you need cycle-accurate single-machine emulation, use a dedicated emulator; if you need to run a zillion Z80s fast, use Zilion.
+> **Scope & honesty:** Zilion is a batch execution core, not a cycle-accurate machine emulator. There are no interrupts and no I/O ports (`IN` reads 0, `OUT` is a no-op), and time is counted in instructions, not T-states — every instruction advances the step counter by one. The `R` refresh register increments per M1 (opcode/prefix) fetch and `HALT` idles correctly (re-executing itself until the step budget runs out, matching a real Z80's PC/R behavior). Two documented simplifications in 0.2.0, kept byte for byte by the 0.2 API (`Zilion`, `buildComputeShader`, `Z80_CORE_WGSL`) and by `compat: '0.2'`: the internal `WZ`/`memptr` register isn't modeled, so the _undocumented_ F3/F5 flag bits of `BIT n,(HL)` come from the operand rather than the memory address (this never affects control flow); and a wasted `DD`/`FD` prefix (one followed by `DD`, `FD` or `ED`) adds 2 to `R` instead of 1. The 0.3.0-dev Z80 of `buildMachine` (`compat: '0.3'`, which a machine names explicitly) fixes both and also models IM and the block-repeat flags; variant `zilog-nmos` adds the Q latch (see docs/ARCHITECTURE.md, "The Z80 core"). Everything else — the full documented instruction set across the base, CB, ED, and DD/FD/DDCB/FDCB pages — is differential-tested against a real-Z80 reference to zero divergence in documented behavior. If you need cycle-accurate single-machine emulation, use a dedicated emulator; if you need to run a zillion Z80s fast, use Zilion.
 
 ## Performance
 

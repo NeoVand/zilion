@@ -6,6 +6,16 @@ import json
 
 from .report import flag_names, pct
 
+# ISA-specific wording of the report: (what the architectural fields are, the internal columns, the group heading).
+WORDING = {
+    "z80": ("Architectural fields are the registers, F, R, I, IFF1/2, IM, memory and ports. WZ (MEMPTR), Q and the "
+            "EI/P interrupt latches are internal and reported in their own columns.", "WZ, Q, EI/P", "prefix group"),
+    "6502": ("Architectural fields are PC, S, A, X, Y, P, the halted state (JAM), memory, ports and the bus-write "
+             "sequence (`bus`: every memory write in order, including the old-value write of a read-modify-write). "
+             "`trap` (the world's trap-cause field) is not in the vectors and is passed through.", "trap", "opcode group"),
+}
+FLAG_FIELD = {"z80": "f", "6502": "p"}
+
 
 def _code(s: str) -> str:
     return f"`{s}`"
@@ -29,11 +39,11 @@ def _reproducer(ex: dict, isa: str) -> list[str]:
     ]
     for f, d in ex["diff"].items():
         mark = " **(unexpected bits " + d["unexpected_bits"] + ")**" if "unexpected_bits" in d else ""
-        if f in ("mem", "ports"):
+        if f in ("mem", "ports", "bus"):
             body = {k: v for k, v in d.items() if k != "unexpected_bits"}
             out.append(f"  - `{f}`{mark}: `{json.dumps(body)}`")
         else:
-            bits = flag_names(int(d["xor"], 16), isa, f) if f == "f" else d["xor"]
+            bits = flag_names(int(d["xor"], 16), isa, f) if f == FLAG_FIELD.get(isa, "f") else d["xor"]
             out.append(f"  - `{f}`: expected `{d['expected']}`, got `{d['actual']}` (xor `{d['xor']}`: {bits}){mark}")
     rerun = f"python -I tools/zt.py vectors {isa} <vector dir> --files '{ex.get('file', '?')}' --test '{ex['name']}'"
     out.append(f"- re-run: `{rerun}`")
@@ -94,19 +104,19 @@ def render(doc: dict, run: dict, digest: str, analysis: str | None) -> str:
             w("")
     w("## Summary")
     w("")
-    w("Architectural fields are the registers, F, R, I, IFF1/2, IM, memory and ports. WZ (MEMPTR), Q and the "
-      "EI/P interrupt latches are internal and reported in their own columns.")
+    arch_note, internal, group_word = WORDING.get(isa, WORDING["z80"])
+    w(arch_note)
     w("")
     w("| | tests | share |")
     w("|---|---:|---:|")
     w(f"| Tests run | {t['tests']:,} | |")
     w(f"| Architectural pass, raw | {t['pass_arch']:,} | {pct(t['pass_arch'], t['tests'])} |")
-    w(f"| All fields pass, raw (incl. WZ, Q, EI/P) | {t['pass_all']:,} | {pct(t['pass_all'], t['tests'])} |")
+    w(f"| All fields pass, raw (incl. {internal}) | {t['pass_all']:,} | {pct(t['pass_all'], t['tests'])} |")
     w(f"| Every divergence explained by an expected rule | {t['explained']:,} | {pct(t['explained'], t['tests'])} |")
     w(f"| Tests with an unexpected divergence | {t['unexpected']:,} | {pct(t['unexpected'], t['tests'])} |")
     w(f"| … of which in an architectural field | {t['unexpected_arch']:,} | {pct(t['unexpected_arch'], t['tests'])} |")
     w("")
-    w("### By prefix group")
+    w(f"### By {group_word}")
     w("")
     w("| Group | Files | Tests | Arch. pass (raw) | Explained | Unexpected |")
     w("|---|---:|---:|---:|---:|---:|")
@@ -177,29 +187,42 @@ def render(doc: dict, run: dict, digest: str, analysis: str | None) -> str:
     w("## Per-opcode ledger")
     w("")
     w("Files with a divergence in an architectural field or an unexpected divergence. Entries read "
-      "`field: tests [rule ids] xor`; for `f` the differing flags are named. Files whose only divergences are in "
-      "the internal columns (WZ, Q, EI/P) are omitted here and listed in full in the JSON ledger.")
+      f"`field: tests [rule ids] xor`; for `{FLAG_FIELD.get(isa, 'f')}` the differing flags are named. Files whose only "
+      f"divergences are in the internal columns ({internal}) are omitted here and listed in full in the JSON ledger.")
     w("")
     w("| File | Tests | Arch. pass | Unexpected | Divergent fields |")
     w("|---|---:|---:|---:|---|")
-    internal_only = 0
+    internal_only = clean = 0
+    mapped_tests: dict[str, int] = {}
+    mapped_files: dict[str, int] = {}
     arch_cols = {f["name"] for f in doc["fields"] if f["architectural"]}
     for key, rec in doc["files"].items():
+        for k, v in rec["mapped"].items():
+            mapped_tests[k] = mapped_tests.get(k, 0) + v
+            mapped_files[k] = mapped_files.get(k, 0) + 1
         arch = {n: e for n, e in rec["fields"].items() if n in arch_cols}
         if not arch and not rec["unexpected"]:
-            internal_only += 1
+            if rec["fields"]:
+                internal_only += 1
+            else:
+                clean += 1
             continue
         parts = []
         for n, e in rec["fields"].items():
             if n not in arch_cols and not e["unexpected"]:
                 continue
             rules = ",".join(e["rules"]) or "—"
-            x = flag_names(e["xor"], isa, n) if n in ("f", "mem", "ports") else hex(e["xor"])
+            x = flag_names(e["xor"], isa, n) if n in (FLAG_FIELD.get(isa, "f"), "mem", "ports", "bus") else hex(e["xor"])
             u = f" **{e['unexpected']} unexpected**" if e["unexpected"] else ""
             parts.append(f"{n}: {e['diverging']} [{rules}] {x}{u}")
         mapped = "; mapped " + ", ".join(f"{k} {v}" for k, v in rec["mapped"].items()) if rec["mapped"] else ""
         w(f"| `{key}` | {rec['tests']} | {rec['pass_arch']} | {rec['unexpected']} | {'; '.join(parts) or '—'}{mapped} |")
     w("")
-    w(f"{internal_only} further files diverge only in the internal columns.")
+    w(f"{internal_only} further files diverge only in the internal columns"
+      + (f"; {clean} files match the reference in every field." if clean else "."))
+    if mapped_tests:
+        w("")
+        w("Convention mappings applied (adapter `postprocess`): " + "; ".join(
+            f"`{k}` in {mapped_tests[k]:,} tests of {mapped_files[k]} files" for k in sorted(mapped_tests)) + ".")
     w("")
     return "\n".join(L)

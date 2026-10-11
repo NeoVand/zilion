@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as Z from "../dist/index.js";
 import { m6502 } from "../dist/cores/m6502/index.js";
+import * as M6502 from "../dist/cores/m6502/index.js";
 import { bff, BFF_ASCII, BFF_ASCII_LITERAL, bffAsciiMap } from "../dist/cores/bff/index.js";
 import { fakeCore } from "./world/fake_core.mjs";
 
@@ -44,7 +45,7 @@ const STEPS = { unit: "steps", value: 100 };
 const LAST = { topAliases: "lastByte" };
 const ring = (P, extra = {}) => ({ memory: { kind: "ring", bytes: P }, budget: STEPS, init: { stack: LAST }, ...extra });
 const bare = (P, extra = {}) => ({ memory: { kind: "ring", bytes: P }, budget: STEPS, ...extra });
-const build = (world, extra = {}) => Z.buildMachine({ isa: Z.z80, world, ...extra });
+const build = (world, extra = {}) => Z.buildMachine({ isa: Z.z80, compat: "0.3", world, ...extra });
 
 // --- address math (values worked out by hand; see test/world/cases.mjs) -------------------------------------
 test("highestAlias: P | 65536 gives 0xFFFF; P = 38, 40, 100 give 0xFFE7, 0xFFEF, 0xFFDB", () => {
@@ -251,7 +252,7 @@ test("skeletons: the builder refuses what a core cannot do, and accepts each cor
   eq(Z.buildMachine({ isa: bff, world: bare(32, { init: { stack: { topAliases: 0 } } }) }).manifest.init.stack, { notApplicable: "no stack", given: { topAliases: 0 } });
   throws(() => Z.buildMachine({ isa: bff, world: bare(32, { hooks: { ioIn: "return 0u;" } }) }), /does not call the 'io' hook/);
   throws(() => Z.buildMachine({ isa: m6502, world: ring(32, { halting: { traps: { "halt-insn": "ignore" } } }) }), /never raises trap 'halt-insn'/);
-  throws(() => Z.buildMachine({ isa: Z.z80, world: ring(32, { halting: { traps: { bounds: "ignore" } } }) }), /never raises trap 'bounds'/);
+  throws(() => Z.buildMachine({ isa: Z.z80, compat: "0.3", world: ring(32, { halting: { traps: { bounds: "ignore" } } }) }), /never raises trap 'bounds'/);
   throws(() => Z.buildMachine({ isa: m6502, world: ring(512, { init: { stack: { topAliases: 0 } } }) }), /no stack pointer/);
   eq(Z.buildMachine({ isa: bff, world: bare(32, { halting: { traps: { unmatched: { halt: { probability: 0.25 } } } } }) }).manifest.core.hooks, ["trap"]);
   eq(Z.buildMachine({ isa: m6502, world: ring(32, { ablation: { table: "uniform" } }) }).manifest.ablation.words, 8);
@@ -294,6 +295,37 @@ test("presets supply the stack and the budget explicitly: compat02World (0.2's Z
   throws(() => Z.compat02World({ memBytes: 48, steps: 1 }), /power of two/);
   throws(() => Z.algocellPairWorld({ L: 16, P: 31, steps: 1 }), /smaller than the pair/);
   eq(Z.presets.algocellPair, Z.algocellPairWorld);
+});
+
+test("the Z80 needs its compat named in the core selection (no default through 0.3.x); manifests report the semantics that ran", () => {
+  const w = { memory: { kind: "ring", bytes: 32 }, budget: STEPS, init: { stack: LAST } };
+  throws(() => Z.buildMachine({ isa: Z.z80, world: w }), /z80 needs its compat named \(no default\): give compat '0\.3' or '0\.2' in the core selection/);
+  throws(() => Z.buildMachine({ core: { isa: Z.z80 }, world: w }), /compat/);
+  throws(() => Z.buildMachine({ isa: Z.z80, variant: "zilog-nmos", world: w }), /needs its compat named/);
+  // worlds carry no core semantics: a world preset alone does not name it
+  throws(() => Z.buildMachine({ isa: Z.z80, world: Z.algocellPairWorld({ L: 16, P: 32, steps: 128 }) }), /needs its compat named/);
+  const m = (spec) => Z.buildMachine(spec).manifest.core;
+  eq([m({ isa: Z.z80, compat: "0.3", world: w }).compat, m({ isa: Z.z80, compat: "0.3", world: w }).coreVersion], ["0.3", "0.3.0"]);
+  eq([m({ core: { isa: Z.z80, compat: "0.2" }, world: w }).compat, m({ core: { isa: Z.z80, compat: "0.2" }, world: w }).coreVersion], ["0.2", "0.2.0"]);
+  if (!/\/\/ core {4}z80 0\.2\.0 \(/.test(Z.buildMachine({ core: { isa: Z.z80, compat: "0.2" }, world: w }).wgsl)) throw new Error("shader header does not name 0.2.0");
+  // other ISAs keep their own default
+  eq(Z.buildMachine({ isa: m6502, world: w }).manifest.core.compat, "0.3"); // the full 6502 core's own default (no compat required)
+});
+
+test("machine presets: a world preset with the core selection it ran with (the Z80, compat '0.2')", () => {
+  const a = Z.algocellPairMachine({ L: 16, P: 37, steps: 128 });
+  eq(a.core.isa === Z.z80 && a.core.compat, "0.2");
+  eq(a.world, Z.algocellPairWorld({ L: 16, P: 37, steps: 128 }));
+  const c = Z.compat02Machine({ memBytes: 64, steps: 100, registers: "perLane" });
+  eq([c.core.isa === Z.z80, c.core.compat, c.world], [true, "0.2", Z.compat02World({ memBytes: 64, steps: 100, registers: "perLane" })]);
+  const built = Z.buildMachine(a);
+  eq([built.manifest.core.compat, built.manifest.core.coreVersion], ["0.2", "0.2.0"]);
+  if (!built.wgsl.includes(Z.Z80_CORE_WGSL)) throw new Error("the Algocell machine does not run the 0.2.0 core");
+  // a condition added to the world, and the same world under the fixes, by spreading
+  eq(Z.buildMachine({ ...a, world: { ...a.world, halting: { lethal: { firstUnit: 0 } } } }).manifest.core.hooks, ["instructionStart"]);
+  eq(Z.buildMachine({ ...a, core: { ...a.core, compat: "0.3" } }).manifest.core.coreVersion, "0.3.0");
+  eq(Z.machinePresets.algocellPair, Z.algocellPairMachine);
+  throws(() => Z.algocellPairMachine({ L: 16, P: 31, steps: 1 }), /smaller than the pair/);
 });
 
 test("covering the stack fields with init.set or init.random counts as giving the stack; the manifest records how the stack was set", () => {
@@ -371,7 +403,7 @@ test("init.stack.firstPushAt: the first pushed byte lands at t (Z80: SP - 1 alia
 // --- decision 2: the trap cause in the record ----------------------------------------------------------------------
 test("trapCause: a record word after haltReason, codes in the manifest, from each core's trapCause symbol", () => {
   for (const [core, world] of [[Z.z80, ring(32)], [m6502, ring(32)], [bff, bare(32)]]) {
-    const m = Z.buildMachine({ isa: core, world: { ...world, outputs: { state: false, memory: false } } });
+    const m = Z.buildMachine({ isa: core, ...(core === Z.z80 ? { compat: "0.3" } : {}), world: { ...world, outputs: { state: false, memory: false } } });
     eq(m.manifest.record.fields.map((f) => [f.name, f.offset]), [["steps", 0], ["haltReason", 1], ["trapCause", 2]], core.id);
     if (!m.wgsl.includes(`fn zil_trap_cause() -> u32 { return ${core.symbols.trapCause}; }`)) throw new Error(`${core.id}: zil_trap_cause`);
     if (!m.wgsl.includes("zil_out[o + 2u] = zil_trap_cause();")) throw new Error(`${core.id}: the record does not store it`);
@@ -384,12 +416,15 @@ test("trapCause: a record word after haltReason, codes in the manifest, from eac
   // descriptors are checked: every symbol, and both stack conventions functions or both null
   const { trapCause: _t, ...noCause } = Z.z80.symbols;
   throws(() => Z.buildMachine({ isa: { ...Z.z80, symbols: noCause }, world: ring(32) }), /symbols\.trapCause must be a WGSL expression/);
-  throws(() => Z.buildMachine({ isa: { ...Z.z80, conventions: { ...Z.z80.conventions, firstPushAt: undefined } }, world: ring(32) }),
+  throws(() => Z.buildMachine({ isa: { ...Z.z80, conventions: { ...Z.z80.conventions, firstPushAt: undefined } }, compat: "0.3", world: ring(32) }),
     /conventions\.firstPushAt must be a function, or null/);
-  throws(() => Z.buildMachine({ isa: { ...Z.z80, conventions: { ...Z.z80.conventions, firstPushAt: null } }, world: ring(32) }),
+  throws(() => Z.buildMachine({ isa: { ...Z.z80, conventions: { ...Z.z80.conventions, firstPushAt: null } }, compat: "0.3", world: ring(32) }),
     /must both be functions or both be null/);
-  // every trap cause a skeleton raises sets its state field before halting (both with and without the trap hook)
-  for (const [core, causes] of [[m6502, ["ILLEGAL", "UNIMPLEMENTED"]], [bff, ["BOUNDS", "UNMATCHED"]]]) {
+  // every trap cause a core raises sets its state field before halting (both with and without the trap hook); the
+  // full 6502 raises only 'illegal' (JAM): no opcode is left unimplemented
+  eq(Object.keys(m6502.conventions.traps), ["illegal"]);
+  for (const trap of [false, true]) if (m6502.wgsl({ hooks: { trap } }).includes("ZIL_TRAP_UNIMPLEMENTED")) throw new Error("m6502 raises 'unimplemented'");
+  for (const [core, causes] of [[m6502, ["ILLEGAL"]], [bff, ["BOUNDS", "UNMATCHED"]]]) {
     for (const trap of [false, true]) {
       const text = core.wgsl({ hooks: { trap } });
       for (const c of causes) if (!text.includes(`_trap = ZIL_TRAP_${c};`)) throw new Error(`${core.id} (trap hook ${trap}): ${c} does not set the cause`);
@@ -429,7 +464,7 @@ test("core params (test-only fake core): validation, WGSL constants ahead of the
   throws(() => fb({ mode: "sub" }), /param 'mode' must be one of 'add', 'xor'/);
   throws(() => fb({ mode: 1 }), /param 'mode' must be one of/);
   throws(() => fb([1, 2]), /core\.params must be an object/);
-  throws(() => Z.buildMachine({ core: { isa: Z.z80, params: { q: true } }, world: ring(32) }), /z80 has no param 'q' \(it declares none\)/);
+  throws(() => Z.buildMachine({ core: { isa: Z.z80, compat: "0.3", params: { q: true } }, world: ring(32) }), /z80 has no param 'q' \(it declares none\)/);
   // the two forms of the core are not mixed, and params never sit beside isa
   throws(() => Z.buildMachine({ isa: fakeCore, params: { scale: 2 }, world: w }), /go in core: \{ isa, params \}/);
   throws(() => Z.buildMachine({ core: { isa: fakeCore }, isa: fakeCore, world: w }), /not both/);
@@ -575,6 +610,37 @@ test("resumable machines: a steps budget, the state and the memory stored; the p
   eq(lib({ memory: "m", out: "o" }).resumable, true);
   if (!lib({ memory: "m", out: "o" }).functions.includes("zil_resume(lane, seed, step_base: vec2<u32>, o)")) throw new Error("zil_resume not listed");
   eq(lib({ memory: "m" }).resumable, false);
+});
+
+// --- the 6502 is exported (experimental) ----------------------------------------------------------------------
+test("6502 exports: the root and the ./m6502 subpath give the same descriptor; the package ships it", () => {
+  eq(Z.m6502 === m6502, true);
+  eq(Z.m6502.status, "experimental");
+  eq(typeof Z.m6502CoreText, "function");
+  eq(Z.m6502FirstPushAt(32, 31), { s: 0xff });
+  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  eq(pkg.files.includes("!dist/cores/m6502"), false);
+  eq(pkg.exports["./m6502"].import, "./dist/cores/m6502/index.js");
+});
+
+// --- the 6502 opcode table ----------------------------------------------------------------------------------------
+test("6502 table: 151 documented, 85 stable undocumented, 8 unstable, 12 JAM; decode words agree with the table", () => {
+  const t = m6502.table();
+  eq(t.length, 256);
+  const count = {};
+  for (const e of t) count[e.families[0]] = (count[e.families[0]] ?? 0) + 1;
+  eq(Object.entries(count).sort(), [["documented", 151], ["jam", 12], ["undocumented", 85], ["unstable", 8]]);
+  eq(t.filter((e) => e.families[0] === "jam").map((e) => e.key), [0x02, 0x12, 0x22, 0x32, 0x42, 0x52, 0x62, 0x72, 0x92, 0xb2, 0xd2, 0xf2]);
+  eq(t.filter((e) => e.families[0] === "unstable").map((e) => e.key), [0x8b, 0x93, 0x9b, 0x9c, 0x9e, 0x9f, 0xab, 0xbb]);
+  eq([t[0x00], t[0x20], t[0x6c], t[0xea], t[0xeb], t[0x1a]].map((e) => `${e.mnemonic}/${e.length}/${e.families[0]}`),
+    ["BRK/2/documented", "JSR/3/documented", "JMP/3/documented", "NOP/1/documented", "SBC/2/undocumented", "NOP/1/undocumented"]);
+  // the decode word: addressing mode in bits 0-3, a read for every memory-operand load, two writes only for RMW
+  const { M6502_DECODE } = M6502;
+  eq(M6502_DECODE[0xad] & 0x1f, 0x15); // LDA abs: abs (5) + READ
+  eq(M6502_DECODE[0xee] & 0x3f, 0x35); // INC abs: abs + READ + RMW
+  eq(M6502_DECODE[0x9d] & 0xff, 0x86); // STA abs,X: abs,X (6) + STORE, no READ
+  eq(M6502_DECODE[0xea], 0);           // NOP: nothing
+  eq((M6502_DECODE[0x02] >> 20) & 15, 12); // JAM: control class 12
 });
 
 // --- engine chunk planner ---------------------------------------------------------------------------------------

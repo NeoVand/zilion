@@ -3,7 +3,9 @@
 A file is a JSON array of tests: {name, initial: {<fields>, ram: [[addr, value], ...]}, final: {...},
 ports?: [[port, value, "r" | "w"], ...], cycles: [...]}. Files are untrusted data: they are parsed only as JSON
 (gzip-decompressed when the name ends in .gz), every value is checked to be an integer inside its field's width,
-and nothing in them is ever executed or used as a path. `cycles` is not used (the cores are not cycle-accurate).
+and nothing in them is ever executed or used as a path. Cycle timing is not compared (the cores are not
+cycle-accurate). An adapter with `write_cap > 0` (the 6502) extracts the reference's memory *writes*, in order, from
+`cycles` through its `bus_writes(test)`; the host logs the core's writes, and the ledger compares the two sequences.
 
 Adapters whose layout differs (nested register blocks, for example) override `state_values`.
 """
@@ -77,6 +79,9 @@ def parse_file(path: Path, key: str, adapter, mem_cap: int, port_cap: int) -> Fi
     port_in = np.zeros((n, port_cap, 2), dtype=np.uint32)
     port_out_n = np.zeros(n, dtype=np.uint32)
     port_out = np.zeros((n, port_cap, 2), dtype=np.uint32)
+    write_cap = getattr(adapter, "write_cap", 0)
+    bus_n = np.zeros(n, dtype=np.uint32) if write_cap else None
+    bus = np.zeros((n, write_cap, 2), dtype=np.uint32) if write_cap else None
     for i, t in enumerate(tests):
         try:
             ram0 = t["initial"]["ram"]
@@ -121,10 +126,24 @@ def parse_file(path: Path, key: str, adapter, mem_cap: int, port_cap: int) -> Fi
                     raise HarnessError(f"{path.name}: {names[i]}: more than {port_cap} port writes")
                 port_out[i, port_out_n[i]] = e[:2]
                 port_out_n[i] += 1
+        if write_cap:
+            try:
+                writes = adapter.bus_writes(t)
+            except (KeyError, TypeError, ValueError) as e:
+                raise HarnessError(f"{path.name}: {names[i]}: malformed cycles: {e!r}") from None
+            for a, v in writes:
+                if type(a) is not int or type(v) is not int or not (0 <= a <= addr_mask) or not (0 <= v <= 0xFF):
+                    raise HarnessError(f"{path.name}: {names[i]}: bad bus write [{a!r}, {v!r}]")
+            # Leave at least 4 free slots for writes the reference did not make (the count is exact in any case).
+            if len(writes) > write_cap - 4:
+                raise HarnessError(f"{path.name}: {names[i]}: {len(writes)} bus writes exceed the log (cap {write_cap})")
+            bus_n[i] = len(writes)
+            for k, (a, v) in enumerate(writes):
+                bus[i, k] = (a, v)
     return FileBatch(
         key=key, path=path, sha256=digest, names=names,
         state_in=state_in.astype(np.uint32), state_exp=state_exp.astype(np.uint32),
         mem_n=mem_n, mem_addr=mem_addr, mem_init=mem_init, mem_exp=mem_exp, mem_final_only=mem_final_only,
         port_in_n=port_in_n, port_in=port_in, port_out_n=port_out_n, port_out=port_out,
-        orig=np.arange(n), tests=tests,
+        orig=np.arange(n), tests=tests, bus_n=bus_n, bus=bus,
     )

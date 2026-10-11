@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from .model import MEM_KINDS, PORT_KINDS
+from .model import BUS_KINDS, MEM_KINDS, PORT_KINDS
 
 
 def sha256(text: str) -> str:
@@ -20,8 +20,11 @@ def flag_names(mask: int, isa: str, field: str) -> str:
     if field == "f" and isa == "z80":
         names = [(0x80, "S"), (0x40, "Z"), (0x20, "Y(5)"), (0x10, "H"), (0x08, "X(3)"), (0x04, "P/V"), (0x02, "N"), (0x01, "C")]
         return "+".join(n for b, n in names if mask & b) or "-"
-    if field in ("mem", "ports"):
-        kinds = MEM_KINDS if field == "mem" else PORT_KINDS
+    if field == "p" and isa == "6502":
+        names = [(0x80, "N"), (0x40, "V"), (0x20, "1(5)"), (0x10, "B"), (0x08, "D"), (0x04, "I"), (0x02, "Z"), (0x01, "C")]
+        return "+".join(n for b, n in names if mask & b) or "-"
+    if field in ("mem", "ports", "bus"):
+        kinds = {"mem": MEM_KINDS, "ports": PORT_KINDS, "bus": BUS_KINDS}[field]
         return "+".join(n for b, n in kinds.items() if mask & b) or "-"
     return f"0x{mask:x}"
 

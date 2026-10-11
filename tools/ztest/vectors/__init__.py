@@ -6,4 +6,5 @@
   runner.py   batching, dispatch, readback
   ledger.py   comparison, ignore masks / expected rules, the divergence ledger and its report
   z80.py      the Z80 adapter (SingleStepTests/z80 on the Zilion core)
+  m6502.py    the 6502 adapter (SingleStepTests/65x02 6502/v1 on the Zilion NMOS core)
 """

@@ -27,7 +27,7 @@ class Runner:
         self.steps = steps
         self.repeat = max(1, repeat)
         self.layout = HostLayout(state_words=len(adapter.fields), mem_cap=mem_cap, port_cap=port_cap,
-                                 addr_bits=adapter.addr_bits, mode=mode)
+                                 addr_bits=adapter.addr_bits, mode=mode, write_cap=getattr(adapter, "write_cap", 0))
         self.wgsl = build_host(self.layout, core, adapter.glue(core), adapter.step_call)
         self.pipeline, self.bgl = G.compile_pipeline(gpu.device, self.wgsl, self.layout.bindings,
                                                      label=f"{adapter.isa} vector host ({mode})")
@@ -53,10 +53,11 @@ class Runner:
         cat = lambda xs: np.concatenate(xs) if xs else np.zeros(0, np.uint32)  # noqa: E731
         state_in = cat([f.state_in for f in files]).reshape(-1, L.state_words)
         N = state_in.shape[0]
-        mem = np.zeros((N, L.mem_stride), dtype=np.uint32)
+        mem = np.zeros((N, L.mem_stride), dtype=np.uint32)  # the table, then the bus-write log (zeroed), if any
+        T = L.table_words
         mem[:, 0] = cat([f.mem_n for f in files])
-        mem[:, 1::2] = cat([f.mem_addr for f in files]).reshape(N, L.mem_cap)
-        mem[:, 2::2] = cat([f.mem_init for f in files]).reshape(N, L.mem_cap)
+        mem[:, 1:T:2] = cat([f.mem_addr for f in files]).reshape(N, L.mem_cap)
+        mem[:, 2:T:2] = cat([f.mem_init for f in files]).reshape(N, L.mem_cap)
         ports = np.zeros((N, L.port_stride), dtype=np.uint32)
         ports[:, 0] = cat([f.port_in_n for f in files])
         ports[:, 2 : 2 + 2 * L.port_cap] = cat([f.port_in for f in files]).reshape(N, 2 * L.port_cap)
@@ -75,7 +76,7 @@ class Runner:
         st, mm, pp, ss = (np.concatenate([o[k] for o in outs]) if outs else None for k in range(4))
 
         result, row = [], 0
-        P = L.port_cap
+        P, W = L.port_cap, L.write_cap
         for f in files:
             sl = slice(row, row + f.n)
             row += f.n
@@ -83,12 +84,14 @@ class Runner:
             result.append(LaneOutputs(
                 state=st[sl],
                 mem_n=m[:, 0],
-                mem_addr=m[:, 1::2],
-                mem_word=m[:, 2::2],
+                mem_addr=m[:, 1:T:2],
+                mem_word=m[:, 2:T:2],
                 port_in_word=p[:, 3 : 2 + 2 * P : 2],
                 port_out_n=p[:, 1],
                 port_out=p[:, 2 + 2 * P : 2 + 4 * P].reshape(-1, P, 2),
                 status=ss[sl],
+                bus_n=m[:, T] if W else None,
+                bus=m[:, T + 1 : T + 1 + 2 * W].reshape(-1, W, 2) if W else None,
             ))
         return result
 

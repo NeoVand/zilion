@@ -126,7 +126,7 @@ const world = { memory: { kind: "ring", bytes: 32 }, budget: { unit: "steps", va
 await test("Batch.read() snapshots at call time: read, run, read → 1 and 2 dispatches (review bug 1)", async () => {
   const dev = mockDevice();
   const engine = await Z.createEngine({ device: dev });
-  const m = await engine.machine({ isa: Z.z80, world });
+  const m = await engine.machine({ isa: Z.z80, compat: "0.3", world });
   const b = m.batch(200, { maxLanesPerSlab: 64 }); // 4 slabs
   b.upload(new Uint8Array(200 * 32));
   const run = () => {
@@ -179,7 +179,7 @@ await test("0.2 facade: no GPU buffer outlives a run; overlapping runs; destroy(
 await test("Machine: destroy() racing run() lets the run finish, then releases its buffers; later runs reject", async () => {
   const dev = mockDevice();
   const engine = await Z.createEngine({ device: dev });
-  const m = await engine.machine({ isa: Z.z80, world });
+  const m = await engine.machine({ isa: Z.z80, compat: "0.3", world });
   const p1 = m.run(new Uint8Array(300 * 32));
   const p2 = m.run(new Uint8Array(100 * 32));
   m.destroy();
@@ -202,7 +202,7 @@ await test("staging buffers stay within maxBufferSize; chunks are planned for th
   assert(per === 11, `planned ${per} lanes per chunk, expected 11`);
   const dev = mockDevice(limits);
   const engine = await Z.createEngine({ device: dev });
-  const m = await engine.machine({ isa: Z.z80, world: { memory: { kind: "ring", bytes: 256 }, budget: { unit: "steps", value: 1 }, init: { stack: { topAliases: "lastByte" } } } });
+  const m = await engine.machine({ isa: Z.z80, compat: "0.3", world: { memory: { kind: "ring", bytes: 256 }, budget: { unit: "steps", value: 1 }, init: { stack: { topAliases: "lastByte" } } } });
   const r = await m.run(new Uint8Array(100 * 256));
   all(r.steps, 1, "steps");
   const z = await Z.Zilion.create({ memBytes: 256, device: dev });
@@ -229,7 +229,7 @@ await test("the typed engine refuses 0.2-kernel manifests (review nit 7)", async
 await test("Machine.run({ stepBase, resume }): the params carry the 64-bit step base and the resume flag; each chunk's records are uploaded before its dispatch", async () => {
   const dev = mockDevice();
   const engine = await Z.createEngine({ device: dev });
-  const m = await engine.machine({ isa: Z.z80, world });
+  const m = await engine.machine({ isa: Z.z80, compat: "0.3", world });
   assert(m.manifest.resumable, "the world should be resumable");
   const R = m.manifest.record.wordsPerLane;
   const at = (role) => m.manifest.params.fields.find((f) => f.role === role).offset / 4;
@@ -255,7 +255,7 @@ await test("Machine.run({ stepBase, resume }): the params carry the 64-bit step 
   };
   await rejects(m.run(new Uint8Array(2 * 32), { resume: new Uint32Array(5) }), /previous records/);
   await rejects(m.run(new Uint8Array(32), { stepBase: -1 }), /non-negative/);
-  const nr = await engine.machine({ isa: Z.z80, world: { ...world, budget: { unit: "fetchBytes", value: 10 } } });
+  const nr = await engine.machine({ isa: Z.z80, compat: "0.3", world: { ...world, budget: { unit: "fetchBytes", value: 10 } } });
   await rejects(nr.run(new Uint8Array(32), { resume: new Uint32Array(nr.manifest.record.wordsPerLane) }), /cannot resume/);
   // Batch: uploadRecords + encode({ resume: true, stepBase }) continues the resident lanes
   const b = m.batch(100, { maxLanesPerSlab: 64 });
@@ -278,7 +278,7 @@ await test("Machine.run({ stepBase, resume }): the params carry the 64-bit step 
 });
 
 await test("typed results decode trapCause through the manifest", async () => {
-  const m = Z.buildMachine({ isa: Z.z80, world }).manifest;
+  const m = Z.buildMachine({ isa: Z.z80, compat: "0.3", world }).manifest;
   const R = m.record.wordsPerLane;
   const rec = new Uint32Array(3 * R);
   rec[0 * R + 2] = 0;

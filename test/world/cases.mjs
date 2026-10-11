@@ -61,7 +61,7 @@ export const CASES = [
     // JP P-1 (C3 lo 00); LD A,n at address P-1, whose operand is address P → position 0, the C3 byte.
     // After 2 steps: A = 0xC3, PC = P+1. Fetched {0,1,2,P-1}; instruction starts {0,P-1}.
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(P, { init: { stack: LAST }, outputs: maps }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(P, { init: { stack: LAST }, outputs: maps }) }, [
         { mem: mem(P, { 0: [0xc3, P - 1, 0x00], [P - 1]: [0x3e] }),
           expect: { steps: 2, halt: "running", state: { a: 0xc3, pc: P + 1 }, fetched: [0, 1, 2, P - 1], starts: [0, P - 1] } },
       ], { budget: 2 }),
@@ -72,7 +72,7 @@ export const CASES = [
     // A = 0xC3, PC = 0x0001 (not 0x10000 mod P): the seam is crossed in 16 bits, then mapped.
     setup: ({ Z, addJob }) => {
       const p = q(P, lit);
-      return addJob({ isa: Z.z80, world: ring(P, { init: { stack: LAST }, outputs: maps }) }, [
+      return addJob({ isa: Z.z80, compat: "0.3", world: ring(P, { init: { stack: LAST }, outputs: maps }) }, [
         { mem: mem(P, { 0: [0xc3, 0xff, 0xff], [p]: [0x3e] }),
           expect: { steps: 2, state: { a: 0xc3, pc: 0x0001 }, fetched: [0, 1, 2, p], starts: [0, p] } },
       ], { budget: 2 });
@@ -84,7 +84,7 @@ export const CASES = [
     // operand from address 0x0000 → position 0 = 0x18. A = 0x18, PC = 1.
     setup: ({ Z, addJob }) => {
       const p = q(P, lit);
-      return addJob({ isa: Z.z80, world: ring(P, { init: { stack: LAST }, outputs: maps }) }, [
+      return addJob({ isa: Z.z80, compat: "0.3", world: ring(P, { init: { stack: LAST }, outputs: maps }) }, [
         { mem: mem(P, { 0: [0x18, 0xfd], [p]: [0x3e] }),
           expect: { steps: 2, state: { a: 0x18, pc: 1 }, fetched: [0, 1, p], starts: [0, p] } },
       ], { budget: 2 });
@@ -96,7 +96,7 @@ export const CASES = [
     // position 65535 mod P. Then HALT at 4.
     setup: ({ Z, addJob }) => {
       const p = q(P, lit);
-      return addJob({ isa: Z.z80, world: ring(P, { init: { set: { sp: 0x0001 } }, outputs: { writeCounts: true } }) }, [
+      return addJob({ isa: Z.z80, compat: "0.3", world: ring(P, { init: { set: { sp: 0x0001 } }, outputs: { writeCounts: true } }) }, [
         { mem: mem(P, { 0: [0x01, 0x34, 0x12, 0xc5, 0x76] }),
           expect: { steps: 3, halt: "halt-insn", state: { sp: 0xffff, pc: 4, b: 0x12, c: 0x34 }, mem: { 0: 0x12, [p]: 0x34 }, writes: [2] } },
       ]);
@@ -108,7 +108,7 @@ export const CASES = [
     // opcode itself. DE = 0xD1CD, SP = 0x0001. HALT at 1.
     setup: ({ Z, addJob }) => {
       const p = q(P, lit);
-      return addJob({ isa: Z.z80, world: ring(P, { init: { set: { sp: 0xffff } } }) }, [
+      return addJob({ isa: Z.z80, compat: "0.3", world: ring(P, { init: { set: { sp: 0xffff } } }) }, [
         { mem: mem(P, { 0: [0xd1, 0x76], [p]: [0xcd] }),
           expect: { steps: 2, halt: "halt-insn", state: { d: 0xd1, e: 0xcd, sp: 0x0001, pc: 1 } } },
       ]);
@@ -118,7 +118,7 @@ export const CASES = [
     name: "seam P=40: LD (0xFFFF),HL splits the word across the seam (positions 15 and 0)",
     // LD HL,0xABCD; LD (0xFFFF),HL: L → 0xFFFF (position 15), H → 0x0000 (position 0). HALT at 6.
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(40, { init: { stack: LAST } }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(40, { init: { stack: LAST } }) }, [
         { mem: mem(40, { 0: [0x21, 0xcd, 0xab, 0x22, 0xff, 0xff, 0x76] }),
           expect: { steps: 3, halt: "halt-insn", mem: { [q(40, 15)]: 0xcd, 0: 0xab } } },
       ]),
@@ -128,7 +128,7 @@ export const CASES = [
     // Lane 0: IX = 0xFFFE; LD (IX+3),0x77 → 0x0001 → position 1 (an unmasked model would hit 65537 mod 40 = 17).
     // Lane 1: IX = 0x0002; LD (IX-4),0x77 → 0xFFFE → position 65534 mod 40 = 14.
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(40, { init: { stack: LAST } }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(40, { init: { stack: LAST } }) }, [
         { mem: mem(40, { 0: [0xdd, 0x21, 0xfe, 0xff, 0xdd, 0x36, 0x03, 0x77, 0x76] }),
           expect: { steps: 3, halt: "halt-insn", state: { ix: 0xfffe, pc: 8 }, mem: { 1: 0x77, 17: 0x00 } } },
         { mem: mem(40, { 0: [0xdd, 0x21, 0x02, 0x00, 0xdd, 0x36, 0xfc, 0x77, 0x76] }),
@@ -140,7 +140,7 @@ export const CASES = [
     // HL=0xFFFE DE=0x0010 BC=4; LDIR copies 0xFFFE,0xFFFF,0x0000,0x0001 = positions 14,15,0,1 = AA BB 21 FE
     // to positions 16..19. Steps: 3 loads + 4 LDIR iterations + HALT = 8. HL ends at 0x0002 (16-bit wrap).
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(40, { init: { stack: LAST }, outputs: { writeCounts: true } }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(40, { init: { stack: LAST }, outputs: { writeCounts: true } }) }, [
         { mem: mem(40, { 0: [0x21, 0xfe, 0xff, 0x11, 0x10, 0x00, 0x01, 0x04, 0x00, 0xed, 0xb0, 0x76], 14: [0xaa, 0xbb] }),
           expect: { steps: 8, halt: "halt-insn", state: { pc: 11, h: 0x00, l: 0x02, d: 0x00, e: 0x14, b: 0, c: 0 },
             mem: { 16: 0xaa, 17: 0xbb, 18: 0x21, 19: 0xfe }, writes: [4] } },
@@ -152,7 +152,7 @@ export const CASES = [
     // CALL 0x0020 pushes 0x0003: 0x00 at 0xFFEE (position 38), 0x03 at 0xFFED (position 37); RET at 32
     // returns to 3, HALT. SP back to 0xFFEF.
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(40, { init: { stack: { topAliases: "lastByte" } } }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(40, { init: { stack: { topAliases: "lastByte" } } }) }, [
         { mem: mem(40, { 0: [0xcd, 0x20, 0x00, 0x76], 32: [0xc9], 38: [0xee] }),
           expect: { steps: 3, halt: "halt-insn", state: { sp: 0xffef, pc: 3 }, mem: { 38: 0x00, 37: 0x03 } } },
       ]),
@@ -173,7 +173,7 @@ export const CASES = [
     name: `stack convention, ${label}: SP0 = 0x${sp.toString(16)} aliases the last byte`,
     setup: ({ Z, addJob }) => {
       const w = { ...world, init: { stack: { topAliases: "lastByte" } } };
-      const built = Z.buildMachine({ isa: Z.z80, world: w });
+      const built = Z.buildMachine({ isa: Z.z80, compat: "0.3", world: w });
       const n = built.manifest.memory.hostBytesPerLane;
       return addJob(built, [{ mem: mem(n, { 0: [0x76] }), expect: { steps: 1, halt: "halt-insn", state: { sp, pc: 0 } } }]);
     },
@@ -182,7 +182,7 @@ export const CASES = [
     name: "stack convention, explicit position: topAliases 5 on ring 40 gives SP0 = 0xFFF5",
     // 0xFFFF - ((0xFFFF - 5) mod 40) = 0xFFFF - 10 = 0xFFF5; 0xFFF5 mod 40 = 5.
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(40, { init: { stack: { topAliases: 5 } } }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(40, { init: { stack: { topAliases: 5 } } }) }, [
         { mem: mem(40, { 0: [0x76] }), expect: { state: { sp: 0xfff5 } } },
       ]),
   },
@@ -193,7 +193,7 @@ export const CASES = [
   {
     name: "padded pair L=16 P=37: padding is writable, zero at start, never stored; writes per segment",
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: pair(16, 37, { init: { stack: { topAliases: "lastByte" } }, outputs: { writeCounts: true } }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: pair(16, 37, { init: { stack: { topAliases: "lastByte" } }, outputs: { writeCounts: true } }) }, [
         // LD A,0x5A; LD (0x22),A → position 34 (padding); LD A,(0x22) reads it back; HALT at 8.
         { label: "write padding", mem: mem(32, { 0: [0x3e, 0x5a, 0x32, 0x22, 0x00, 0x3a, 0x22, 0x00, 0x76] }),
           expect: { steps: 4, halt: "halt-insn", state: { a: 0x5a, pc: 8 }, writes: [0, 0, 1],
@@ -212,7 +212,7 @@ export const CASES = [
   {
     name: "padded pair L=36 P=75: padding at 72..74; 0xFFFF maps to position 60, inside B",
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: pair(36, 75, { init: { stack: LAST }, outputs: { writeCounts: true } }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: pair(36, 75, { init: { stack: LAST }, outputs: { writeCounts: true } }) }, [
         // LD A,0x77; LD (0x0048),A → position 72 = padding; HALT. Output memory unchanged.
         { label: "padding", mem: mem(72, { 0: [0x3e, 0x77, 0x32, 0x48, 0x00, 0x76] }),
           expect: { steps: 3, writes: [0, 0, 1], memAll: mem(72, { 0: [0x3e, 0x77, 0x32, 0x48, 0x00, 0x76] }) } },
@@ -229,21 +229,21 @@ export const CASES = [
     name: "budget per lane (steps): INC A everywhere, budgets 0, 1, 5, 64, 200",
     // Each step is one INC A: A = budget mod 256, PC = budget, R = budget mod 128.
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(64, { init: { stack: LAST }, budget: { unit: "steps", value: "perLane" } }) },
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(64, { init: { stack: LAST }, budget: { unit: "steps", value: "perLane" } }) },
         [0, 1, 5, 64, 200].map((b) => ({ budget: b, mem: mem(64, {}, 0x3c),
           expect: { steps: b, halt: "running", trap: 0, state: { a: b & 0xff, pc: b, r: b & 0x7f } } }))),
   },
   {
     name: "budget uniform: the world default (7) and a per-run override (9)",
     setup: ({ Z, addJob }) => [
-      addJob({ isa: Z.z80, world: ring(64, { init: { stack: LAST }, budget: steps(7) }) }, [{ mem: mem(64, {}, 0x3c), expect: { steps: 7, state: { a: 7 } } }]),
-      addJob({ isa: Z.z80, world: ring(64, { init: { stack: LAST }, budget: steps(7) }) }, [{ mem: mem(64, {}, 0x3c), expect: { steps: 9, state: { a: 9 } } }], { budget: 9 }),
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(64, { init: { stack: LAST }, budget: steps(7) }) }, [{ mem: mem(64, {}, 0x3c), expect: { steps: 7, state: { a: 7 } } }]),
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(64, { init: { stack: LAST }, budget: steps(7) }) }, [{ mem: mem(64, {}, 0x3c), expect: { steps: 9, state: { a: 9 } } }], { budget: 9 }),
     ],
   },
   {
     name: "budget: a lane that halts first reports the steps it ran",
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST } }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST } }) }, [
         { mem: mem(32, { 0: [0x3c, 0x3c, 0x76] }), expect: { steps: 3, halt: "halt-insn", state: { a: 2, pc: 2 } } },
       ], { budget: 100 }),
   },
@@ -252,7 +252,7 @@ export const CASES = [
     // LD B,1 (06 01) everywhere. A step starts while fewer than `budget` bytes have been fetched, so the
     // steps are ceil(budget / 2) and PC = 2 · steps.
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(64, { init: { stack: LAST }, budget: { unit: "fetchBytes", value: "perLane" } }) },
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(64, { init: { stack: LAST }, budget: { unit: "fetchBytes", value: "perLane" } }) },
         [[0, 0], [1, 1], [2, 1], [4, 2], [5, 3], [6, 3]].map(([b, s]) => ({
           budget: b, mem: mem(64, Object.fromEntries(Array.from({ length: 32 }, (_, i) => [2 * i, [0x06, 0x01]]))),
           expect: { steps: s, state: { pc: 2 * s } } }))),
@@ -264,7 +264,7 @@ export const CASES = [
   {
     name: "native HALT: halts, parks PC on the opcode, reason halt-insn",
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST } }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST } }) }, [
         { mem: mem(32, { 0: [0x3c, 0x3c, 0x76, 0x3c] }),
           expect: { steps: 3, halt: "halt-insn", trap: "halt-insn", state: { a: 2, pc: 2, halted: 1, r: 3 } } },
       ], { budget: 10 }),
@@ -272,14 +272,14 @@ export const CASES = [
   {
     name: "trap policy halt-insn: ignore turns HALT into a 1-byte no-op",
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST }, halting: { traps: { "halt-insn": "ignore" } } }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST }, halting: { traps: { "halt-insn": "ignore" } } }) }, [
         { mem: mem(32, { 0: [0x3c, 0x3c, 0x76, 0x3c] }), expect: { steps: 4, halt: "running", trap: 0, state: { a: 3, pc: 4, halted: 0 } } },
       ], { budget: 4 }),
   },
   {
     name: "lethal first unit 0x00: halts only on the first byte of an instruction",
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST }, halting: { lethal: { firstUnit: 0 } }, outputs: maps }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST }, halting: { lethal: { firstUnit: 0 } }, outputs: maps }) }, [
         // INC A; 00 → halted by the host, PC backed onto the 00, R counted both M1s.
         { label: "3C 00", mem: mem(32, { 0: [0x3c, 0x00, 0x3c, 0x76] }),
           expect: { steps: 2, halt: "host", trap: 0, state: { a: 1, pc: 1, halted: 2, r: 2 }, fetched: [0, 1], starts: [0, 1] } },
@@ -299,7 +299,7 @@ export const CASES = [
   {
     name: "lethal first unit 0xC9 (any unit value works): RET halts before it executes",
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST }, halting: { lethal: { firstUnit: 0xc9 } } }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST }, halting: { lethal: { firstUnit: 0xc9 } } }) }, [
         { mem: mem(32, { 0: [0x3c, 0xc9, 0x76] }), expect: { steps: 2, halt: "host", state: { a: 1, pc: 1 } } },
       ], { budget: 50 }),
   },
@@ -315,7 +315,7 @@ export const CASES = [
         while (s < 40 && !(Z.zilHash(seed, l, s, 0) < T)) s++;
         return { mem: mem(32), expect: s < 40 ? { steps: s + 1, halt: "host", state: { pc: s } } : { steps: 40, halt: "running", state: { pc: 40 } } };
       });
-      return addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST }, halting: { lethal: { firstUnit: 0, probability: 0.3 } } }) }, lanes, { seed, budget: 40 });
+      return addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST }, halting: { lethal: { firstUnit: 0, probability: 0.3 } } }) }, lanes, { seed, budget: 40 });
     },
     check: (job) => {
       const first = job.result.filter((r) => r.steps === 1 && r.halt === "host").length / job.result.length;
@@ -335,7 +335,7 @@ export const CASES = [
         return { mem: mem(32, {}, 0x76),
           expect: s < 30 ? { steps: s + 1, halt: "halt-insn", trap: "halt-insn", state: { pc: s, r: s + 1 } } : { steps: 30, halt: "running", trap: 0, state: { pc: 30 } } };
       });
-      return addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST }, halting: { traps: { "halt-insn": { halt: { probability: 0.5, salt: 7 } } } } }) },
+      return addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST }, halting: { traps: { "halt-insn": { halt: { probability: 0.5, salt: 7 } } } } }) },
         lanes, { seed, budget: 30 });
     },
   },
@@ -350,19 +350,19 @@ export const CASES = [
       const world = ring(32, { init: { stack: LAST }, ablation: { table: "uniform" } });
       return [
         // INC A ablated: 3C 3C are 1-byte no-ops (still steps), LD A,5, HALT.
-        addJob({ isa: Z.z80, world }, [{ mem: mem(32, { 0: [0x3c, 0x3c, 0x3e, 0x05, 0x76] }), expect: { steps: 4, halt: "halt-insn", state: { a: 5, r: 4 } } }],
+        addJob({ isa: Z.z80, compat: "0.3", world }, [{ mem: mem(32, { 0: [0x3c, 0x3c, 0x3e, 0x05, 0x76] }), expect: { steps: 4, halt: "halt-insn", state: { a: 5, r: 4 } } }],
           { ablation: words([[0, 0x3c]]) }),
         // LD A,n ablated: 3E is a 1-byte no-op, its operand 3C runs as INC A.
-        addJob({ isa: Z.z80, world }, [{ mem: mem(32, { 0: [0x3e, 0x3c, 0x76] }), expect: { steps: 3, state: { a: 1, pc: 2 } } }],
+        addJob({ isa: Z.z80, compat: "0.3", world }, [{ mem: mem(32, { 0: [0x3e, 0x3c, 0x76] }), expect: { steps: 3, state: { a: 1, pc: 2 } } }],
           { ablation: words([[0, 0x3e]]) }),
         // LDIR ablated: ED B0 is a 2-byte no-op (R counts both M1s); BC stays 0.
-        addJob({ isa: Z.z80, world }, [{ mem: mem(32, { 0: [0xed, 0xb0, 0x76] }), expect: { steps: 2, halt: "halt-insn", state: { pc: 2, r: 3, b: 0, c: 0 } } }],
+        addJob({ isa: Z.z80, compat: "0.3", world }, [{ mem: mem(32, { 0: [0xed, 0xb0, 0x76] }), expect: { steps: 2, halt: "halt-insn", state: { pc: 2, r: 3, b: 0, c: 0 } } }],
           { ablation: words([[2, 0xb0]]) }),
         // Coarse layout: DD forms follow the base page, so INC HL ablated also skips INC IX (DD 23, 2 bytes).
-        addJob({ isa: Z.z80, world }, [{ mem: mem(32, { 0: [0xdd, 0x23, 0x76] }), expect: { steps: 2, state: { ix: 0, pc: 2 } } }],
+        addJob({ isa: Z.z80, compat: "0.3", world }, [{ mem: mem(32, { 0: [0xdd, 0x23, 0x76] }), expect: { steps: 2, state: { ix: 0, pc: 2 } } }],
           { ablation: words([[0, 0x23]]) }),
         // No ablation: LD A,0x3C.
-        addJob({ isa: Z.z80, world }, [{ mem: mem(32, { 0: [0x3e, 0x3c, 0x76] }), expect: { steps: 2, state: { a: 0x3c } } }]),
+        addJob({ isa: Z.z80, compat: "0.3", world }, [{ mem: mem(32, { 0: [0x3e, 0x3c, 0x76] }), expect: { steps: 2, state: { a: 0x3c } } }]),
       ];
     },
   },
@@ -371,14 +371,14 @@ export const CASES = [
     setup: ({ Z, addJob }) => {
       const w = new Uint32Array(7 * 8);
       w[3 * 8 + (0x23 >> 5)] |= 1 << (0x23 & 31); // page 3 = dd
-      return addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST }, ablation: { table: "uniform", layout: "fine" } }) },
+      return addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST }, ablation: { table: "uniform", layout: "fine" } }) },
         [{ mem: mem(32, { 0: [0xdd, 0x23, 0x23, 0x76] }), expect: { steps: 3, state: { ix: 0, h: 0, l: 1 } } }], { ablation: w });
     },
   },
   {
     name: "ablation expression (0.2 fetchHook form): prefix == 0u && op == 0x3cu",
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST }, ablation: { expr: "prefix == 0u && op == 0x3cu" } }) },
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST }, ablation: { expr: "prefix == 0u && op == 0x3cu" } }) },
         [{ mem: mem(32, { 0: [0x3c, 0x3c, 0x3e, 0x05, 0x76] }), expect: { steps: 4, state: { a: 5 } } }]),
   },
 
@@ -386,7 +386,7 @@ export const CASES = [
     name: "io hooks: port numbers of IN/OUT, IN r,(C), OUT (C),r, OUT (C),0, INI (BC before B--), OUTI (after)",
     // io_in(port) returns (port >> 8) ^ (port & 0xFF); io_out(port, val) stores val at 0x20 + (port & 0xF).
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(64, { init: { stack: LAST }, hooks: {
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(64, { init: { stack: LAST }, hooks: {
         ioIn: "return ((port >> 8u) ^ port) & 0xffu;", ioOut: "mem_write(0x20u + (port & 0xfu), val);" } }) }, [
         // LD A,0x12; IN A,(0x34): port 0x1234 → 0x12 ^ 0x34 = 0x26.
         { label: "IN A,(n)", mem: mem(64, { 0: [0x3e, 0x12, 0xdb, 0x34, 0x76] }), expect: { steps: 3, state: { a: 0x26 } } },
@@ -412,7 +412,7 @@ export const CASES = [
     // Raw hook: skip first units 0x3C and 0xDD. 3C 3C LD A,5 HALT → A = 5 (R counts the skipped M1s).
     // DD 04 HALT: the DD alone is skipped, so 04 runs as INC B (ablation would have consumed DD 04 together).
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST }, outputs: maps, hooks: {
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST }, outputs: maps, hooks: {
         onInstructionStart: "if (unit == 0x3cu || unit == 0xddu) { return ZIL_SKIP; }" } }) }, [
         { mem: mem(32, { 0: [0x3c, 0x3c, 0x3e, 0x05, 0x76] }), expect: { steps: 4, halt: "halt-insn", state: { a: 5, r: 4, pc: 4 }, starts: [0, 1, 2, 4] } },
         { mem: mem(32, { 0: [0xdd, 0x04, 0x76] }), expect: { steps: 3, state: { b: 1, pc: 2 }, starts: [0, 1, 2] } },
@@ -425,7 +425,7 @@ export const CASES = [
   {
     name: "maps: operands are fetched but are not instruction starts; prefixes and DDCB",
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST }, outputs: maps }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST }, outputs: maps }) }, [
         { label: "LD A,n; INC A; HALT", mem: mem(32, { 0: [0x3e, 0x42, 0x3c, 0x76] }),
           expect: { steps: 3, fetched: [0, 1, 2, 3], starts: [0, 2, 3] } },
         { label: "LD IX,nn; HALT", mem: mem(32, { 0: [0xdd, 0x21, 0x34, 0x12, 0x76] }),
@@ -442,10 +442,10 @@ export const CASES = [
   {
     name: "maps span several words: ring 79 (position 78 → word 2) and ring 100 (position 64)",
     setup: ({ Z, addJob }) => [
-      addJob({ isa: Z.z80, world: ring(79, { init: { stack: LAST }, outputs: maps }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(79, { init: { stack: LAST }, outputs: maps }) }, [
         { mem: mem(79, { 0: [0xc3, 78, 0x00], 78: [0x3e] }), expect: { state: { a: 0xc3 }, fetched: [0, 1, 2, 78], starts: [0, 78] } },
       ], { budget: 2 }),
-      addJob({ isa: Z.z80, world: ring(100, { init: { stack: LAST }, outputs: maps }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(100, { init: { stack: LAST }, outputs: maps }) }, [
         { mem: mem(100, { 0: [0xc3, 64, 0x00], 64: [0x76] }), expect: { steps: 2, fetched: [0, 1, 2, 64], starts: [0, 64] } },
       ]),
     ],
@@ -465,7 +465,7 @@ export const CASES = [
         fields.forEach((f, k) => { if (f.randomizable) state[f.name] = Z.initDraw(seed, l, k, salt, f.bits); });
         return { mem: mem(32, { 0: [0x76] }), expect: { steps: 1, state } };
       });
-      return addJob({ isa: Z.z80, world: ring(32, { init: { stack: { topAliases: "lastByte" }, random: { salt } } }) }, lanes, { seed });
+      return addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: { topAliases: "lastByte" }, random: { salt } } }) }, lanes, { seed });
     },
   },
   {
@@ -474,17 +474,17 @@ export const CASES = [
       const k = Z.z80.state.findIndex((f) => f.name === "sp");
       const lanes = Array.from({ length: 32 }, (_, l) => ({ mem: mem(32, { 0: [0x76] }),
         expect: { state: { sp: Z.initDraw(4, l, k, 0, 16), a: 0, ix: 0 } } }));
-      return addJob({ isa: Z.z80, world: ring(32, { init: { random: { fields: ["sp"] } } }) }, lanes, { seed: 4 });
+      return addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { random: { fields: ["sp"] } } }) }, lanes, { seed: 4 });
     },
   },
   {
     name: "init.set and entry: constants, PC at a position, PC at lastByte",
     setup: ({ Z, addJob }) => [
-      addJob({ isa: Z.z80, world: ring(32, { init: { set: { a: 0x12, sp: 0x4000, ix: 0xbeef } } }) },
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { set: { a: 0x12, sp: 0x4000, ix: 0xbeef } } }) },
         [{ mem: mem(32, { 0: [0x76] }), expect: { state: { a: 0x12, sp: 0x4000, ix: 0xbeef } } }]),
-      addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST }, entry: { position: 5 } }) },
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST }, entry: { position: 5 } }) },
         [{ mem: mem(32, { 5: [0x76] }, 0x3c), expect: { steps: 1, halt: "halt-insn", state: { pc: 5, a: 0 } } }]),
-      addJob({ isa: Z.z80, world: pair(16, 40, { init: { stack: LAST }, entry: { position: "lastByte" } }) },
+      addJob({ isa: Z.z80, compat: "0.3", world: pair(16, 40, { init: { stack: LAST }, entry: { position: "lastByte" } }) },
         [{ mem: mem(32, { 31: [0x76] }), expect: { steps: 1, state: { pc: 31 } } }]),
     ],
   },
@@ -492,7 +492,7 @@ export const CASES = [
     name: "init.state perLane: the whole state record per lane (R bit 7 preserved)",
     // NOP NOP HALT at 3: PC 3 → parked at 5; R 0x80 → 0x83; everything else as loaded.
     setup: ({ Z, addJob }) =>
-      addJob({ isa: Z.z80, world: pair(16, 40, { init: { state: "perLane" } }) }, [
+      addJob({ isa: Z.z80, compat: "0.3", world: pair(16, 40, { init: { state: "perLane" } }) }, [
         { state: { a: 0x55, f: 0xff, ix: 0x1234, iy: 0xfedc, sp: 0x2000, pc: 3, r: 0x80, i: 0x3f, b_: 0x9a },
           mem: mem(32, { 3: [0x00, 0x00, 0x76] }),
           expect: { steps: 3, halt: "halt-insn", trap: "halt-insn", state: { a: 0x55, f: 0xff, ix: 0x1234, iy: 0xfedc, sp: 0x2000, pc: 5, r: 0x83, i: 0x3f, b_: 0x9a, halted: 1 } } },
@@ -503,19 +503,19 @@ export const CASES = [
     name: "on_reset runs last: after a per-lane state load it sees and keeps the loaded state (review bug 2)",
     // Raw hook A <- A + 1. perLane state A = 0x11 → 0x12; with init.set A = 0x11 the same → 0x12. HALT at 0.
     setup: ({ Z, addJob }) => [
-      addJob({ isa: Z.z80, world: ring(32, { init: { state: "perLane" }, hooks: { onReset: "cpu_a = cpu_a + 1u;" } }) },
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { state: "perLane" }, hooks: { onReset: "cpu_a = cpu_a + 1u;" } }) },
         [{ state: { a: 0x11 }, mem: mem(32, { 0: [0x76] }), expect: { steps: 1, state: { a: 0x12 } } }]),
-      addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST, set: { a: 0x11 } }, hooks: { onReset: "cpu_a = cpu_a + 1u;" } }) },
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST, set: { a: 0x11 } }, hooks: { onReset: "cpu_a = cpu_a + 1u;" } }) },
         [{ mem: mem(32, { 0: [0x76] }), expect: { steps: 1, state: { a: 0x12 } } }]),
     ],
   },
   {
     name: "user expressions on their own lines: trailing // comments in ablation.expr and hooks.decode; ioIn '' (review nit 8)",
     setup: ({ Z, addJob }) => [
-      addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST }, ablation: { expr: "prefix == 0u && op == 0x3cu // INC A" }, hooks: { decode: "false // nothing else" } }) },
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST }, ablation: { expr: "prefix == 0u && op == 0x3cu // INC A" }, hooks: { decode: "false // nothing else" } }) },
         [{ mem: mem(32, { 0: [0x3c, 0x3c, 0x3e, 0x05, 0x76] }), expect: { steps: 4, state: { a: 5 } } }]),
       // an empty ioIn enables the io hooks with the default (ports read 0): LD A,0x12; IN A,(0x34) → 0
-      addJob({ isa: Z.z80, world: ring(32, { init: { stack: LAST }, hooks: { ioIn: "" } }) },
+      addJob({ isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST }, hooks: { ioIn: "" } }) },
         [{ mem: mem(32, { 0: [0x3e, 0x12, 0xdb, 0x34, 0x76] }), expect: { steps: 3, state: { a: 0 } } }]),
     ],
   },
@@ -529,8 +529,8 @@ export const CASES = [
       const lanes = lanesOf(randomBytes(4096 * P, P), P);
       const w = { init: { stack: LAST }, budget: steps(128), outputs: { writeCounts: true, ...maps } };
       return [
-        addJob({ isa: Z.z80, world: { memory: { kind: "ring", bytes: P }, ...w } }, lanes, { budget: 128 }),
-        addJob({ isa: Z.z80, world: { memory: { kind: "mask", bytes: P }, ...w } }, lanes, { budget: 128 }),
+        addJob({ isa: Z.z80, compat: "0.3", world: { memory: { kind: "ring", bytes: P }, ...w } }, lanes, { budget: 128 }),
+        addJob({ isa: Z.z80, compat: "0.3", world: { memory: { kind: "mask", bytes: P }, ...w } }, lanes, { budget: 128 }),
       ];
     },
     check: ([a, b]) => compareJobs(a, b),
@@ -541,9 +541,9 @@ export const CASES = [
       const lanes = lanesOf(randomBytes(4096 * 40, 7), 40);
       const base = pair(20, 44, { init: { stack: { topAliases: "lastByte" } }, outputs: { writeCounts: true } });
       const hooked = { ...base, hooks: { onFetch: "", onInstructionStart: "", trap: "", ioIn: "return 0u;", ioOut: "", decode: "false", onReset: "" } };
-      const m = Z.buildMachine({ isa: Z.z80, world: hooked });
+      const m = Z.buildMachine({ isa: Z.z80, compat: "0.3", world: hooked });
       if (m.manifest.core.hooks.length !== 4) throw new Error(`expected all 4 hooks, got ${m.manifest.core.hooks}`);
-      return [addJob({ isa: Z.z80, world: base }, lanes, { budget: 128 }), addJob(m, lanes, { budget: 128 })];
+      return [addJob({ isa: Z.z80, compat: "0.3", world: base }, lanes, { budget: 128 }), addJob(m, lanes, { budget: 128 })];
     },
     check: ([a, b]) => compareJobs(a, b),
   },
@@ -556,7 +556,7 @@ export const CASES = [
       const world = pair(16, 37, { init: { stack: { topAliases: "lastByte" }, random: { fields: ["ix", "iy"] } },
         halting: { lethal: { firstUnit: 0, probability: 0.05 } }, ablation: { table: "uniform" },
         outputs: { writeCounts: true, ...maps } });
-      const lib = Z.buildMachine({ isa: Z.z80, world, mode: "library", bindingNames: { memory: "pair_data", out: "lane_out", ablation: "params.suppress" } });
+      const lib = Z.buildMachine({ isa: Z.z80, compat: "0.3", world, mode: "library", bindingNames: { memory: "pair_data", out: "lane_out", ablation: "params.suppress" } });
       const host = `struct Params { lanes: u32, lane_base: u32, budget: u32, seed: u32, suppress: array<vec4<u32>, 6> };
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read_write> pair_data: array<u32>;
@@ -575,7 +575,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     }
 }
 `;
-      const kernel = Z.buildMachine({ isa: Z.z80, world });
+      const kernel = Z.buildMachine({ isa: Z.z80, compat: "0.3", world });
       const manifest = { ...lib.manifest, mode: "kernel", entryPoint: "main", workgroupSize: 16, lanesPerInvocation: 4,
         params: { bytes: 112, fields: [
           { name: "lanes", role: "laneCount", offset: 0, words: 1 }, { name: "lane_base", role: "laneBase", offset: 4, words: 1 },
@@ -613,7 +613,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       });
       return [
         addJob(Z.legacyMachine(64), legacyLanes, { budget: 100 }),
-        addJob({ isa: Z.z80, compat: "0.2", world: Z.compat02World({ memBytes: 64, steps: 100, registers: "perLane" }) }, worldLanes),
+        addJob(Z.compat02Machine({ memBytes: 64, steps: 100, registers: "perLane" }), worldLanes),
       ];
     },
     check: ([a, b]) => {
@@ -634,7 +634,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     name: "library zil_run may be called again on a lane: zil_run(3) + zil_run(4) = one zil_run(7), dial included (review nit 6)",
     setup: ({ Z, addJob }) => {
       const world = pair(16, 32, { init: { stack: { topAliases: "lastByte" } }, halting: { lethal: { firstUnit: 0, probability: 0.2 } }, outputs: { writeCounts: true, ...maps } });
-      const lib = Z.buildMachine({ isa: Z.z80, world, mode: "library", bindingNames: { memory: "lane_mem", out: "lane_out" } });
+      const lib = Z.buildMachine({ isa: Z.z80, compat: "0.3", world, mode: "library", bindingNames: { memory: "lane_mem", out: "lane_out" } });
       const host = `struct Params { lanes: u32, lane_base: u32, budget: u32, seed: u32 };
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read_write> lane_mem: array<u32>;
@@ -660,7 +660,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
           { group: 0, binding: 1, name: "lane_mem", role: "memory", type: "storage", wordsPerLane: lib.manifest.memory.storageWordsPerLane },
           { group: 0, binding: 2, name: "lane_out", role: "record", type: "storage", wordsPerLane: lib.manifest.record.wordsPerLane }] };
       const lanes = lanesOf(randomBytes(4096 * 32, 77), 32);
-      return [addJob(Z.buildMachine({ isa: Z.z80, world }), lanes, { seed: 5, budget: 7 }), addJob({ wgsl: host, manifest }, lanes, { seed: 5, budget: 7 })];
+      return [addJob(Z.buildMachine({ isa: Z.z80, compat: "0.3", world }), lanes, { seed: 5, budget: 7 }), addJob({ wgsl: host, manifest }, lanes, { seed: 5, budget: 7 })];
     },
     check: ([a, b]) => compareJobs(a, b),
   },
@@ -668,7 +668,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     name: "chunk invariance: 5000 lanes with a dial in 1, 5 and 16 dispatches, and a lane_base slice",
     setup: ({ Z, addJob }) => {
       const lanes = lanesOf(randomBytes(5000 * 32, 11), 32);
-      const spec = { isa: Z.z80, world: ring(32, { halting: { lethal: { firstUnit: 0, probability: 0.1 } }, init: { stack: LAST, random: {} }, outputs: maps }) };
+      const spec = { isa: Z.z80, compat: "0.3", world: ring(32, { halting: { lethal: { firstUnit: 0, probability: 0.1 } }, init: { stack: LAST, random: {} }, outputs: maps }) };
       return [
         addJob(spec, lanes, { seed: 4242, budget: 64 }),
         addJob(spec, lanes, { seed: 4242, budget: 64, chunk: 1000 }),
@@ -700,7 +700,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         ablation: { table: "uniform" },
         outputs: { writeCounts: true, fetchMap: true, startMap: true },
       };
-      const spec = { isa: Z.z80, world };
+      const spec = { isa: Z.z80, compat: "0.3", world };
       const lanes = [...lanesOf(randomBytes(4096 * 32, 91), 32), ...Array.from({ length: 1024 }, () => ({ mem: mem(32) }))];
       const ablation = new Uint32Array(24);
       for (let i = 0; i < 24; i++) ablation[i] = randomBytes(4, 300 + i).reduce((a, b, j) => a | ((b & b >> 1 & b >> 2) << (8 * j)), 0) >>> 0;
@@ -738,7 +738,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         while (s < budget && !(Z.zilDraw(seed, l, BigInt(base) + BigInt(s), 0) < T)) s++;
         return { mem: mem(32), expect: s < budget ? { steps: s + 1, halt: "host", trap: 0, state: { pc: s } } : { steps: budget, halt: "running", state: { pc: budget } } };
       });
-      const spec = { isa: Z.z80, world: ring(32, { init: { stack: LAST }, halting: { lethal: { firstUnit: 0, probability: 0.3 } } }) };
+      const spec = { isa: Z.z80, compat: "0.3", world: ring(32, { init: { stack: LAST }, halting: { lethal: { firstUnit: 0, probability: 0.3 } } }) };
       const base = 2 ** 32 - 3;
       const high = 5 * 2 ** 32 + 7; // a high word of 5
       return [
@@ -759,7 +759,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     setup: ({ Z, addJob }) => {
       const world = { ...Z.algocellPairWorld({ L: 16, P: 37, steps: 10 }), hooks: { onReset: "cpu_b = 0x77u;" },
         outputs: { writeCounts: true, fetchMap: true, startMap: true } };
-      const built = Z.buildMachine({ isa: Z.z80, world });
+      const built = Z.buildMachine({ isa: Z.z80, compat: "0.3", world });
       const M = built.manifest;
       const f = (n) => M.record.fields.find((x) => x.name === n);
       const rec = new Uint32Array(M.record.wordsPerLane);
@@ -790,7 +790,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     setup: ({ Z, addJob }) => {
       const world = { ...Z.algocellPairWorld({ L: 16, P: 40, steps: 64 }), halting: { lethal: { firstUnit: 0, probability: 0.1 } },
         outputs: { writeCounts: true, ...maps } };
-      const lib = Z.buildMachine({ isa: Z.z80, world, mode: "library", bindingNames: { memory: "lane_mem", out: "lane_out" } });
+      const lib = Z.buildMachine({ isa: Z.z80, compat: "0.3", world, mode: "library", bindingNames: { memory: "lane_mem", out: "lane_out" } });
       if (!lib.manifest.resumable) throw new Error("library machine is not resumable");
       const host = `struct Params { lanes: u32, lane_base: u32, budget: u32, seed: u32, step_base: vec2<u32>, resume: u32, _pad: u32 };
 @group(0) @binding(0) var<uniform> params: Params;
@@ -820,7 +820,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
           { group: 0, binding: 1, name: "lane_mem", role: "memory", type: "storage", wordsPerLane: lib.manifest.memory.storageWordsPerLane },
           { group: 0, binding: 2, name: "lane_out", role: "record", type: "storage", wordsPerLane: lib.manifest.record.wordsPerLane }] };
       const lanes = lanesOf(randomBytes(4096 * 32, 55), 32);
-      return [addJob(Z.buildMachine({ isa: Z.z80, world }), lanes, { seed: 8, budget: 64 }), addJob({ wgsl: host, manifest }, lanes, { seed: 8, stepChunks: [20, 44] })];
+      return [addJob(Z.buildMachine({ isa: Z.z80, compat: "0.3", world }), lanes, { seed: 8, budget: 64 }), addJob({ wgsl: host, manifest }, lanes, { seed: 8, stepChunks: [20, 44] })];
     },
     check: ([a, b]) => compareJobs(a, b),
   },

@@ -54,6 +54,7 @@ const STATE_NMOS: readonly StateField[] = [
 ];
 
 const INTERNALS = ["idx_mode", "idx_disp", "idx_uses_mem"] as const;
+const CORE_VERSION = "0.3.0";
 
 function semantics(o: { variant?: string; compat?: string }): Required<Z80Semantics> {
   const variant = o.variant ?? "classic";
@@ -85,7 +86,7 @@ const FINE_PAGE_EXPR =
 export const z80: IsaCore = {
   id: "z80",
   name: "Zilog Z80",
-  coreVersion: "0.3.0",
+  coreVersion: CORE_VERSION,
   status: "stable",
   addressBits: 16,
   fetchUnitBytes: 1,
@@ -167,6 +168,11 @@ export const z80: IsaCore = {
   },
   defaultVariant: "classic",
   compat: Z80_COMPAT,
+  // No silent default through 0.3.x: a machine names '0.3' or '0.2' (or runs a world that states it).
+  compatRequired: true,
+  coreVersionFor(o) {
+    return semantics(o).compat === "0.2" ? "0.2.0" : CORE_VERSION;
+  },
   wgsl(o) {
     const s = semantics({ variant: o.variant ?? this.defaultVariant, compat: o.compat ?? this.compat[0] });
     return z80CoreText(

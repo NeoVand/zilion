@@ -62,12 +62,14 @@ interface HookText {
   outBody: string;
 }
 
-const START_HOOK =
+/** The instruction-start hook. A host halt executes no instruction: nothing but R (the M1 already happened), PC (backed
+ * onto the byte) and halted changes, Q included. A skip consumes the unit as a no-op instruction (zilog-nmos: Q = 0). */
+const startHook = (nmos: boolean) =>
   "    // host contract v2: instruction start (raw first byte; R already counted; before prefixes and decode)\n" +
   "    {\n" +
   "        let zil_act = on_instruction_start((cpu_pc + 0xffffu) & 0xffffu, op);\n" +
   "        if (zil_act == ZIL_HALT) { cpu_halted = Z80_HALT_HOST; cpu_pc = (cpu_pc - 1u) & 0xffffu; return; }\n" +
-  "        if (zil_act == ZIL_SKIP) { return; }\n" +
+  `        if (zil_act == ZIL_SKIP) {${nmos ? " cpu_q = 0u;" : ""} return; }\n` +
   "    }\n";
 
 /**
@@ -86,7 +88,7 @@ export function z80CoreText(hooks: Z80Hooks = {}, semantics: Z80Semantics = {}):
   }
   const h: HookText = {
     fetch: hooks.fetch ? "    on_fetch(cpu_pc);\n" : "",
-    start: hooks.instructionStart ? START_HOOK : "",
+    start: hooks.instructionStart ? startHook(variant === "zilog-nmos") : "",
     haltOpen: hooks.trap ? "                if (zil_trap(ZIL_TRAP_HALT_INSN) != ZIL_TRAP_IGNORE) {\n" : "",
     haltClose: hooks.trap ? "                }\n" : "",
     inBody: hooks.io ? "return io_in(port) & 0xffu;" : "return 0u;",
@@ -1003,16 +1005,16 @@ fn z80_step() {
     // the same opcode (R increments), PC stays put. It resumes only on interrupt.
     // A lane halted by the host (or a trap) is stopped: a step changes nothing.
     if (cpu_halted != Z80_RUNNING) { if (cpu_halted == Z80_HALT_INSN) { r_inc();${nmos ? " cpu_q = 0u;" : ""} } return; }
-${nmos ? `    z80_qprev = cpu_q; // Q as this step begins (SCF/CCF read it)
-    cpu_q = 0u;        // 0 unless the instruction writes F: a wasted prefix, a skipped or ablated one, POP AF ...
-` : ""}    // Reset per-instruction index-prefix state.
+    // Reset per-instruction index-prefix state.
     idx_mode = 0u;
     idx_uses_mem = 0u;
     idx_disp = 0u;
 
     var op = z80_fetch();
     r_inc(); // M1: opcode (or prefix) fetch
-${h.start}    // A DD/FD prefix selects IX/IY for the following opcode.
+${h.start}${nmos ? `    z80_qprev = cpu_q; // Q as this instruction begins (SCF/CCF read it)
+    cpu_q = 0u;        // 0 unless the instruction writes F: a wasted prefix, an ablated one, POP AF ...
+` : ""}    // A DD/FD prefix selects IX/IY for the following opcode.
     if (op == 0xddu || op == 0xfdu) {
         idx_mode = select(2u, 1u, op == 0xddu);
         let next = z80_fetch();
