@@ -17,11 +17,14 @@
 		"./z80": {
 			"types": "./dist/cores/z80/index.d.ts",
 			"import": "./dist/cores/z80/index.js"
+		},
+		"./m6502": {
+			"types": "./dist/cores/m6502/index.d.ts",
+			"import": "./dist/cores/m6502/index.js"
 		}
 	},
 	"files": [
 		"dist",
-		"!dist/cores/m6502",
 		"!dist/cores/bff",
 		"README.md",
 		"LICENSE"

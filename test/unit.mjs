@@ -504,6 +504,17 @@ test("resumable machines: a steps budget, the state and the memory stored; the p
   eq(lib({ memory: "m" }).resumable, false);
 });
 
+// --- the 6502 is exported (experimental) ----------------------------------------------------------------------
+test("6502 exports: the root and the ./m6502 subpath give the same descriptor; the package ships it", () => {
+  eq(Z.m6502 === m6502, true);
+  eq(Z.m6502.status, "experimental");
+  eq(typeof Z.m6502CoreText, "function");
+  eq(Z.m6502FirstPushAt(32, 31), { s: 0xff });
+  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  eq(pkg.files.includes("!dist/cores/m6502"), false);
+  eq(pkg.exports["./m6502"].import, "./dist/cores/m6502/index.js");
+});
+
 // --- the 6502 opcode table ----------------------------------------------------------------------------------------
 test("6502 table: 151 documented, 85 stable undocumented, 8 unstable, 12 JAM; decode words agree with the table", () => {
   const t = m6502.table();

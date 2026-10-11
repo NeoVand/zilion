@@ -327,6 +327,26 @@ Register it in `ADAPTERS` (`tools/ztest/vectors/session.py`) and the `vectors` c
 
 `tools/ztest/selftest.py`'s probe core is a complete minimal adapter, about 30 lines.
 
+### The 6502's decimal mode against Clark's algorithm
+
+The vectors reach fewer than 4% of the 131,072 decimal-mode inputs (A, operand, carry) of each ADC or SBC opcode.
+`python -I tools/zt.py decimal6502 <6502 dir> --md test/baselines/6502-decimal-clark.md` closes the gap against a
+published, hardware-verified specification: Bruce Clark, "Decimal Mode" (6502.org Tutorials), Appendix A, whose
+6502 table takes ADC's accumulator and C from Seq. 1, N and V from Seq. 2 and Z from binary mode, and SBC's
+accumulator from Seq. 3 with every flag from binary mode. `tools/ztest/decimal6502.py` transcribes the sequences step
+by step (each line labelled 1a, 1b, …) and states how it reads the two points the document leaves open (the width
+of step 2c's "signed" operands, decided by the vectors; `&` of a negative number in step 3b, which any reading gives
+alike).
+
+1. The transcription is checked against every test of the vectors for ADC (8 files), SBC (E9 in 7 modes, and EB),
+   RRA and ISC (7 files each), both modes: 310,000 tests. The operand and carry-in come from each test's bus cycles.
+2. The core runs every input of ADC #, SBC # (E9 and EB), RRA zp and ISC zp, in decimal and binary mode, with the
+   other flags of P varied, as synthetic vectors through the same test host and ledger (registers, P, memory, bus
+   writes): 1,310,720 tests, each against the transcription.
+
+Both must hold. The self-test runs the check and, as a control, a core that takes decimal ADC's Z from the BCD result
+(the 65C02 rule), which must fail it. ARR's decimal mode is not in the document and stays checked by the vectors.
+
 ## Baselines
 
 `test/baselines/<isa>-v<version>.md` and `.json` record a core's divergences. The Z80 baselines were made with:
@@ -398,6 +418,7 @@ A future CI gate should fail on any unexpected divergence (exit 1) and on any ru
      with maps, dials and trap policies run) and must match exactly.
   4. **memory-model invariance.** `sparse` and `full` give identical ledgers on real vectors (Z80 and 6502).
   5. **determinism.** Two sessions give the same canonical ledger, and repeated dispatches give identical bytes.
+  6. **decimal mode** (with `--vectors-6502`): the Clark check above, and its control.
 
 ## Determinism
 

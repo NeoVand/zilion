@@ -284,6 +284,28 @@ class M6502AdapterTests(unittest.TestCase):
             shutil.rmtree(d)
 
 
+class DecimalTranscriptionTests(unittest.TestCase):
+    """tools/ztest/decimal6502.py on valid BCD sums and differences, and on the appendix's own example."""
+
+    def test_valid_bcd(self):
+        from ztest.decimal6502 import adc, sbc
+        # (a, b, c) -> (accumulator, carry), decimal mode
+        for (a, b, c), (r, cy) in {(0x12, 0x34, 0): (0x46, 0), (0x58, 0x46, 1): (0x05, 1), (0x99, 0x00, 1): (0x00, 1),
+                                   (0x09, 0x01, 0): (0x10, 0), (0x50, 0x50, 0): (0x00, 1)}.items():
+            acc, _, _, _, got_c = adc(a, b, c, True)
+            self.assertEqual((acc, got_c), (r, cy), (hex(a), hex(b), c))
+        for (a, b, c), (r, cy) in {(0x46, 0x12, 1): (0x34, 1), (0x40, 0x13, 1): (0x27, 1), (0x32, 0x02, 0): (0x29, 1),
+                                   (0x00, 0x01, 1): (0x99, 0), (0x12, 0x21, 1): (0x91, 0)}.items():
+            acc, _, _, _, got_c = sbc(a, b, c, True)
+            self.assertEqual((acc, got_c), (r, cy), (hex(a), hex(b), c))
+
+    def test_appendix_example(self):
+        # Appendix A: SED; CLC; LDA #$99; ADC #$01 gives A = $00, and the 6502's Z is "bin": clear (binary $9A)
+        from ztest.decimal6502 import adc
+        acc, _, _, z, c = adc(0x99, 0x01, 0, True)
+        self.assertEqual((acc, z, c), (0x00, 0, 1))
+
+
 class FetchScriptTests(unittest.TestCase):
     """Offline checks of tools/fetch-vectors.py (it never touches the network here)."""
 

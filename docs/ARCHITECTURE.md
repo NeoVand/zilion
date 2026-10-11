@@ -199,6 +199,14 @@ variant `nmos`, compat `'0.3'`.
 - **Halting.** The 12 JAM opcodes raise trap `illegal`: as-chip the lane halts (`halted` = 3, `trap` = 1) with PC
   parked on the opcode; `ignore` makes JAM a 1-byte no-op. On random code most lanes reach a JAM: 73.5% of random
   32-byte pairs within 128 steps.
+- **Decimal mode, exhaustively.** Beyond the vectors (which reach under 4% of the decimal inputs per opcode), a gate
+  in `npm run test:harness` compares the core on all 131,072 inputs (A, operand, carry) of ADC, SBC, RRA and ISC
+  with Bruce Clark's published NMOS algorithm, transcribed step by step and first checked against every decimal
+  vector (`tools/ztest/decimal6502.py`, report `test/baselines/6502-decimal-clark.md`).
+- **Exports.** `m6502` (with `m6502CoreText`, `m6502FirstPushAt`, the opcode table and the decode words) from the
+  package root and from `@neovand/zilion/m6502`, and the package ships it.
+- **Future work: core parameters.** Decimal mode on or off (the 2A03 has none) and the unstable constants (ANE/LXA
+  magic, the `& (H + 1)` term) are natural core `params` (decision 4); today they are fixed in the `nmos` variant.
 - **World reset.** P = 0x20 (bit 5 set, every flag clear), A = X = Y = S = PC = 0. Both stack conventions give the
   S for which `0x0100 | S` aliases t: on the 6502 the stack pointer addresses the byte the next push writes, so
   `topAliases` and `firstPushAt` coincide.

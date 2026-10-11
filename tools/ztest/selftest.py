@@ -417,6 +417,23 @@ def hooked_6502(art: Artifacts, vectors: Path, log) -> bool:
     return ok
 
 
+def decimal_6502(art: Artifacts, vectors: Path, log) -> bool:
+    """The gate on decimal mode: Clark's Appendix A against the vectors, then exhaustively against the core; and a
+    planted decimal bug (Z from the BCD result) must fail it, so the gate is live."""
+    from . import decimal6502
+
+    ok, _ = decimal6502.run(art, vectors, log=log)
+    base = art.core("6502")
+    old = "m6502_p = (m6502_p & 0x3cu) | n | ov | z | select(0u, 1u, t >= 0x100u);"
+    new = "m6502_p = (m6502_p & 0x3cu) | n | ov | select(0u, 0x02u, (t & 0xffu) == 0u) | select(0u, 1u, t >= 0x100u);"
+    if base.count(old) != 1:
+        log("  FAIL decimal6502 control: the mutant's anchor is not in the core")
+        return False
+    bad, _ = decimal6502.run(art, vectors, core=base.replace(old, new), log=lambda m: None)
+    log(f"  {'ok  ' if not bad else 'FAIL'} decimal6502 control: a core taking decimal ADC's Z from the BCD result fails the gate")
+    return ok and not bad
+
+
 def mutants_6502(art: Artifacts, vectors: Path, log) -> bool:
     ok = True
     base = art.core("6502")
@@ -480,6 +497,7 @@ def run(art: Artifacts, vectors: Path | None, limit: int, log=print, vectors_650
         ok = False
     else:
         ok &= hooked_6502(art, vectors_6502, log)
+        ok &= decimal_6502(art, vectors_6502, log)
         ok &= mutants_6502(art, vectors_6502, log)
         ok &= invariance_and_determinism(art, vectors_6502, limit, log, isa="6502")
     log("selftest " + ("passed" if ok else "FAILED"))

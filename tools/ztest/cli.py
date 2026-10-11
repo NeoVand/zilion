@@ -61,8 +61,27 @@ def main(argv: list[str]) -> int:
     t.add_argument("--vectors-6502", type=Path, help="6502 vector directory for the 6502 mutant, invariance and determinism tests")
     t.add_argument("--limit-per-file", type=int, default=50, help="tests per file for invariance and determinism")
 
+    d = sub.add_parser("decimal6502", help="the 6502's decimal mode against Clark's published NMOS algorithm, exhaustively")
+    _common(d)
+    d.add_argument("vectors", type=Path, help="SingleStepTests 6502/v1 directory (step 1 checks the transcription against it)")
+    d.add_argument("--md", type=Path, help="write the report here (test/baselines/6502-decimal-clark.md)")
+    d.add_argument("--json", type=Path, help="write the results as JSON here")
+
     a = ap.parse_args(argv)
     try:
+        if a.cmd == "decimal6502":
+            from . import decimal6502
+            from .vectors.ledger import canonical_json
+
+            art = artifacts.load(a.wgsl_dir, do_emit=not a.no_emit)
+            ok, doc = decimal6502.run(art, a.vectors)
+            if a.md:
+                a.md.parent.mkdir(parents=True, exist_ok=True)
+                a.md.write_text(decimal6502.markdown(doc), encoding="utf-8")
+            if a.json:
+                a.json.parent.mkdir(parents=True, exist_ok=True)
+                a.json.write_text(canonical_json(doc), encoding="utf-8")
+            return 0 if ok else 1
         if a.cmd == "selftest":
             from . import selftest
 

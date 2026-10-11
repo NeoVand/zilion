@@ -94,6 +94,12 @@ a wasted DD/FD prefix still adds 2 to R). Not published.
   `cycles` (the `bus` field), `npm run test:vectors:6502`, `ZILION_6502_VECTORS`. With the bus-write log off the Z80
   test-host WGSL is unchanged byte for byte, and so are the three Z80 ledgers (0.3, zilog-nmos, compat 0.2); a
   regenerated Z80 Markdown report gains one line listing the convention mappings applied (HALT-PC).
+- Decimal mode exhaustively: Bruce Clark's published NMOS algorithm (6502.org, "Decimal Mode", Appendix A),
+  transcribed step by step, agrees with all 310,000 ADC/SBC/RRA/ISC vector tests, and the core agrees with it on all
+  1,310,720 inputs of ADC #, SBC # (E9, EB), RRA zp and ISC zp in both modes (`tools/zt.py decimal6502`, a gate of
+  `npm run test:harness`; `test/baselines/6502-decimal-clark.md`).
+- Exported: `m6502`, `m6502CoreText`, `m6502FirstPushAt`, `M6502_*` from the root and `@neovand/zilion/m6502`; the
+  package ships `dist/cores/m6502` (status experimental).
 - `test/world/cases_m6502.mjs`: the 6502 on rings of 32, 33 and 64 bytes, with a self-copier under the soup's init.
 - `test/bench/bench-cores.mjs`: Z80 and 6502 throughput on random 32-byte pairs.
 

@@ -225,7 +225,7 @@ const r2 = await m.run(r.memory, { seed: 1, ablation: masks, budget: 64, stepBas
   provenance); `node scripts/export-machines.mjs worlds.json --out shaders/` writes the WGSL and manifest for
   each named world, and `test/world/gpu_runner.py` is a complete wgpu-py host driven only by the manifest.
 - **More than the Z80.** A full NMOS 6502 core (every opcode, validated against 2,560,000 SingleStepTests vectors;
-  experimental, not yet exported) and a BFF skeleton run in the same worlds; see
+  experimental; `@neovand/zilion/m6502`) and a BFF skeleton run in the same worlds; see
   [docs/ADDING_A_CORE.md](docs/ADDING_A_CORE.md).
 
 The design and its layers are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
