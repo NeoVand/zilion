@@ -23,6 +23,9 @@ def flag_names(mask: int, isa: str, field: str) -> str:
     if field == "p" and isa == "6502":
         names = [(0x80, "N"), (0x40, "V"), (0x20, "1(5)"), (0x10, "B"), (0x08, "D"), (0x04, "I"), (0x02, "Z"), (0x01, "C")]
         return "+".join(n for b, n in names if mask & b) or "-"
+    if field == "flags" and isa == "8086":
+        names = [(0x800,"OF"),(0x400,"DF"),(0x200,"IF"),(0x100,"TF"),(0x80,"SF"),(0x40,"ZF"),(0x10,"AF"),(4,"PF"),(1,"CF")]
+        return "+".join(n for b,n in names if mask & b) or "-"
     if field in ("mem", "ports", "bus"):
         kinds = {"mem": MEM_KINDS, "ports": PORT_KINDS, "bus": BUS_KINDS}[field]
         return "+".join(n for b, n in kinds.items() if mask & b) or "-"

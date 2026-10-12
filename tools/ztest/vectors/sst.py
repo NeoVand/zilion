@@ -36,12 +36,30 @@ def _int_matrix(rows: list, width: int, what: str, path: Path) -> np.ndarray:
     return arr.astype(np.int64)
 
 
-def load_tests(path: Path) -> tuple[list, str]:
+def load_tests(path: Path, max_tests: int = 0) -> tuple[list, str]:
     raw = path.read_bytes()
     digest = hashlib.sha256(raw).hexdigest()
     try:
         text = gzip.decompress(raw) if path.name.endswith(".gz") else raw
-        tests = json.loads(text)
+        if max_tests:
+            text = text.decode("utf-8")
+            decoder = json.JSONDecoder()
+            pos = 0
+            while pos < len(text) and text[pos].isspace(): pos += 1
+            if text[pos:pos + 1] != "[": raise ValueError("expected array")
+            pos += 1
+            tests = []
+            while len(tests) < max_tests:
+                while pos < len(text) and text[pos].isspace(): pos += 1
+                if text[pos:pos + 1] == "]": break
+                test, pos = decoder.raw_decode(text, pos)
+                tests.append(test)
+                while pos < len(text) and text[pos].isspace(): pos += 1
+                if text[pos:pos + 1] == "]": break
+                if text[pos:pos + 1] != ",": raise ValueError("expected comma")
+                pos += 1
+        else:
+            tests = json.loads(text)
     except (OSError, ValueError) as e:
         raise HarnessError(f"{path.name}: not a (gzipped) JSON file: {e}") from None
     if not isinstance(tests, list) or not all(isinstance(t, dict) for t in tests):
@@ -49,8 +67,14 @@ def load_tests(path: Path) -> tuple[list, str]:
     return tests, digest
 
 
-def parse_file(path: Path, key: str, adapter, mem_cap: int, port_cap: int) -> FileBatch:
-    tests, digest = load_tests(path)
+def parse_file(path: Path, key: str, adapter, mem_cap: int, port_cap: int, max_tests: int = 0) -> FileBatch:
+    tests, digest = load_tests(path, max_tests)
+    prepare = getattr(adapter, "prepare_test", None)
+    if prepare is not None:
+        try:
+            tests = [prepare(t) for t in tests]
+        except (KeyError, TypeError, ValueError) as e:
+            raise HarnessError(f"{path.name}: malformed adapter input: {e!r}") from None
     fields = adapter.fields
     n, F = len(tests), len(fields)
     try:

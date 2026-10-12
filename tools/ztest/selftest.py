@@ -480,7 +480,38 @@ def invariance_and_determinism(art: Artifacts, vectors: Path, limit: int, log, i
     return ok
 
 
-def run(art: Artifacts, vectors: Path | None, limit: int, log=print, vectors_6502: Path | None = None) -> int:
+# Intel mutants compare unmasked flags, segmentation, ordered writes and REP.
+MUTANTS_8086 = [
+    ("rep-latch", "i8086_ip = i8086_rep_end; i8086_rep = 0u;", "i8086_ip = i8086_rep_end;", ["a4"], "rep"),
+    ("parity", "(countOneBits(r & 255u) & 1u) == 0u", "(countOneBits(r & 255u) & 1u) != 0u", ["04"], "flags"),
+    ("mul-zero", "i8086_szp(high, w);", "i8086_szp(high, w); i8086_flag(64u, false);", ["f6.4"], "flags"),
+    ("segment-scale", "(seg << 4u)", "(seg << 3u)", ["a0"], "mem"),
+    ("push-order", "mem_write(a, v & 255u); mem_write(i8086_phys(seg, (off + 1u) & 65535u), (v >> 8u) & 255u);",
+     "mem_write(i8086_phys(seg, (off + 1u) & 65535u), (v >> 8u) & 255u); mem_write(a, v & 255u);", ["50"], "bus"),
+    ("rep-count", "i8086_r[1] = (i8086_r[1] - 1u) & 0xffffu;", "i8086_r[1] = (i8086_r[1] - 2u) & 0xffffu;", ["a4"], "cx"),
+    ("iret-flags", "i8086_flags = (flags & 0xfd5u) | 0xf002u;", "i8086_flags = flags;", ["cf"], "flags"),
+    ("shift-no-write-zero", "store = true; }\n    else if (op == 246u", "store = n != 0u; }\n    else if (op == 246u", ["d2.4"], "bus"),
+]
+
+def mutants_8086(art, vectors, log):
+    ok = True
+    core = art.core("8086")
+    rules = session.default_rules_path("8086", art)
+    for mid, old, new, files, field in MUTANTS_8086:
+        if core.count(old) != 1:
+            log(f"  FAIL mutant 8086 {mid}: anchor occurs {core.count(old)} times")
+            ok = False
+            continue
+        fake = with_core(art, "8086", core.replace(old,new), f"mutant {mid}")
+        led,_ = session.run(fake,"8086",[vectors],patterns=files,workers=1,limit_per_file=512,
+                          mem_cap=768,lanes=1024,progress=None,rules_path=rules)
+        hit = sum(f["fields"].get(field,{}).get("unexpected",0) for f in led.files.values())
+        ok &= hit > 0
+        log(f"  {'ok  ' if hit else 'FAIL'} mutant 8086 {mid}: {hit} unexpected {field} divergences")
+    return ok
+
+
+def run(art: Artifacts, vectors: Path | None, limit: int, log=print, vectors_6502: Path | None = None, vectors_8086: Path | None = None) -> int:
     gpu = G.get_gpu()
     log(f"selftest on {gpu.summary()}")
     ok = host_probe(gpu, log)
@@ -500,5 +531,7 @@ def run(art: Artifacts, vectors: Path | None, limit: int, log=print, vectors_650
         ok &= decimal_6502(art, vectors_6502, log)
         ok &= mutants_6502(art, vectors_6502, log)
         ok &= invariance_and_determinism(art, vectors_6502, limit, log, isa="6502")
+    if vectors_8086 is not None:
+        ok &= mutants_8086(art, vectors_8086 / "v2", log)
     log("selftest " + ("passed" if ok else "FAILED"))
     return 0 if ok else 1

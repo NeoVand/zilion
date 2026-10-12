@@ -686,3 +686,10 @@ manifest (the world as given, `core`, `init`, `budget`, `record`, the options ha
    value, then new), as the chip writes twice.
 8. **The dial threshold** is `round(p · 2³²)` (BFF's convention); Algocell's Z80 dial floors it and uses a PCG
    stream, reproduced exactly through raw hooks.
+
+## Intel 8086/8088 work in progress
+
+`src/cores/i8086/` provides the architectural-fetch instruction core and vector adapter (CLI ISA `8086`).
+It remains `skeleton`: the hardware prefetch queue is unfinished, and missing hidden latch state prevents
+validation of certain undefined forms. See [I8086.md](I8086.md) for addressing, initialization, the hardware
+ledger scope, the queue decision and the remaining work before a registered experiment.

@@ -125,3 +125,6 @@ export type { ChunkLimits, ChunkPlanOptions } from "./engine/chunks.js";
 export { packMemory, unpackMemory, stepBaseWords } from "./engine/runner.js";
 export type { Slab, SlabBuffers } from "./engine/runner.js";
 export { legacyMachine } from "./legacy/manifest.js";
+
+export { i8086, i8086CoreText, i8086FirstPushAt } from "./cores/i8086/index.js";
+export type { I8086Hooks } from "./cores/i8086/index.js";

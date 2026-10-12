@@ -53,7 +53,7 @@ test("--list-cores finds z80, m6502 and bff in the build by descriptor id", () =
   const r = spawnSync(process.execPath, [script, "--list-cores"], { encoding: "utf8" });
   if (r.status !== 0) throw new Error(r.stderr);
   const ids = r.stdout.trim().split("\n").map((l) => l.split("\t")[0]).sort();
-  for (const id of ["bff", "m6502", "z80"]) if (!ids.includes(id)) throw new Error(`no ${id} in ${ids}`);
+  for (const id of ["bff", "m6502", "z80", "i8086"]) if (!ids.includes(id)) throw new Error(`no ${id} in ${ids}`);
   if (!/z80\t0\.3\.0\tstable\tcompat: 0\.3, 0\.2 \(required\)/.test(r.stdout)) throw new Error(r.stdout);
 });
 
@@ -72,6 +72,16 @@ test("canonical specs: z80 (compat 0.2 and 0.3 zilog-nmos), m6502 and bff export
   const lit = man("bff_lit").params;
   if (JSON.stringify(lit) !== JSON.stringify({ alphabet: [...BFF_ASCII_LITERAL], literal: true, lit_rep: 2 })) throw new Error(`bff_lit params ${JSON.stringify(lit)}`);
   if (!read(out, "bff_lit.wgsl").includes("const ZIL_PARAM_LIT_REP: u32 = 2u;")) throw new Error("bff_lit: the params did not reach the WGSL");
+});
+
+test("8086 exports by descriptor id and rejects its unvalidated queued mode", () => {
+  const dest = join(dir, "intel");
+  const spec = {name:"intel",core:{isa:"i8086",params:{prefetch:"none"}},world:{...pairWorld,init:{stack:{firstPushAt:"lastByte"}}}};
+  const r = run([spec],"--out",dest);
+  if(r.status!==0) throw new Error(r.stderr);
+  const m = JSON.parse(read(dest,"intel.manifest.json"));
+  if(m.core.id!=="i8086" || m.core.params.prefetch!=="none" || m.core.status!=="skeleton") throw new Error(JSON.stringify(m.core));
+  expectError(run([{...spec,core:{isa:"i8086",params:{prefetch:"8088"}}}],"--out",dest),/prefetch '8088' is not implemented or validated/);
 });
 
 test("the exported compat '0.2' machine is byte-identical to buildMachine(algocellPairMachine(...)) and runs the 0.2.0 core", () => {

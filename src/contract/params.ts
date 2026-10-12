@@ -78,7 +78,7 @@ export function checkCoreParamDecls(isa: Pick<IsaCore, "id" | "params">): void {
       if (!Array.isArray(d.values) || d.values.length === 0) throw new Error(`${isa.id}: enum param '${name}' needs values`);
       if (new Set(d.values).size !== d.values.length) throw new Error(`${isa.id}: enum param '${name}' repeats a value`);
       for (const v of d.values) {
-        if (typeof v !== "string" || !NAME.test(v)) throw new Error(`${isa.id}: value '${v}' of param '${name}' must be lower snake case`);
+        if (typeof v !== "string" || !(NAME.test(v) || /^[0-9]+$/.test(v))) throw new Error(`${isa.id}: value '${v}' of param '${name}' must be lower snake case or a numeric model name`);
         claim(coreParamConstant(name, v), `'${name}' (value '${v}')`);
       }
     }
