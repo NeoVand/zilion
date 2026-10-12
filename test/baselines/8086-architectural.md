@@ -75,8 +75,10 @@ None: every divergence is covered by an expected rule.
 ## Analysis and limits
 
 This is **architectural-fetch validation**, not validation of the 8088 prefetch
-queue. The core remains a skeleton, and `prefetch: '8088'` is rejected. The
-registered experiment is not ready to run. No paper default has been selected.
+queue. The paper's declared machine is **8086/8088 instruction semantics,
+validated against hardware 8088 vectors, with coherent fetch** (2026-10-12).
+Status is experimental; `prefetch: 'coherent'` is named and `8088` is rejected.
+The ledger and its core SHA-256 are unchanged by this contract selection.
 
 Hardware queue evidence: the B9 file always ends with an empty queue; the 51 file
 ends with three bytes from a full initial queue and one from an empty initial
@@ -116,7 +118,7 @@ too few writes. World probes also cover odd and partially completed counts.
 B9 51 writes the same tiling under soup initialization on P=32 and P=64. Its
 pushes put low byte 51 at the last byte, high byte B9 at zero, then descend by two.
 A NOP-filled partner probe reaches an unwritten partner byte: the literal channel
-is open under `prefetch: 'none'`. This does not establish its queued-chip behavior.
+is open under the now-named `prefetch: 'coherent'`. This does not establish its queued-chip behavior.
 
 References and the complete remaining-work description are in
 [docs/I8086.md](../../docs/I8086.md).

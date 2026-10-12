@@ -19,7 +19,7 @@ export function i8086FirstPushAt(P: number, t: number): { sp: number } {
   throw new Error(`i8086: no SS=0 stack offset aliases ${t} on ring ${P}`);
 }
 export const i8086: IsaCore = {
-  id: "i8086", name: "Intel 8086/8088 (real mode)", coreVersion: "0.3.0", status: "skeleton",
+  id: "i8086", name: "8086/8088 instruction semantics, validated against hardware 8088 vectors, with coherent fetch", coreVersion: "0.3.0", status: "experimental",
   addressBits: 20, fetchUnitBytes: 1, endianness: "little", state, internals: ["i8086_tf_suppress"],
   symbols: { step: "i8086_step", haltReason: "i8086_halted", pc: "i8086_pc()",
     trapCause: "select(0u, i8086_trap, i8086_halted == ZIL_HALT_TRAP || i8086_halted == ZIL_HALT_INSN)" },
@@ -35,15 +35,17 @@ export const i8086: IsaCore = {
     entry(pos) { if (pos > 0xffff) throw new Error("i8086: entry must fit CS=0 IP"); return { ip: pos }; },
     traps: { "halt-insn": "halt", "div-zero": "vector", syscall: "vector", bounds: "halt", unimplemented: "halt" },
     halting: "HLT sets halt-insn, IP past HLT; software interrupts and divide errors vector through 0000:0000. No external IRQ/NMI device. Host halt parks IP on first prefix.",
-    illegal: "8086 aliases execute as hardware; unsupported forms raise unimplemented and halt. No 80186 instructions.",
+    illegal: "8086 undocumented aliases execute, including 60-6F Jcc, C0/C1/C8/C9 RET, F1 LOCK, SETMO/SETMOC, F6/F7 /1 TEST and FF /7 PUSH. No 80186 decoding. Register LEA/LES/LDS raise unimplemented after ModRM. Register FE/FF far CALL/JMP use the deterministic zero-ea policy: effective offset zero, register destination, memory-fed segment; no hidden history. Other unsupported forms raise unimplemented. These are declared abstractions, not hardware-certified hidden-state behaviour.",
   },
-  variants: { nmos: "8088 NMOS instruction semantics, including hardware undefined flags." }, defaultVariant: "nmos", compat: ["0.3"],
-  params: { prefetch: { type: "enum", values: ["none", "8088"], default: "none",
-    description: "Architectural fetch ('none'); '8088' is reserved and rejected until cycle/queue validation is implemented. No paper default is selected." } },
+  variants: { nmos: "8086/8088 instruction semantics, validated against hardware 8088 vectors, with coherent fetch; hardware undefined flags and declared zero-ea hidden-latch abstraction." }, defaultVariant: "nmos", compat: ["0.3"],
+  params: { prefetch: { type: "enum", values: ["coherent", "8088"], default: "coherent",
+    description: "Every consumed opcode, prefix and operand byte is read from current memory, without a prefetch queue. REP retains its decoded operation across iterations. Deliberate paper abstraction; 8088 queue requests are rejected." },
+    hidden_latch: { type: "enum", values: ["zero_ea"], default: "zero_ea",
+      description: "Register LEA/LES/LDS trap; register FE/FF far transfers substitute effective offset zero, never history or uninitialized state. See docs/I8086.md." } },
   wgsl(o) {
     if (o.variant !== undefined && o.variant !== "nmos") throw new Error(`i8086: unknown variant '${o.variant}'`);
     if (o.compat !== undefined && o.compat !== "0.3") throw new Error(`i8086: unknown compat '${o.compat}'`);
-    if (o.params?.prefetch === "8088") throw new Error("i8086: prefetch '8088' is not implemented or validated; this skeleton is not ready for registered soup experiments");
+    if (o.params?.prefetch === "8088") throw new Error("i8086: prefetch '8088' is not implemented or validated; select 'coherent' (the paper's deliberate no-queue abstraction)");
     return i8086CoreText(o.hooks);
   },
 };

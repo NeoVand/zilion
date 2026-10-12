@@ -76,11 +76,11 @@ test("canonical specs: z80 (compat 0.2 and 0.3 zilog-nmos), m6502 and bff export
 
 test("8086 exports by descriptor id and rejects its unvalidated queued mode", () => {
   const dest = join(dir, "intel");
-  const spec = {name:"intel",core:{isa:"i8086",params:{prefetch:"none"}},world:{...pairWorld,init:{stack:{firstPushAt:"lastByte"}}}};
+  const spec = {name:"intel",core:{isa:"i8086",params:{prefetch:"coherent",hidden_latch:"zero_ea"}},world:{...pairWorld,init:{stack:{firstPushAt:"lastByte"}}}};
   const r = run([spec],"--out",dest);
   if(r.status!==0) throw new Error(r.stderr);
   const m = JSON.parse(read(dest,"intel.manifest.json"));
-  if(m.core.id!=="i8086" || m.core.params.prefetch!=="none" || m.core.status!=="skeleton") throw new Error(JSON.stringify(m.core));
+  if(m.core.id!=="i8086" || m.core.params.prefetch!=="coherent" || m.core.params.hidden_latch!=="zero_ea" || m.core.status!=="experimental" || m.core.compat!=="0.3" || m.core.coreVersion!=="0.3.0") throw new Error(JSON.stringify(m.core));
   expectError(run([{...spec,core:{isa:"i8086",params:{prefetch:"8088"}}}],"--out",dest),/prefetch '8088' is not implemented or validated/);
 });
 

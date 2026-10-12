@@ -687,9 +687,14 @@ manifest (the world as given, `core`, `init`, `budget`, `record`, the options ha
 8. **The dial threshold** is `round(p · 2³²)` (BFF's convention); Algocell's Z80 dial floors it and uses a PCG
    stream, reproduced exactly through raw hooks.
 
-## Intel 8086/8088 work in progress
+## Intel 8086/8088 coherent-fetch machine
 
-`src/cores/i8086/` provides the architectural-fetch instruction core and vector adapter (CLI ISA `8086`).
-It remains `skeleton`: the hardware prefetch queue is unfinished, and missing hidden latch state prevents
-validation of certain undefined forms. See [I8086.md](I8086.md) for addressing, initialization, the hardware
+`src/cores/i8086/` (CLI ISA `8086`) is **8086/8088 instruction semantics, validated against hardware 8088 vectors, with coherent fetch**.
+Status `experimental`, core version `0.3.0`, compat `0.3`, variant `nmos`, as for the validated 6502.
+The 2026-10-12 user decision pins `prefetch: 'coherent'` (default); each opcode, prefix and operand byte
+reads current memory without a queue. `8088` queue selection is rejected. `hidden_latch: 'zero_ea'`
+pins deterministic undefined register far transfers; register LEA/LES/LDS trap. The paper/census pins
+firstPushAt:lastByte (SP=1 on P=32/64, first low/high write P−1,0), segments zero and FLAGS=F002 (DF=TF=0).
+REP costs one execution step per iteration and retains its decoded operation across iterations/resumes.
+These are deliberate abstractions, not bus-timing or missing-hardware-latch validation. See [I8086.md](I8086.md) for addressing, initialization, the hardware
 ledger scope, the queue decision and the remaining work before a registered experiment.

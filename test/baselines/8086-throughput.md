@@ -13,10 +13,10 @@ Measured source: `e6aefbf`; architectural vector-core SHA-256
 | Z80, compat 0.3 classic, native HALT | 28.96 | 1091.4 | 120.6 | 0.067 |
 | NMOS 6502, native JAM | 15.32 | 860.4 | 50.3 | 0.736 |
 | NMOS 6502, JAM ignored | 20.98 | 1599.7 | 128.0 | 0.000 |
-| 8086 architectural fetch (`none`) | 89.48 | 333.7 | 113.9 | 0.144 |
+| 8086 coherent fetch (formerly `none`) | 89.48 | 333.7 | 113.9 | 0.144 |
 
-The 8086 is still a skeleton: queued timing is unimplemented, and hidden-state
-forms have declared limitations. These timings do not describe a cycle-accurate
+The 8086 is now experimental under the coherent-fetch paper abstraction; queued
+timing is excluded and hidden-state forms use the declared zero-ea policy. These timings do not describe a cycle-accurate
 8088 implementation. Different halt rates make lane throughput less comparable
 than executed-step throughput. The 8086 ran at 31% of the Z80's executed-step rate,
 and 39% of the 6502's native-JAM rate for these inputs. The small warm workload is
