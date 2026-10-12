@@ -22,7 +22,8 @@ segment-load trap postponement, REP's last-prefix interrupt restart erratum,
 ignored-trap IP preservation, excluded hidden-EA register forms, comparison of
 REP completion, and default sparse-host binding size. The final fresh review
 found no further concrete defects and confirmed the prefetch requirement is
-still incomplete. World tests cover the changes that vectors cannot see.
+still incomplete. World tests cover the changes that vectors cannot see, including REP DIV remaining
+unsigned while REP IDIV negates the quotient (vectors exercise only the latter).
 
 Eight mutants test parity, MUL's undefined ZF, segment translation, pushed byte
 order, REP completion and iteration count, reserved IRET flags, and zero-count

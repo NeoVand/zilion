@@ -203,7 +203,6 @@ fn i8086_muldiv(op: u32, a: u32, w: u32, rep: u32) {
     if (negative) { q = (0u - q) & mask; }
   }
 
-  if (rep != 0u && op == 6u) { q = (0u - q) & mask; }
   if (w == 0u) { i8086_r[0] = q | (rem << 8u); } else { i8086_r[0] = q; i8086_r[2] = rem; }
 }
 fn i8086_execute() {

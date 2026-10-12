@@ -47,6 +47,11 @@ const CASES = [
       const lanes=[{mem:memory(64,{0:[0x8e,0xd0,0x90],4:[24,0,0,0]}),expect:{steps:2,halt:"running",state:{ip:24,flags:0xf002,sp:0xfffb},writes:[6],mem:{59:3,60:0}}}];
       return [addJob(spec,lanes),addJob(spec,lanes,{stepChunks:[1,1]})];
     }},
+  { name:"8086 REP DIV ignores REP, while REP IDIV negates the quotient",
+    setup:({addJob})=>addJob({isa:i8086,world:world(32,{init:{stack:{firstPushAt:"lastByte"},set:{ax:20,bx:3}},budget:{unit:"steps",value:1}})},[
+      {mem:memory(32,{0:[0xf3,0xf7,0xf3]}),expect:{steps:1,state:{ax:6,dx:2,ip:3}}},
+      {mem:memory(32,{0:[0xf3,0xf7,0xfb]}),expect:{steps:1,state:{ax:0xfffa,dx:2,ip:3}}}
+    ])},
   { name:"8086 interrupt round trip: INT n and IRET restore IP CS FLAGS",
     setup:({addJob})=>addJob({isa:i8086,world:world(64,{budget:{unit:"steps",value:3}})},[
       {mem:memory(64,{0:[0xcd,3,0xf4],12:[20,0,0,0],20:[0xcf]}),expect:{steps:3,halt:"halt-insn",state:{ip:3,cs:0,flags:0xf002,sp:1}}}
