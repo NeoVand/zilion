@@ -1,8 +1,16 @@
 import { i8086, i8086FirstPushAt } from "../../dist/cores/i8086/index.js";
+import { readFileSync } from "node:fs";
+const bootstrapPanel = JSON.parse(readFileSync(new URL("./fixtures/i8086-bootstrap-panel.json", import.meta.url), "utf8"));
 const memory = (P, entries, fill = 0x90) => { const m = new Uint8Array(P).fill(fill); for (const [a,b] of Object.entries(entries)) m.set(b,+a); return m; };
 const world = (P, extra = {}) => ({ memory: { kind: "ring", bytes: P }, init: { stack: { firstPushAt: "lastByte" } },
   budget: { unit: "steps", value: 16 }, ...extra });
 const CASES = [
+  ...bootstrapPanel.rings.map(({L,lanes})=>({name:`8086 seeded random-panel bootstrap: 16 partners on ring ${2*L}`,
+    setup:({addJob})=>addJob({isa:i8086,world:world(2*L,{memory:{kind:"segments",segments:[{bytes:L,name:"A"},{bytes:L,name:"B"}],ring:2*L},budget:{unit:"steps",value:bootstrapPanel.budget},outputs:{writeCounts:true,fetchMap:true}})},lanes.map(l=>({
+      mem:Uint8Array.from([...Array.from({length:L},(_,i)=>i%2?0x51:0xb9),...Buffer.from(l.partner,"hex")]),
+      expect:{steps:l.steps,halt:l.halt,writes:l.writes,fetched:l.fetched,memAll:Array.from(Buffer.from(l.finalMemory,"hex"))}
+    })))
+  })),
   { name:"8086 coherent contract reset fixes segments, DF and TF",
     setup:({addJob})=>addJob({isa:i8086,world:world(32,{budget:{unit:"steps",value:0}})},[
       {mem:memory(32,{}),expect:{steps:0,state:{cs:0,ds:0,es:0,ss:0,ax:0,cx:0,dx:0,bx:0,bp:0,si:0,di:0,sp:1,flags:0xf002}}}
@@ -68,7 +76,7 @@ const CASES = [
       {mem:memory(32,{0:[0xff,0xf8]}),expect:{steps:1,state:{ip:2,sp:65535},mem:{31:0x34,0:0x12}}},
       {mem:memory(32,{0:[0x60,2]}),expect:{steps:1,state:{ip:2}}}
     ])},
-  ...[32,64].map(P=>({name:`8086 B9 51 bootstrap into zero and frozen random partners on ring ${P}`,
+  ...[32,64].map(P=>({name:`8086 B9 51 bootstrap into zero and affine partners on ring ${P}`,
     setup:({addJob})=>{
       const L=P/2; const tiles=Uint8Array.from({length:L},(_,i)=>i%2?0x51:0xb9);
       return addJob({isa:i8086,world:world(P,{memory:{kind:"segments",segments:[{bytes:L,name:"A"},{bytes:L,name:"B"}],ring:P},budget:{unit:"steps",value:L/2},outputs:{writeCounts:true,fetchMap:true}})},[0,1].map(v=>{
