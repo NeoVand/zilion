@@ -17,6 +17,7 @@ What the port does not cover: Zilion.run's own TypeScript buffer handling, which
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -43,9 +44,12 @@ def run_batch(device, pipeline, layout, programs: list[list[int]], steps: int, m
     regs_out = G.storage_buffer(device, regs.nbytes, readback=True)
     regs_in = G.storage_buffer(device, regs)
     params = G.uniform_buffer(device, [n, mem_bytes, steps, 0])
+    dispatch_start = time.perf_counter()
     G.dispatch(device, pipeline, layout, [params, mem_buf, regs_out, regs_in], n)
     out_mem = G.read_u32(device, mem_buf).view(np.uint8)[: n * mem_bytes].reshape(n, mem_bytes)
     out_regs = G.read_u32(device, regs_out, n * REGS_PER_PROGRAM).reshape(n, REGS_PER_PROGRAM)
+    if os.environ.get("ZILION_GPU_DUTY") == "0.5":
+        time.sleep(time.perf_counter() - dispatch_start)
     for b in (mem_buf, regs_out, regs_in, params):
         b.destroy()
     return out_regs, out_mem

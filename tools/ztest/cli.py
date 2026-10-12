@@ -34,13 +34,13 @@ def main(argv: list[str]) -> int:
 
     v = sub.add_parser("vectors", help="run per-instruction vectors and write the divergence ledger")
     _common(v)
-    v.add_argument("isa", choices=["z80", "6502"])
+    v.add_argument("isa", choices=["z80", "6502", "8086"])
     v.add_argument("dirs", type=Path, nargs="+", help="vector directories (SingleStepTests layout, .json or .json.gz)")
     v.add_argument("--files", nargs="*", help="only these opcode keys (fnmatch patterns, e.g. 'ed b?' 'cb 4?')")
     v.add_argument("--test", nargs="*", help="only these test names (e.g. 'ed 70 0123')")
     v.add_argument("--limit-per-file", type=int, default=0, help="first N tests of each file (0 = all)")
     v.add_argument("--memory", choices=["sparse", "full"], default="sparse", help="memory model of the test host")
-    v.add_argument("--mem-cap", type=int, default=32, help="memory-table slots per lane")
+    v.add_argument("--mem-cap", type=int, default=None, help="memory-table slots per lane")
     v.add_argument("--port-cap", type=int, default=8, help="port-table slots per lane (reads and writes each)")
     v.add_argument("--lanes", type=int, help="lanes per dispatch (default 65536 sparse, 1024 full)")
     v.add_argument("--repeat", type=int, default=1, help="run every dispatch N times and require identical bytes")
@@ -59,6 +59,7 @@ def main(argv: list[str]) -> int:
     _common(t)
     t.add_argument("--vectors", type=Path, help="Z80 vector directory for the mutant, invariance and determinism tests")
     t.add_argument("--vectors-6502", type=Path, help="6502 vector directory for the 6502 mutant, invariance and determinism tests")
+    t.add_argument("--vectors-8086", type=Path, help="8088 vector root (containing v2) for Intel mutants")
     t.add_argument("--limit-per-file", type=int, default=50, help="tests per file for invariance and determinism")
 
     d = sub.add_parser("decimal6502", help="the 6502's decimal mode against Clark's published NMOS algorithm, exhaustively")
@@ -86,7 +87,7 @@ def main(argv: list[str]) -> int:
             from . import selftest
 
             art = artifacts.load(a.wgsl_dir, do_emit=not a.no_emit)
-            return selftest.run(art, a.vectors, a.limit_per_file, vectors_6502=a.vectors_6502)
+            return selftest.run(art, a.vectors, a.limit_per_file, vectors_6502=a.vectors_6502, vectors_8086=a.vectors_8086)
         if a.cmd == "conformance":
             from . import conformance
 
@@ -109,7 +110,7 @@ def _vectors(a) -> int:
         art = artifacts.with_core(art, a.isa, a.core.read_text(encoding="utf-8"), str(a.core))
     ledger, info = session.run(
         art, a.isa, a.dirs, patterns=a.files, limit_per_file=a.limit_per_file, only_tests=a.test, mode=a.memory,
-        mem_cap=a.mem_cap, port_cap=a.port_cap, lanes=a.lanes, repeat=a.repeat, rules_path=a.expected,
+        mem_cap=a.mem_cap if a.mem_cap is not None else (768 if a.isa == "8086" else 32), port_cap=a.port_cap, lanes=a.lanes if a.lanes is not None else (1024 if a.isa == "8086" else None), repeat=a.repeat, rules_path=a.expected,
         workers=a.workers,
     )
     if a.dump_wgsl:

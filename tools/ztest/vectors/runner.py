@@ -8,6 +8,8 @@ be byte-identical, or the run fails (a determinism check).
 from __future__ import annotations
 
 import hashlib
+import os
+import time
 
 import numpy as np
 
@@ -34,6 +36,10 @@ class Runner:
         lanes = lanes_per_dispatch or DEFAULT_LANES[mode]
         if mode == "full":
             lanes = min(lanes, WEBGPU_DEFAULT_MAX_BINDING // (FULL_STRIDE * 4))
+        # Sparse hosts with wide address spaces/string logs can exceed default
+        # binding limits long before the workgroup-count limit.
+        largest_stride = max(self.layout.mem_stride, self.layout.port_stride, self.layout.state_words, STATUS_WORDS)
+        lanes = min(lanes, WEBGPU_DEFAULT_MAX_BINDING // (largest_stride * 4))
         self.lanes = min(lanes, G.MAX_LANES_PER_DISPATCH)
         self._full = None
         if mode == "full":
@@ -109,6 +115,7 @@ class Runner:
         ]
         if self._full is not None:
             bufs.append(self._full)
+        dispatch_start = time.perf_counter()
         G.dispatch(dev, self.pipeline, self.bgl, bufs, n, clear=[self._full] if self._full is not None else [])
         self.dispatches += 1
         out = (
@@ -117,6 +124,8 @@ class Runner:
             G.read_u32(dev, bufs[4], n * L.port_stride).reshape(n, L.port_stride),
             G.read_u32(dev, bufs[5], n * STATUS_WORDS).reshape(n, STATUS_WORDS),
         )
+        if os.environ.get("ZILION_GPU_DUTY") == "0.5":
+            time.sleep(time.perf_counter() - dispatch_start)
         for b in bufs[:6]:
             b.destroy()
         return out

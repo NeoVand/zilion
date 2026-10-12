@@ -16,10 +16,11 @@ from . import sst
 from .ledger import Ledger
 from .model import Rule
 from .m6502 import M6502Adapter
+from .i8086 import I8086Adapter
 from .runner import Runner
 from .z80 import Z80Adapter
 
-ADAPTERS = {"z80": Z80Adapter, "6502": M6502Adapter}
+ADAPTERS = {"z80": Z80Adapter, "6502": M6502Adapter, "8086": I8086Adapter}
 
 
 def default_rules_path(isa: str, art: Artifacts) -> Path:
@@ -65,7 +66,7 @@ def list_files(adapter, dirs: list[Path], patterns: list[str] | None) -> list[tu
 
 def _parse(args):
     key, path, isa, mem_cap, port_cap, limit, only = args
-    fb = sst.parse_file(path, key, ADAPTERS[isa](), mem_cap, port_cap)
+    fb = sst.parse_file(path, key, ADAPTERS[isa](), mem_cap, port_cap, max_tests=limit if not only else 0)
     if only or limit:
         idx = [i for i, n in enumerate(fb.names) if (not only or n in only)][: limit or None]
         fb = fb.subset(idx)

@@ -4,3 +4,6 @@ dist/
 .DS_Store
 build/
 __pycache__/
+
+# Worktrees may share dependencies through a symlink.
+node_modules

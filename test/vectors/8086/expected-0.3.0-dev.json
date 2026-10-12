@@ -1,0 +1,28 @@
+{
+  "core_sha256": "979f0ae19c6ea6d69d5cf7949ce27dcbfbeb5f7824d4fe64b6643c7048597b12",
+  "passthrough": [],
+  "rules": [
+    {
+      "id": "far-register-hidden-latch",
+      "files": [
+        "undefined fe.3",
+        "undefined fe.5",
+        "undefined ff.3",
+        "undefined ff.5"
+      ],
+      "fields": [
+        "cs",
+        "ip",
+        "mem"
+      ],
+      "mask": {
+        "cs": 65535,
+        "ip": 65535,
+        "mem": 4
+      },
+      "when": "far_register_hidden_latch",
+      "reason": "Register far transfers consume uninitialized tmpB. Initial hidden latch state is absent from the hardware vectors; upstream explicitly says these results cannot be predicted. Soup-observability: control flow and memory reads can change; this model does not validate these forms for soup use. Memory values, writes and every other register remain compared.",
+      "source": "https://github.com/SingleStepTests/8088/blob/aea84484abc79d09639d855b7b0ab32bc9e4dbeb/v2_undefined/README.md"
+    }
+  ]
+}

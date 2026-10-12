@@ -68,7 +68,9 @@ def main(plan_path: str, out_path: str | None) -> int:
     print(f"{'configuration':<24} {'ms/dispatch':>11} {'Mlanes/s':>9} {'Msteps/s':>9} {'mean steps':>10} {'halted':>7}  note")
     for c in plan["configs"]:
         m = G.Machine(open(os.path.join(base, c["wgsl"])).read(), json.load(open(os.path.join(base, c["manifest"]))))
+        t_burst = time.perf_counter()
         r = bench(m, host, c["budget"], plan["reps"])
+        time.sleep(time.perf_counter() - t_burst)  # equal pause after each short GPU configuration
         rows.append(c | r)
         print(f"{c['name']:<24} {1e3 * r['seconds_median']:>11.2f} {r['lanes_per_s'] / 1e6:>9.2f} {r['steps_per_s'] / 1e6:>9.1f} "
               f"{r['mean_steps']:>10.1f} {r['halted_share']:>7.3f}  {c['note']}")

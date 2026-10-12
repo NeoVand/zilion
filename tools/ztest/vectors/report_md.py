@@ -10,11 +10,12 @@ from .report import flag_names, pct
 WORDING = {
     "z80": ("Architectural fields are the registers, F, R, I, IFF1/2, IM, memory and ports. WZ (MEMPTR), Q and the "
             "EI/P interrupt latches are internal and reported in their own columns.", "WZ, Q, EI/P", "prefix group"),
+    "8086": ("Architectural registers and all 16 FLAGS bits are compared, including undefined flags. Memory, ports, ordered memory writes, halt/trap and the REP completion latch are compared. Queue state and cycle timing are not compared; this is architectural-fetch validation only.", "none", "opcode group"),
     "6502": ("Architectural fields are PC, S, A, X, Y, P, the halted state (JAM), memory, ports and the bus-write "
              "sequence (`bus`: every memory write in order, including the old-value write of a read-modify-write). "
              "`trap` (the world's trap-cause field) is not in the vectors and is passed through.", "trap", "opcode group"),
 }
-FLAG_FIELD = {"z80": "f", "6502": "p"}
+FLAG_FIELD = {"z80": "f", "6502": "p", "8086": "flags"}
 
 
 def _code(s: str) -> str:

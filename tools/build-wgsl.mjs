@@ -94,6 +94,13 @@ const cores = {
   },
 };
 
+// Intel 8088 hardware-vector core (ISA CLI name 8086).
+const i8086 = zilion.i8086;
+coreConfigs["8086"] = [{ key: "8086", core: "i8086", variant: "nmos", compat: "0.3", hooks: ["io"],
+  coreVersion: i8086.coreVersion, export: "HOST_CONTRACT_PRELUDE_WGSL + i8086CoreText({ io: true })",
+  ...write("i8086-core.wgsl", zilion.HOST_CONTRACT_PRELUDE_WGSL + zilion.i8086CoreText({ io: true })) }];
+cores["8086"] = coreConfigs["8086"][0];
+
 // --- conformance plan (test/conformance.js, run headlessly) ------------------
 const hooks = [];
 const hookIndex = (h) => {

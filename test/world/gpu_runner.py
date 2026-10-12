@@ -28,6 +28,7 @@ Adapter policy: never a CPU adapter unless ZILION_ALLOW_CPU_ADAPTER=1.
 from __future__ import annotations
 
 import json
+import time
 import os
 import sys
 
@@ -200,10 +201,13 @@ class Machine:
             p.set_bind_group(0, bg)
             p.dispatch_workgroups(-(-c // (wg * self.m.get("lanesPerInvocation", 1))))
             p.end()
+            dispatch_start = time.perf_counter()
             self.dev.queue.submit([enc.finish()])
             st = np.frombuffer(self.dev.queue.read_buffer(bufs["memory"]), dtype=np.uint32)[: c * self.storage_words]
             mem_out[s0: s0 + c] = self.unpack(st.reshape(c, self.storage_words))
             rec_out[s0: s0 + c] = np.frombuffer(self.dev.queue.read_buffer(bufs["record"]), dtype=np.uint32)[: c * self.record_words].reshape(c, self.record_words)
+            if os.environ.get("ZILION_GPU_DUTY") == "0.5":
+                time.sleep(time.perf_counter() - dispatch_start)
             for b in bufs.values():
                 b.destroy()
         return mem_out, rec_out

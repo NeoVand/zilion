@@ -38,17 +38,21 @@ const world = (budget, extra = {}) => ({
 
 const configs = [];
 for (const b of budgets) {
-  configs.push({ name: `z80 b${b}`, isa: "z80", budget: b, note: "HALT halts (as-chip)", spec: { isa: Z.z80, world: world(b) } });
+  configs.push({ name: `z80 b${b}`, isa: "z80", budget: b, note: "HALT halts (as-chip)", spec: { core: { isa: Z.z80, compat: "0.3" }, world: world(b) } });
   configs.push({ name: `6502 b${b}`, isa: "6502", budget: b, note: "JAM halts (as-chip); P = 0x20",
     spec: { isa: m6502, world: world(b, { init: { set: { a: 0, x: 0, y: 0, p: 0x20 } } }) } });
   configs.push({ name: `6502 b${b} jam-ignored`, isa: "6502", budget: b, note: "JAM a 1-byte no-op: every lane runs the whole budget",
     spec: { isa: m6502, world: world(b, { init: { set: { a: 0, x: 0, y: 0, p: 0x20 } }, halting: { traps: { illegal: "ignore" } } }) } });
 }
 
+for (const b of budgets) configs.push({ name: `8086 b${b} none`, isa: "8086", budget: b,
+  note: "architectural fetch; skeleton, queued mode pending", spec: { core: { isa: Z.i8086, params: { prefetch: "none" } }, world: world(b) } });
+const selectedIsas = opt("--isas", "z80,6502,8086").split(",");
+const selectedConfigs = configs.filter(c => selectedIsas.includes(c.isa));
 const dir = mkdtempSync(join(tmpdir(), "zilion-bench-"));
 try {
   const plan = { lanes, reps, seed: 20261010, configs: [] };
-  configs.forEach((c, i) => {
+  selectedConfigs.forEach((c, i) => {
     const m = Z.buildMachine(c.spec);
     writeFileSync(join(dir, `m${i}.wgsl`), m.wgsl);
     writeFileSync(join(dir, `m${i}.manifest.json`), JSON.stringify(m.manifest));

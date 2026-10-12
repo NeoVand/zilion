@@ -18,7 +18,9 @@ import { CORE_CASES } from "./cases_cores.mjs";
 import { Z80_SEMANTICS_CASES } from "./cases_z80.mjs";
 import { M6502_CASES } from "./cases_m6502.mjs";
 
-const CASES = [...Z80_CASES, ...Z80_SEMANTICS_CASES, ...CORE_CASES, ...M6502_CASES];
+import { I8086_CASES } from "./cases_i8086.mjs";
+
+const CASES = [...Z80_CASES, ...Z80_SEMANTICS_CASES, ...CORE_CASES, ...M6502_CASES, ...I8086_CASES];
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);

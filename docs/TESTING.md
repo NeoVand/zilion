@@ -542,3 +542,12 @@ What it does, all on the same pairs for the three implementations (the Zilion ma
 Exit status 0 only if every comparison is identical and every negative control is caught. The full baseline
 (1,048,576 pairs × 15 configurations with the CPU reference on every pair) is CPU-bound: bff.py's reference is
 plain Python, about 0.2 to 0.3 µs per step on an idle M4 core, so it takes hours; the GPU part is minutes.
+
+## Intel 8088 architectural vectors
+
+`python -I tools/fetch_8088.py` inventories the pinned compressed set; add `--download` to fetch and
+Git-blob-verify its data. `npm run test:vectors:8086` runs v2 and v2_undefined with the 20-bit sparse host.
+Use `ZILION_GPU_DUTY=0.5` on the working Mac for equal pauses after each dispatch. The ledger compares
+unmasked flags, registers, final memory, ordered writes, ports and completed REP state. It explicitly
+excludes cycle timing and queue state: the core is still a skeleton, not ready for the registered study.
+The optional `selftest --vectors-8086 <root>` adds Intel mutants. See [I8086.md](I8086.md).
