@@ -112,4 +112,3 @@ class I8086Adapter:
             while pos < len(code) and code[pos] in (0x26,0x2e,0x36,0x3e,0xf0,0xf1,0xf2,0xf3): pos += 1
             return pos + 1 < len(code) and code[pos] in (0xfe,0xff) and code[pos+1] >> 6 == 3 and (code[pos+1] >> 3) & 7 in (3,5)
         return np.array([hidden(fb.test(i)) for i in range(fb.n)],dtype=bool)
-
