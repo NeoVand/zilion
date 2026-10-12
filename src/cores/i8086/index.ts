@@ -8,7 +8,7 @@ const state: StateField[] = [
   ...registers.map((name, n) => ({ name, bits: 16, wgsl: `i8086_r[${n}]`, randomizable: n !== 4 })),
   ...segments.map((name, n) => ({ name, bits: 16, wgsl: `i8086_s[${n}]` })),
   { name: "ip", bits: 16, wgsl: "i8086_ip" },
-  { name: "flags", bits: 16, wgsl: "i8086_flags", reset: 0xf002 },
+  { name: "flags", bits: 16, wgsl: "i8086_flags", reset: 0xf002, note: "Raw init may contain impossible reserved bits; PUSHF/INT read bits3/5 clear, bit1 and bits12..15 set. POPF/IRET normalize stored flags." },
   { name: "halted", bits: 8, wgsl: "i8086_halted" },
   { name: "trap", bits: 8, wgsl: "i8086_trap" },
   ...["rep", "rep_op", "rep_seg", "rep_start", "rep_end", "rep_first", "rep_interrupt_ip"].map(name => ({ name, bits: 16, wgsl: `i8086_${name}` })),

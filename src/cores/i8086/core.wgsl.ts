@@ -93,7 +93,7 @@ fn i8086_cond(n: u32) -> bool {
 fn i8086_interrupt(n: u32) {
   // Hardware bus traces: both IVT words are read BEFORE any stack writes.
   let destination = i8086_rw(0u, n * 4u); let seg = i8086_rw(0u, n * 4u + 2u);
-  i8086_push(i8086_flags | 0xf002u); i8086_flags &= ~768u;
+  i8086_push((i8086_flags & 0xfd5u) | 0xf002u); i8086_flags &= ~768u;
   i8086_push(i8086_s[1]); i8086_push(i8086_ip); i8086_s[1] = seg; i8086_ip = destination;
   i8086_rep = 0u;
 }
@@ -371,7 +371,7 @@ fn i8086_execute() {
     case 153u: { i8086_r[2] = select(0u, 65535u, (i8086_r[0] & 32768u) != 0u); }
     case 154u: { let destination = i8086_fetchw(); let cs = i8086_fetchw(); i8086_push(i8086_s[1]); i8086_push(i8086_ip); i8086_s[1] = cs; i8086_ip = destination; }
     case 155u: {} // WAIT without a coprocessor
-    case 156u: { i8086_push(i8086_flags | 0xf002u); }
+    case 156u: { i8086_push((i8086_flags & 0xfd5u) | 0xf002u); }
     case 157u: { i8086_flags = (i8086_pop() & 0xfd5u) | 0xf002u; }
     case 158u: { i8086_flags = (i8086_flags & ~213u) | ((i8086_r[0] >> 8u) & 213u); }
     case 159u: { i8086_r[0] = (i8086_r[0] & 255u) | ((i8086_flags & 213u | 2u) << 8u); }

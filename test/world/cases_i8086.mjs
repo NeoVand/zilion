@@ -52,6 +52,10 @@ const CASES = [
       {mem:memory(32,{0:[0xf3,0xf7,0xf3]}),expect:{steps:1,state:{ax:6,dx:2,ip:3}}},
       {mem:memory(32,{0:[0xf3,0xf7,0xfb]}),expect:{steps:1,state:{ax:0xfffa,dx:2,ip:3}}}
     ])},
+  { name:"8086 PUSHF reads reserved flag bits as fixed, even after raw initialization",
+    setup:({addJob})=>addJob({isa:i8086,world:world(32,{init:{stack:{firstPushAt:"lastByte"},set:{flags:0x28}},budget:{unit:"steps",value:1}})},[
+      {mem:memory(32,{0:[0x9c]}),expect:{steps:1,state:{ip:1,flags:0x28},mem:{31:2,0:0xf0}}}
+    ])},
   { name:"8086 interrupt round trip: INT n and IRET restore IP CS FLAGS",
     setup:({addJob})=>addJob({isa:i8086,world:world(64,{budget:{unit:"steps",value:3}})},[
       {mem:memory(64,{0:[0xcd,3,0xf4],12:[20,0,0,0],20:[0xcf]}),expect:{steps:3,halt:"halt-insn",state:{ip:3,cs:0,flags:0xf002,sp:1}}}
