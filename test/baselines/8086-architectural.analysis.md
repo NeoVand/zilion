@@ -4,6 +4,13 @@ This is **architectural-fetch validation**, not validation of the 8088 prefetch
 queue. The core remains a skeleton, and `prefetch: '8088'` is rejected. The
 registered experiment is not ready to run. No paper default has been selected.
 
+Hardware queue evidence: the B9 file always ends with an empty queue; the 51 file
+ends with three bytes from a full initial queue and one from an empty initial
+queue. The 90 file ends with zero, one or two. Each file has 5,000 full and 5,000
+empty initial queues, whose bytes agree with RAM. Final queues exclude the
+already consumed first byte of the next instruction. These NOP-padded tests cannot
+establish stale-byte behavior in self-modifying soups through register results.
+
 Every FLAGS bit is compared, including documented undefined bits. Initial
 registers must be complete; sparse final registers are merged with their initial
 values. The adapter compares byte writes in bus order, ports, final RAM and the
