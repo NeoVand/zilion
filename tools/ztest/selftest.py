@@ -488,7 +488,7 @@ MUTANTS_8086 = [
     ("segment-scale", "(seg << 4u)", "(seg << 3u)", ["a0"], "mem"),
     ("push-order", "mem_write(a, v & 255u); mem_write(i8086_phys(seg, (off + 1u) & 65535u), (v >> 8u) & 255u);",
      "mem_write(i8086_phys(seg, (off + 1u) & 65535u), (v >> 8u) & 255u); mem_write(a, v & 255u);", ["50"], "bus"),
-    ("rep-count", "i8086_r[1] = (i8086_r[1] - 1u) & 0xffffu;", "i8086_r[1] = (i8086_r[1] - 2u) & 0xffffu;", ["a4"], "cx"),
+    ("rep-count", "i8086_r[1] = (i8086_r[1] - 1u) & 0xffffu;", "i8086_r[1] = (i8086_r[1] - 2u) & 0xffffu;", ["a4"], "bus"),
     ("iret-flags", "i8086_flags = (flags & 0xfd5u) | 0xf002u;", "i8086_flags = flags;", ["cf"], "flags"),
     ("shift-no-write-zero", "store = true; }\n    else if (op == 246u", "store = n != 0u; }\n    else if (op == 246u", ["d2.4"], "bus"),
 ]

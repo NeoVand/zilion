@@ -37,6 +37,16 @@ const CASES = [
     setup:({addJob})=>addJob({isa:i8086,world:world(64,{init:{stack:{firstPushAt:"lastByte"},set:{flags:0xf102,cx:3,si:32,di:40}},budget:{unit:"steps",value:2},halting:{traps:{syscall:"ignore"}}})},[
       {mem:memory(64,{0:[0xf3,0x26,0xa4],32:[1,2,3]}),expect:{steps:2,halt:"running",state:{flags:0xf102,ip:0,cx:1,si:34,di:42,rep:0xf3,sp:1},mem:{40:1,41:2,42:0x90}}}
     ])},
+  { name:"8086 TF plus INT3 nests type 1 before the INT3 handler begins",
+    setup:({addJob})=>addJob({isa:i8086,world:world(64,{init:{stack:{firstPushAt:"lastByte"},set:{flags:0xf102}},budget:{unit:"steps",value:1},outputs:{writeCounts:true}})},[
+      {mem:memory(64,{0:[0xcc],4:[24,0,0,0],12:[20,0,0,0]}),expect:{steps:1,halt:"running",state:{ip:24,flags:0xf002,sp:0xfff5},writes:[12],mem:{53:20,54:0,55:0,56:0,57:2,58:0xf0,59:1,60:0,61:0,62:0,63:2,0:0xf1}}}
+    ])},
+  { name:"8086 MOV SS delays TF until after the following instruction, including resumed runs",
+    setup:({addJob})=>{
+      const spec={isa:i8086,world:world(64,{init:{stack:{firstPushAt:"lastByte"},set:{flags:0xf102}},budget:{unit:"steps",value:2},outputs:{writeCounts:true}})};
+      const lanes=[{mem:memory(64,{0:[0x8e,0xd0,0x90],4:[24,0,0,0]}),expect:{steps:2,halt:"running",state:{ip:24,flags:0xf002,sp:0xfffb},writes:[6],mem:{59:3,60:0}}}];
+      return [addJob(spec,lanes),addJob(spec,lanes,{stepChunks:[1,1]})];
+    }},
   { name:"8086 interrupt round trip: INT n and IRET restore IP CS FLAGS",
     setup:({addJob})=>addJob({isa:i8086,world:world(64,{budget:{unit:"steps",value:3}})},[
       {mem:memory(64,{0:[0xcd,3,0xf4],12:[20,0,0,0],20:[0xcf]}),expect:{steps:3,halt:"halt-insn",state:{ip:3,cs:0,flags:0xf002,sp:1}}}
@@ -57,6 +67,14 @@ const CASES = [
       addJob({isa:i8086,world:world(32,{budget:{unit:"fetchBytes",value:2}})},[{mem:memory(32,{0:[0xb9,0x51,0xb9,0x51,0xf4]}),expect:{steps:1,halt:"running",state:{cx:0xb951,ip:3}}}]),
       addJob({isa:i8086,world:world(32)},[{mem:memory(32,{0:[0xf4]}),expect:{steps:1,halt:"halt-insn",trap:"halt-insn",state:{ip:1,halted:1}}}])
     ]},
+  ...[32,64].map(P=>({name:`8086 B9 51 opens into an unwritten partner byte on ring ${P}`,
+    setup:({addJob})=>{
+      const L=P/2; const m=new Uint8Array(P).fill(0x90);for(let i=0;i<L;i++)m[i]=i%2?0x51:0xb9;
+      const wanted={};for(let i=P-L/2+1;i<P;i++)wanted[i]=i%2?0x51:0xb9;
+      return addJob({isa:i8086,world:{...world(P),memory:{kind:"segments",segments:[{bytes:L,name:"A"},{bytes:L,name:"B"}],ring:P},budget:{unit:"steps",value:L/2+1},outputs:{writeCounts:true,fetchMap:true}}},[
+        {mem:m,expect:{steps:L/2+1,halt:"running",state:{ip:L+1,cx:0xb951,sp:(1-L/2)&65535},mem:wanted,writes:[1,L/2-1],fetched:Array.from({length:L+1},(_,i)=>i)}}
+      ]);
+    }})),
   ...[32,64].map(P=>({ name:`8086 B9 51 tiling on pair [${P/2},${P/2}]: soup init, 128 steps self-write without changing tiling`,
     setup:({addJob})=>{
       const m=Uint8Array.from({length:P},(_,i)=>i%2?0x51:0xb9);
