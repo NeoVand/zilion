@@ -1,4 +1,4 @@
-# Zilion architecture (0.3.0-dev)
+# Zilion architecture (0.3.0)
 
 Zilion computes, for very many (machine, world) pairs at once, what a world does to its memory and which
 addresses the machine visited. A **machine** is a byte-code interpreter with a program counter and some
@@ -7,7 +7,7 @@ budget of steps, and keeps a record. The point of the architecture is that **the
 every machine**: comparisons across ISAs (Z80, 6502, coherent-fetch 8086, BFF) are only clean if the world does not change
 when the machine does.
 
-This document describes the implemented 0.3.0-dev contract, shared world and engine, including the full NMOS
+This document describes the implemented 0.3.0 contract, shared world and engine, including the full NMOS
 6502 and BFF cores and the experimental coherent-fetch Intel core. The implementation decisions and remaining
 work are recorded at the end. See [Testing](TESTING.md), [Adding a core](ADDING_A_CORE.md) and the
 [Intel machine definition](I8086.md) for validation and extension details.

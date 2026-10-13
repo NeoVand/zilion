@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0-dev — unreleased
+## 0.3.0 — 2026-10-12
 
 ### M1: shared contract, world and batch engine
 
@@ -32,7 +32,7 @@
 - Remove local path prefixes from unpublished history and use relative vector paths in public ledgers. Only metadata hashes change; core hashes, comparisons and GPU digests are preserved. Update recorded ledger hashes and reproduce them with the documented commands.
 - Add a download-free harness script, ignore downloaded data/local environments and update the throughput runner to the named coherent-fetch selection.
 - Preserve legacy outcomes while chunking large `Zilion.run` batches, serializing instance runs, reducing readback maps and reporting shader errors during creation.
-- This development branch does not create a version tag or publish an npm release.
+- Keep the validation ledgers named `*-v0.3.0-dev.*`: they record the development build that was validated. The release version changes manifest provenance and generated shader headers, while core hashes, the frozen 0.2 shader text and recorded GPU outcomes remain unchanged.
 
 ## 0.2.0 — 2026-10-07
 
