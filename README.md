@@ -4,196 +4,319 @@
 
 <h1 align="center">Zilion</h1>
 
-<p align="center"><b>Many small machines. One GPU. One shared world.</b></p>
+<p align="center"><b>Watch replication begin.</b><br />
+A laboratory for the origin of evolution, built from real processors and run on your GPU.</p>
 
-Zilion is a **multi-ISA WebGPU batch emulator** for Z80, NMOS 6502, coherent-fetch 8086/8088 instruction semantics, and BFF. It executes independent programs in parallel, with one machine per GPU invocation and private memory per lane. A shared world specification makes memory mapping, initialization, budgets, halting, instruction ablation and measurements consistent across instruction sets.
+<p align="center"><img src="assets/soup.webp" width="420" alt="A soup of 20,000 random Z80 programs in which a self-copying program spreads as a wave and is later replaced" /></p>
+<p align="center"><sub>Twenty thousand random Z80 programs on a grid, each drawn as its bytes at its place (rendered by
+<a href="https://github.com/NeoVand/algocell">Algocell</a>). The first self-copier, the two-byte word <code>01 c5</code>
+repeated, spreads as a blue wave. Later a descendant whose execution returns into its own code (green) takes over.</sub></p>
 
-It is intended for artificial life, genetic programming, program search and batch instruction testing. It generates WGSL compute shaders and manifests from TypeScript, runs batches through a WebGPU engine, and can export machines for other hosts, including Python. There are no JavaScript runtime dependencies. Zilion originated in [Algocell](https://github.com/NeoVand/algocell).
+<p align="center">
+  <a href="#see-it-in-a-minute">Try it</a> ·
+  <a href="#what-you-can-do-with-it">What it does</a> ·
+  <a href="#tutorial-your-first-experiments">Tutorial</a> ·
+  <a href="#what-has-been-found-with-it">Findings</a> ·
+  <a href="#how-far-can-you-trust-it">Validation</a> ·
+  <a href="#citing-zilion">Cite</a>
+</p>
 
-**Zilion 0.3.0 is the current npm release.** It includes the multi-ISA API. The accompanying paper is in preparation.
+---
 
-## Cores and compatibility
+Put a few thousand random strings of machine code in a dish. Let neighbours meet: join two programs end to end, run
+them for a moment on a real processor, and keep whatever they wrote. Nobody sets a goal and nothing is rewarded. Within
+minutes, a program that copies itself appears out of the noise and sweeps the dish.
 
-| Core | Semantics | Status and availability |
-|---|---|---|
-| Z80 | Documented and undocumented prefix pages, shadow registers, ports through optional hooks, WZ/MEMPTR and IM; `classic` or `zilog-nmos` with the Q latch | Stable; root export `z80` and `@neovand/zilion/z80` |
-| NMOS 6502 | All 256 opcodes, decimal arithmetic, stable undocumented instructions, explicit unstable-opcode constants and JAM policies | Experimental; root export `m6502` and `@neovand/zilion/m6502` |
-| 8086/8088 | Segmented 20-bit addressing, coherent instruction fetch, REP continuations, software/type-1 interrupts and hardware-validated aliases | Experimental; root export `i8086` and `@neovand/zilion/i8086`; [machine definition](docs/I8086.md) |
-| BFF | Ring-native two-head tape machine, bracket matching, configurable alphabet, literal push and halt dials; equivalence to Algocell's `bff.py` | Stable core in this checkout; available to the machine-export CLI, currently excluded from npm exports and package files |
+This happens reliably, it can be repeated thousands of times, and every byte of every copy can be recorded. That turns
+these *primordial soups* of code into an experimental system for questions that are very hard to ask of chemistry. How
+does replication begin? When does copying start to pass on differences, so that evolution can act on them? What changes
+when the chemistry changes?
 
-A Z80 machine must select **`compat: "0.2"` or `"0.3"` explicitly** throughout 0.3.x. Compat 0.2 is frozen: the bare core, legacy shader generator and recorded GPU outcomes are byte-identical to 0.2.0. The legacy `Zilion`, `buildComputeShader` and `Z80_CORE_WGSL` exports retain those semantics.
+**Zilion is the instrument for those experiments.** It emulates real processors (the Zilog Z80, the MOS 6502 and the
+Intel 8086) and a minimal tape language (BFF), runs about a billion instructions per second on an ordinary laptop GPU,
+and records exactly what each encounter read, executed and wrote. The rules of the world, such as memory layout,
+starting state, time budget and what counts as death, are written down separately from the processor. The same world
+can therefore be run under different "chemistries" and compared.
 
-Compat 0.3 fixes wasted-prefix refresh counts, MEMPTR, IM, block-repeat flags and frozen host halts. `zilog-nmos` additionally models the Q latch. A manifest records the selected semantics and their core version, separately from the package version. The 6502 and Intel cores use compat 0.3; BFF uses compat `bff.py` and core version 1.0.0.
+It is built for researchers in the origins of life, evolutionary biology, astrobiology and artificial life who want a
+controllable system in which self-replication emerges by itself and can be taken apart, one byte at a time.
 
-## Build and quick start
+## See it in a minute
+
+For the full interactive experience, open [Algocell](https://neovand.github.io/algocell/), a live soup in the browser
+built on Zilion. To see how little code a soup needs, [`examples/soup.html`](examples/soup.html) is a complete one in
+about 250 lines. 4,096 random 16-byte
+programs sit on a 64 × 64 grid. In each update about 1,600 neighbouring pairs meet; each pair is joined into one 32-byte
+ring and executed for 128 steps on an emulated Z80, then split back, and a few random bytes mutate. Colours identify
+programs, so when one colour spreads, one program is copying itself.
 
 ```sh
-git clone --branch next https://github.com/NeoVand/zilion.git
+git clone https://github.com/NeoVand/zilion.git
 cd zilion
-npm ci
-npm run build
+npm ci && npm run build
+python3 -m http.server 8000
+# open http://localhost:8000/examples/soup.html in a WebGPU browser (recent Chrome, Edge or Safari)
 ```
 
-Use a WebGPU-capable browser in a secure context or a host that supplies a `GPUDevice`. Node needs a WebGPU backend; Node alone does not provide one. The following runs in a browser module served from this checkout:
+On a laptop the soup first fills with zero bytes, a kind of inert order that spreads without being inherited. Then,
+usually within a minute or so, a self-copier takes over. Its most common form is the tape `01 c5 01 c5 …`: the processor reads `01 c5 01` as "load the
+next two bytes into register pair BC" and `c5` as "push BC into memory", so the program writes its own bytes into its
+neighbour. The page's built-in test runs the most common tape against 16 random partners and reports how often the
+partner becomes a copy. Switch the chemistry to *lethal*, where executing a zero byte is fatal, and watch a different
+history unfold. Add `?seed=42` to the address to repeat a run exactly.
+
+## What you can do with it
+
+**Grow replicators from noise.** No designed ancestor is needed. Random code, random meetings and mutation are enough,
+and you can watch the first self-copier arise, spread as a wave across the grid and give way to successors.
+
+**Change the chemistry.** The same world can run on four instruction sets, each a different vocabulary in which some
+things are easy to say and others hard. The Z80 (ZX Spectrum, Pac-Man) has two-byte pushes and block-copy
+instructions. The 6502 (Apple II, Commodore 64, NES) pushes one byte at a time. The 8086 (the original IBM PC family)
+has segmented memory and repeated string moves. BFF is the minimal tape language of Agüera y Arcas and colleagues.
+Whether a finding holds across vocabularies tells you whether it is about replication or about one machine.
+
+**Change the physics.** Make a byte value lethal when executed, or make it halt with a chosen probability. Forbid whole
+families of instructions to ask which ones replication needs. Change tape length, ring size, the time budget per
+meeting, and whether registers start at zero or at random.
+
+**See inside every encounter.** For each meeting, Zilion can return which bytes were executed as instructions, where
+instructions started, how many bytes were written into each program, the final registers and why execution stopped. That
+lets you tell a program that stays inside its own tape (*confined*) from one whose execution runs into its partner
+(*open*), and ask whose bytes ended up where.
+
+**Run controlled experiments.** Lift a program out of the soup and culture it against fresh random partners. Plant a
+marker byte in a parent and follow it through generations, separately from the survival of the lineage. Every random
+draw is seeded, so experiments repeat exactly.
+
+**Scale up and publish.** Export any machine as a WGSL compute shader plus a JSON manifest, and run it from Python
+(`wgpu-py`) on cloud GPUs. Manifests carry SHA-256 identities of the core, the world and the shader, and semantic
+versions are frozen, so a paper can state exactly what was run and anyone can rerun it.
+
+## Tutorial: your first experiments
+
+Each step is a few lines of JavaScript. Run them in a page served as in [See it in a minute](#see-it-in-a-minute), or in
+any app that bundles npm packages:
+
+```sh
+npm install @neovand/zilion
+```
+
+### 1. One meeting between two programs
+
+A *world* describes where programs meet. Here two tapes, A and B, of 16 bytes each sit back to back on a 32-byte ring.
+The processor starts with every register at zero, the stack pointer aliases the last byte of B, and execution starts at
+A's first byte and runs for 128 steps.
 
 ```js
-import { createEngine, z80 } from "./dist/index.js";
+import { createEngine, z80 } from "@neovand/zilion"; // or "./dist/index.js" from a checkout
 
-const engine = await createEngine(); // or createEngine({ device: yourGPUDevice })
-try {
-  const machine = await engine.machine({
-    core: { isa: z80, compat: "0.3", variant: "zilog-nmos" },
-    world: {
-      memory: { kind: "ring", bytes: 32 },
-      init: { stack: { firstPushAt: "lastByte" } },
-      budget: { unit: "steps", value: 16 },
-      outputs: { state: true, memory: true },
-    },
-  });
+const world = {
+  memory: { kind: "segments", segments: [{ bytes: 16, name: "A" }, { bytes: 16, name: "B" }] },
+  init: { stack: { topAliases: "lastByte" } }, // registers start at zero; SP aliases B's last byte
+  budget: { unit: "steps", value: 128 },
+  outputs: { memory: true, fetchMap: true },
+};
 
-  // LD A,0x42 ; INC A ; HALT. Each array is a separate lane.
-  const result = await machine.run([[0x3e, 0x42, 0x3c, 0x76]]);
-  console.log(result.stateOf(0).a); // 67 (0x43)
-  console.log(result.haltReasonOf(0)); // "halt-insn"
-  console.log(result.memoryOf(0)); // final 32-byte image
-} finally {
-  engine.destroy();
-}
+const engine = await createEngine();
+const machine = await engine.machine({ core: { isa: z80, compat: "0.3" }, world });
+
+const hex = (bytes) => Array.from(bytes, (v) => v.toString(16).padStart(2, "0")).join(" ");
+const pusher = Array(8).fill([0x01, 0xc5]).flat(); // 01 c5 01 c5 …
+const partner = Array.from({ length: 16 }, () => Math.floor(Math.random() * 256));
+
+const result = await machine.run([[...pusher, ...partner]]); // one lane; pass many to run them in parallel
+console.log(hex(result.memoryOf(0).subarray(16))); // B afterwards: 01 c5 01 c5 01 c5 …
 ```
 
-`Machine.run` accepts a flat `Uint8Array` of lane memories or an array of programs, and splits large batches against device limits. `machine.batch(n)` keeps a batch resident on the GPU and can encode into a host command encoder. Results expose memory, state, executed steps, halt reasons and trap causes; optional outputs include write counters and fetch/start maps.
+The partner has been overwritten with a copy of the pusher. `machine.run` takes one memory image per lane and runs all of
+them at once on the GPU; a soup simply passes thousands of pairs per call.
 
-The legacy API remains available for 0.2 semantics:
+### 2. Open or confined?
+
+The fetch map lists every ring position the processor read as an instruction. Positions 16–31 belong to B.
 
 ```js
-import { Zilion } from "./dist/index.js";
-const cpu = await Zilion.create({ memBytes: 256 });
-try {
-  const result = await cpu.run([[0x3e, 0x42, 0x3c, 0x76]], { steps: 16 });
-  console.log(result.registers[0].af >> 8); // 67
-} finally {
-  cpu.destroy();
-}
+const open = result.fetchedOf(0).some((position) => position >= 16);
+console.log(open); // true: the pusher's execution runs on into its partner
 ```
 
-## IsaCore and the world specification
+### 3. One byte decides what is inherited
 
-An **IsaCore** is WGSL plus a descriptor: state fields, a step function, address/fetch widths, decode pages, hooks, stack/entry conventions, traps, named semantics and optional compile-time parameters. Cores access bytes through the host and report every state value needed to resume execution. The world and engine operate through that descriptor.
+Many evolved Z80 copiers share a four-byte core, `XX 5e ed b0`. With every register at zero, `5e` loads the value of
+the tape's own first byte into register E, and `ed b0` (`LDIR`) copies memory forwards, writing each byte that many
+positions ahead of where it read it. The first byte is therefore both a harmless instruction and the *copy distance*.
+Give two copiers the same marker payload and different first bytes:
 
-A **world** defines:
+```js
+const marker = Array(12).fill(0xaa);
+const both = await machine.run([
+  [0x50, 0x5e, 0xed, 0xb0, ...marker, ...partner], // distance 0x50 mod 32 = 16: the whole tape
+  [0x04, 0x5e, 0xed, 0xb0, ...marker, ...partner], // distance 4: only the core
+]);
+console.log(hex(both.memoryOf(0).subarray(16))); // 50 5e ed b0 aa aa aa …  marker inherited
+console.log(hex(both.memoryOf(1).subarray(16))); // 04 5e ed b0 04 5e ed b0 …  marker erased
+console.log(both.fetchedOf(0), both.fetchedOf(1)); // [0, 1, 2, 3] twice: both are confined
+```
 
-- Memory: power-of-two masks, rings of any positive size, or named segments on a padded ring. ISA addresses wrap at the ISA width before world mapping; odd rings expose that seam.
-- Initialization: reset values, explicit stack placement, selected fixed/random fields, or per-lane state. `firstPushAt` names the ring position of the first byte written by a push across ISAs.
-- Budget: explicit steps or fetched instruction bytes. A step follows the core's declared convention; an Intel REP iteration is one step.
-- Policies: native halts, traps, probabilistic halt dials and instruction ablation, either compiled expressions or per-run bitsets.
-- Measurements: final memory/state, halt/trap codes, writes, fetched instruction bytes and instruction-start positions.
+Both copiers are confined and both reproduce, but only one passes on the marker. When the copy distance d divides the
+tape length, the number of positions free to carry anything is d minus the core's length, and the distance byte is
+itself copied to the offspring. That is the central observation of the paper described [below](#what-has-been-found-with-it).
 
-The stateless dial hash uses seed, global lane, step and salt. Chunked and resumed runs preserve it when the host supplies the corresponding lane/step bases and records. `buildMachine` emits WGSL and a `zilion.manifest/2` JSON manifest with buffer layouts, selected parameters and SHA-256 provenance. Library mode emits functions for a shader that owns its buffers.
+### 4. Change the chemistry, change the physics
 
-Read [Architecture](docs/ARCHITECTURE.md) for the complete contract and [Adding a core](docs/ADDING_A_CORE.md) for the implementation and validation checklist. Export machines without a JavaScript GPU host:
+Worlds take conditions. Build one machine per condition, keep everything else identical, and compare.
+
+```js
+// Lethal chemistry: executing a zero byte kills the run (add `probability: 0.3` for a dial).
+const lethal = await engine.machine({
+  core: { isa: z80, compat: "0.3" },
+  world: { ...world, halting: { lethal: { firstUnit: 0 } } },
+});
+
+// Ablation: forbid every PUSH of a register pair (opcodes c5, d5, e5, f5) by turning it into a no-op.
+const noPush = await engine.machine({
+  core: { isa: z80, compat: "0.3" },
+  world: { ...world, ablation: { expr: "prefix == 0u && (op & 0xcfu) == 0xc5u" } },
+});
+const blocked = await noPush.run([[...pusher, ...partner]]);
+console.log(hex(blocked.memoryOf(0).subarray(16))); // the partner is untouched: no pushes, no copy
+```
+
+Ablation expressions see the decoded prefix and opcode, so you can remove a single instruction, a family or a whole
+prefix page. A packed per-page table (`ablation: { table: "uniform" }`) changes the forbidden set between runs without
+recompiling.
+
+### 5. Another processor
+
+Swap the core and keep the world. `firstPushAt` puts the first pushed byte at the same ring position on every
+instruction set, which keeps cross-chemistry comparisons fair.
+
+```js
+import { m6502, i8086 } from "@neovand/zilion";
+
+const crossWorld = { ...world, init: { stack: { firstPushAt: "lastByte" } } };
+const mos = await engine.machine({ core: { isa: m6502, compat: "0.3" }, world: crossWorld });
+const intel = await engine.machine({ core: { isa: i8086, compat: "0.3" }, world: crossWorld });
+```
+
+The 8086 core models instruction semantics with coherent fetch. Read [I8086](docs/I8086.md) before designing 8086
+worlds; the paper's 8086 soups, for example, started the stack pointer at 1 rather than using `firstPushAt`.
+
+### 6. A soup
+
+A soup is a loop around `machine.run`. Each update: draw cells, pair each with a random neighbour, copy both tapes into
+one lane, run every lane at once, write the two halves back, then mutate a few random bytes. That is the whole of
+[`examples/soup.html`](examples/soup.html). Population structure, sampling and measurement live in your code, so they
+stay visible and under your control.
+
+### 7. From Python, at scale
+
+The research runs behind the paper used Python on cloud GPUs. Export any machine as a WGSL shader plus a manifest and
+run it with [`wgpu-py`](https://github.com/pygfx/wgpu-py):
 
 ```sh
 node scripts/export-machines.mjs --list-cores
 node scripts/export-machines.mjs machines.json --out build/exported
 ```
 
-The input is an array of `{ "name", "core": { "isa", "compat" }, "world" }` selections. The exporter can select every built core by id, including BFF.
+`machines.json` is a list of `{ "name", "core": { "isa", "compat" }, "world" }` objects, in the same form as above with
+the instruction set named by id. The manifest records buffer layouts, parameters and SHA-256 identities.
 
-## Validation ledgers
+## What has been found with it
 
-These are instruction/state checks, not cycle-accuracy claims. Expected rules are explicit, narrowly scoped and tested with planted faults. **Zero unexpected divergences does not mean zero raw divergences.** Reports contain the full coverage, rules, input hashes and reproduction details.
+Zilion was built for a study of what spontaneous replicators pass on to their descendants. The paper is in
+preparation; in short:
 
-| Configuration | Tests | Raw architectural passes | Unexpected divergences | Report |
-|---|---:|---:|---:|---|
-| Z80 compat 0.2 | 1,604,384 | 1,557,549 | 0; 14 expected rules | [Frozen baseline](test/baselines/z80-v0.2.0.md) |
-| Z80 compat 0.3, classic | 1,604,470 | 1,602,260 | 0; Q, Q-XY and EI-P rules | [Classic baseline](test/baselines/z80-v0.3.0-dev.md) |
-| Z80 compat 0.3, zilog-nmos | 1,604,470 | 1,604,470 | 0; EI-P rule for internal interrupt latches | [NMOS baseline](test/baselines/z80-v0.3.0-dev-zilog-nmos.md) |
-| NMOS 6502 | 2,560,000 | 2,560,000 | 0; no expected rules | [6502 baseline](test/baselines/6502-v0.3.0-dev.md) |
-| 8086 coherent fetch | 3,137,000 | 3,126,917 | 0; one hidden-latch rule covering 10,083 cases | [Architectural baseline](test/baselines/8086-architectural.md) |
+- **Reproduction is not heredity.** The first replicator in Z80 soups, the `01 c5` pusher, sustains its lineages while
+  losing every one of 512 tested variants by a registered carriage criterion. It rebuilds its pattern and forgets what
+  was done to it.
+- **One inherited byte sets how much is inherited.** For the recurring forward-copy family above, the number of freely
+  inherited positions is the copy distance minus the core's length. Registered edits of that byte in Z80 copiers, across
+  1,067,608 tests, and 42 eligible evolved 6502 copiers matched this prediction without a single mismatch.
+- **The environment chooses.** Making the zero byte lethal shifts populations from copiers that erase variation towards
+  copiers that keep it.
+- **Availability does not predict evolution.** The 8086 can run a pusher just like the Z80's, yet its soups mostly began
+  with confined copiers, a registered prediction that failed. Many of them independently evolved the same
+  four-byte-distance copying geometry as the Z80.
 
-The Z80 inputs are 1,604,000 upstream tests plus 384 locally derived wasted-prefix tests; 0.3 also includes 86 R/WZ probes. The 6502 set covers every opcode. Its [decimal gate](test/baselines/6502-decimal-clark.md) checks Clark's algorithm against 310,000 upstream cases, then checks all **1,310,720** inputs of five opcode forms across binary and decimal modes.
+## Key ideas, in plain words
 
-The Intel ledger comprises **2,657,000 documented**, **350,000 alias**, and **130,000 undefined-form** tests in 336 files. Every FLAGS bit and ordered memory write is compared. The one rule covers CS/IP and unlisted reads for four undefined register far-transfer forms whose initial hidden latch is absent from the hardware vectors. Queue state and cycle timing are excluded. Independent world probes cover small-ring aliasing, coherent self-modification, interrupt boundaries, REP resumes and the frozen bootstrap panel.
+| Term | Meaning |
+|---|---|
+| Tape | A program: a short string of bytes, each one an instruction or data. |
+| Encounter | Two tapes joined into one ring of memory and executed together for a fixed budget. |
+| Ring | Memory whose end wraps around to its start, so a program can run or write into its partner. |
+| Budget | Instruction steps allowed per encounter; a world never runs on a hidden default. |
+| Reset state | What registers and the stack hold when an encounter starts. Evolved copiers can depend on it. |
+| Open / confined | Whether execution runs into the partner's bytes, or stays inside the program's own tape. |
+| Fetch map | The positions read as instructions during an encounter; the basis of open versus confined. |
+| Chemistry | The instruction set, plus world rules such as which byte values are lethal. |
+| Ablation | Turning chosen instructions into no-ops, to ask which ones replication needs. |
 
-[BFF equivalence](test/baselines/bff-equivalence.md) checks **1,048,576 pairs in each of 20 configurations** (20,971,520 GPU comparisons), with zero differences against Algocell's GPU reference. The CPU reference covers every pair in the first 15 configurations and 65,536 pairs in each of the remaining five: **16,056,320 CPU comparisons**. All six negative controls are caught; **4,718,592** dial-hash draws match. BFF's external reference checkout is required for reproduction.
+## How far can you trust it?
 
-### Fetch and reproduce
+An emulator is a measuring instrument, so it is checked like one: instruction by instruction, against independent
+reference tests, with every expected difference stated in advance and tested with deliberately planted faults. These are
+instruction and state checks, not cycle-timing claims.
 
-Use Node 22+ and Python 3.11+ with `wgpu` and `numpy`; BFF reference tests also need `pytest`. For example:
+| Core | Reference tests | Unexpected differences | Report |
+|---|---:|---:|---|
+| Z80, compat 0.3 (classic and `zilog-nmos`) | 1,604,470 each | 0 | [Classic](test/baselines/z80-v0.3.0-dev.md), [NMOS](test/baselines/z80-v0.3.0-dev-zilog-nmos.md) |
+| Z80, compat 0.2 (frozen) | 1,604,384 | 0 | [Frozen baseline](test/baselines/z80-v0.2.0.md) |
+| NMOS 6502 | 2,560,000 | 0 | [6502 baseline](test/baselines/6502-v0.3.0-dev.md) |
+| 8086, coherent fetch | 3,137,000 recorded from real hardware | 0 | [Architectural baseline](test/baselines/8086-architectural.md) |
+| BFF | 20,971,520 GPU pair comparisons | 0 | [Equivalence](test/baselines/bff-equivalence.md) |
 
-```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install 'wgpu==0.32.0' 'numpy==2.5.3' pytest
-export ZILION_PYTHON=.venv/bin/python
+The Z80 and 6502 references are the community SingleStepTests suites; the 8086 references were recorded from a physical
+8088. "Zero unexpected differences" does not mean zero raw differences: each report lists its narrowly scoped expected
+rules, such as 10,083 8086 cases that depend on a hidden internal latch the hardware recordings do not capture. The
+ledgers were recorded at version `0.3.0-dev`, whose instruction semantics are those of the 0.3.x releases.
 
-# No vector download is needed for these gates.
-npm test
-npm run test:conformance
-npm run test:harness:offline
-npm run typecheck
-```
+A Z80 machine must name its semantics explicitly. `compat: "0.2"` is frozen byte for byte, so historical experiments
+remain reproducible; `compat: "0.3"` corrects rarely used corners (refresh counting after wasted prefixes, the hidden
+WZ/MEMPTR register, interrupt mode and block-repeat flags), and the `zilog-nmos` variant adds the Q latch of NMOS chips.
+To reproduce every ledger, fetch the pinned datasets and run the suites in [Testing](docs/TESTING.md).
 
-Datasets remain **outside the repository**. Fetch these pinned revisions; the fetchers verify Git blob hashes and write local manifests:
+## Speed
 
-```sh
-python3 -I tools/fetch-vectors.py SingleStepTests/z80 \
-  ebe1875d48f374bcfd4b505d8eb8ee751568b5f7 v1/ ../zilion-vectors/z80
-python3 -I tools/fetch-vectors.py SingleStepTests/65x02 \
-  2f6980a2d95757486c7bee24355c360e40e2a224 6502/v1/ ../zilion-vectors/6502
-python3 -I tools/fetch_8088.py --download --out ../zilion-vectors/8088
-```
+On an Apple M4 laptop GPU, with 262,144 random 32-byte pair rings and a 128-step budget, Zilion executes about 1.09
+billion Z80 steps, 0.86 billion 6502 steps and 0.33 billion 8086 steps per second
+([measurements and method](test/baselines/8086-throughput.md)). The example soup runs roughly 150 updates per second in
+a browser, most of it spent moving data between the CPU and the GPU.
 
-The Intel fetcher pins `aea84484abc79d09639d855b7b0ab32bc9e4dbeb`; its compressed vectors occupy **804,548,868 bytes** and are refused if the selected set exceeds 3 GB. Then run:
+## Limits worth knowing
 
-```sh
-npm run test:vectors:0.2
-npm run test:vectors
-npm run test:vectors:nmos
-npm run test:vectors:6502
-npm run test:vectors:8086
-npm run test:harness
+- Zilion emulates instruction semantics, not whole computers: no cycle timing, no external interrupts and no peripherals.
+  Budgets count instruction steps or instruction-stream bytes.
+- The 8086 core reads each instruction from current memory (*coherent fetch*), without the real chip's prefetch queue.
+  Self-modifying code therefore behaves differently from a physical 8088, and experiments must say so.
+- The 6502 is the NMOS chip only. BFF ships in the source and exporter but not yet in the npm interface.
+- Each lane has private memory. Populations, pairing and mutation are written by the host, as in the example soup.
+- GPU validation was measured on Apple M4 (Metal). Bit identity across other GPU backends has not yet been measured.
 
-# Requires an Algocell checkout; the default quick gate uses 131,072 pairs/config.
-ALGOCELL_DIR=../algocell npm run test:bff
-# Full recorded BFF baseline (CPU sampling follows the report):
-"$ZILION_PYTHON" -I test/world/bff_equiv.py --algocell ../algocell \
-  --pairs 1048576 --cpu 1.0
-```
+## For developers
 
-[Testing](docs/TESTING.md#baselines) gives commands to write canonical JSON ledgers and Markdown reports, including exact digest checks. Public ledgers use relative vector directories; removing local directory prefixes changes their metadata hashes while preserving core hashes, every vector comparison and GPU output digests. Use the documented directory spellings to reproduce canonical bytes. Dataset licences and reference attribution are in [THIRD_PARTY.md](THIRD_PARTY.md).
+An **IsaCore** is WGSL plus a descriptor of state fields, a step function, address and fetch widths, decode pages,
+hooks, stack and entry conventions, traps and named semantics. A **world** defines memory (power-of-two, any-size ring
+or named segments), initialization, budget, halting and trap policies, ablation and outputs. `buildMachine` turns a core
+and a world into WGSL and a `zilion.manifest/2` manifest; `createEngine` runs machines in a browser or any host with a
+`GPUDevice`, chunking large batches to device limits and keeping resident batches on the GPU when asked. The 0.2 API
+(`Zilion`, `buildComputeShader`) remains available with frozen semantics.
 
-## Measured throughput
+Read [Architecture](docs/ARCHITECTURE.md) for the full contract, [Adding a core](docs/ADDING_A_CORE.md) to bring a new
+instruction set, [Testing](docs/TESTING.md) to reproduce the validation, and the [CHANGELOG](CHANGELOG.md) for release
+history. Zilion has no JavaScript runtime dependencies.
 
-[Apple M4 measurements](test/baselines/8086-throughput.md): 262,144 lanes, random 32-byte pair rings, 128-step budget, median of five warm dispatches. Timing includes restoring pristine lane memory and a small queue fence, and excludes bulk upload/readback. Rates count **executed world steps**, including early halts; they are not chip cycles.
+## Citing Zilion
 
-| Configuration | ms per dispatch | Million executed steps/s |
-|---|---:|---:|
-| Z80 compat 0.3 classic, native HALT | 28.96 | 1,091.4 |
-| NMOS 6502, native JAM | 15.32 | 860.4 |
-| NMOS 6502, JAM ignored | 20.98 | 1,599.7 |
-| 8086 coherent fetch | 89.48 | 333.7 |
+The paper introducing Zilion is in preparation. Until it appears, cite the software and the exact version you used;
+[CITATION.cff](CITATION.cff) has machine-readable metadata.
 
-This is a local pilot workload. Different halt rates, memory sizes, instruction mixes, device limits and host overhead affect throughput. Reproduce after building:
+> Mostafa 'Neo' Mohsenvand (MIT Media Lab). *Zilion: a multi-ISA WebGPU batch emulator*. https://github.com/NeoVand/zilion
 
-```sh
-node test/bench/bench-cores.mjs --lanes 262144 --reps 5 --budgets 128 \
-  --json build/test/throughput.json
-```
-
-## Limitations
-
-- Zilion is a batch interpreter, not a complete computer emulator. There is no cycle timing, external IRQ/NMI input, peripheral model or coprocessor execution. Budgets count steps or instruction-stream bytes; cycle budgets are unimplemented.
-- **The Intel core has coherent fetch and no prefetch queue.** It reads consumed instruction bytes from current memory. This changes self-modifying-code behavior relative to a queued 8086/8088 and must be named in experiments. `prefetch: "8088"` is rejected. The deterministic `hidden_latch: "zero_ea"` policy is not a prediction of unspecified hardware latch state; register LEA/LES/LDS trap. See [I8086](docs/I8086.md).
-- The Z80 has no interrupt delivery. Compat 0.2 retains its documented historical simplifications. Classic 0.3 leaves the Q latch unmodelled; use `zilog-nmos` for that behavior. Without port hooks, Z80 input reads zero and output is discarded; Intel input reads FF per byte and output is discarded.
-- The 6502 is NMOS only. Unstable-opcode constants match the pinned vectors and need not describe every physical chip. Dummy reads and cycle timing are omitted; ordered writes are modelled.
-- BFF is available in the checkout and exporter but currently omitted from the npm package interface. Full external-reference CPU validation is expensive, and Algocell has no repository licence file.
-- GPU validation was measured on Apple M4/Metal. Cross-backend bit identity has not been measured; Linux software-adapter CI is documented but not configured. Real-device tests exercise the WGSL through wgpu-py; JavaScript engine handling is additionally checked with mocks and a browser test page.
-- Worlds currently use private per-lane memory. Storage/sparse world memory, packed memory, storage ablation tables, a generic CPU twin and soup/population dynamics are not implemented. Raw hooks require host discipline; not every raw-hook machine can resume.
-
-## Citation and licence
-
-The paper introducing Zilion is **in preparation**; there is no paper DOI yet. Cite the software and the exact commit used. [CITATION.cff](CITATION.cff) provides machine-readable metadata:
-
-> Mostafa 'Neo' Mohsenvand (MIT Media Lab). *Zilion: a multi-ISA WebGPU batch emulator*. Version 0.3.0. https://github.com/NeoVand/zilion.
-
-Zilion is [MIT licensed](LICENSE). See [CHANGELOG](CHANGELOG.md) for release history and [third-party attribution](THIRD_PARTY.md) for separately downloaded validation data and semantic references.
+Zilion grew out of [Algocell](https://github.com/NeoVand/algocell), a live soup in the browser. It owes its central
+inspiration to *Computational Life* by Agüera y Arcas and colleagues ([arXiv:2406.19108](https://arxiv.org/abs/2406.19108)),
+which showed that self-replicators arise from random programs, and to the SingleStepTests project, whose reference
+suites make careful emulation possible. Zilion is [MIT licensed](LICENSE); validation datasets are downloaded separately
+under their own licences ([third-party attribution](THIRD_PARTY.md)).
