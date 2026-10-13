@@ -10,7 +10,7 @@ Zilion is a **multi-ISA WebGPU batch emulator** for Z80, NMOS 6502, coherent-fet
 
 It is intended for artificial life, genetic programming, program search and batch instruction testing. It generates WGSL compute shaders and manifests from TypeScript, runs batches through a WebGPU engine, and can export machines for other hosts, including Python. There are no JavaScript runtime dependencies. Zilion originated in [Algocell](https://github.com/NeoVand/algocell).
 
-**This branch is `0.3.0-dev`.** The npm release is still 0.2.0; install from this source checkout to use the multi-ISA API. The accompanying paper is in preparation.
+**Zilion 0.3.0 is the current npm release.** It includes the multi-ISA API. The accompanying paper is in preparation.
 
 ## Cores and compatibility
 
@@ -194,6 +194,6 @@ node test/bench/bench-cores.mjs --lanes 262144 --reps 5 --budgets 128 \
 
 The paper introducing Zilion is **in preparation**; there is no paper DOI yet. Cite the software and the exact commit used. [CITATION.cff](CITATION.cff) provides machine-readable metadata:
 
-> Mostafa 'Neo' Mohsenvand (MIT Media Lab). *Zilion: a multi-ISA WebGPU batch emulator*. Version 0.3.0-dev. https://github.com/NeoVand/zilion.
+> Mostafa 'Neo' Mohsenvand (MIT Media Lab). *Zilion: a multi-ISA WebGPU batch emulator*. Version 0.3.0. https://github.com/NeoVand/zilion.
 
 Zilion is [MIT licensed](LICENSE). See [CHANGELOG](CHANGELOG.md) for release history and [third-party attribution](THIRD_PARTY.md) for separately downloaded validation data and semantic references.
