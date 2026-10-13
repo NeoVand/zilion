@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.3.1 — unreleased
+## 0.3.1 — 2026-10-13
+
+- Rewrite the README for researchers in the origins of life, evolution, astrobiology and artificial life: what Zilion is for, what it can do and a seven-step tutorial whose snippets were run in Chrome on this release. Add `examples/soup.html`, a complete primordial soup in about 250 lines, and an Algocell soup animation.
 
 - Make generated i8086 WGSL valid under the strict WGSL expression grammar used by browser/Tint compilers: parenthesize one `&&` range inside an `||` chain and one `&` mask inside an `|` expression. Naga's actual parse is preserved; no core or world semantics change. Machines exported by 0.3.0 for naga hosts behave identically.
 - Add the stdlib-only `scripts/check-wgsl-strict.mjs` to `npm test`. It parses 815 generated texts across every supported core/variant/compat, all core hook combinations, kernel/library mode, rings, segments, ablation, lethal/trap dials, initialization and all output combinations. It checks the full WGSL operator-mixing grammar, including bitwise/arithmetic/relational mixing and non-associating shifts/comparisons. Exactly two offending expressions were found, both in i8086; Z80, NMOS 6502, BFF and world text need no edits.
