@@ -1,0 +1,1071 @@
+{
+  "reference": "7f223de (0.3.0)",
+  "cores": [
+    {
+      "core": "z80@0.3/classic",
+      "old": "6053c3481d2d85461470338c12cdcad47d962808750144585bc617e3403d89e0",
+      "new": "6053c3481d2d85461470338c12cdcad47d962808750144585bc617e3403d89e0"
+    },
+    {
+      "core": "z80@0.3/zilog-nmos",
+      "old": "15699854c1554d964cd0315e52e064a5c0e3213c07190826287c06f9c1b99184",
+      "new": "15699854c1554d964cd0315e52e064a5c0e3213c07190826287c06f9c1b99184"
+    },
+    {
+      "core": "z80@0.2/classic",
+      "old": "8db4015dab560cd075b2f4da7de78b6cc5e2b120034bfbf62590eb49784b2955",
+      "new": "8db4015dab560cd075b2f4da7de78b6cc5e2b120034bfbf62590eb49784b2955"
+    },
+    {
+      "core": "m6502@0.3/nmos",
+      "old": "4f4baf4dad24e724d978045be31f17ade978a56a95f77ca43e7186a0e2a765ad",
+      "new": "4f4baf4dad24e724d978045be31f17ade978a56a95f77ca43e7186a0e2a765ad"
+    },
+    {
+      "core": "i8086@0.3/nmos",
+      "old": "979f0ae19c6ea6d69d5cf7949ce27dcbfbeb5f7824d4fe64b6643c7048597b12",
+      "new": "cb6e8360ad2dee38a29544c542b7240d325451f1573222f0dcbce3a59847105e"
+    },
+    {
+      "core": "bff@bff.py/cubff",
+      "old": "59d6828a866a4f5d9c820dd64221f3619864798967f1e8b2017dd9a5d3088840",
+      "new": "59d6828a866a4f5d9c820dd64221f3619864798967f1e8b2017dd9a5d3088840"
+    }
+  ],
+  "matrix": {
+    "texts": 815,
+    "originalErrors": 276,
+    "changedTexts": 138,
+    "exactEditsVerified": true
+  },
+  "adapter": "Apple M4 (Metal, IntegratedGPU)",
+  "wgpu": "0.32.0",
+  "numpy": "2.5.4",
+  "precedence": {
+    "lanes": 65536,
+    "expressions": [
+      "op == 140u || op == 141u || op == 142u || op == 143u || op >= 196u && op <= 199u",
+      "op == 140u || op == 141u || op == 142u || op == 143u || (op >= 196u && op <= 199u)",
+      "(op == 140u || op == 141u || op == 142u || op == 143u || op >= 196u) && op <= 199u",
+      "flags & 213u | 2u",
+      "(flags & 213u) | 2u",
+      "flags & (213u | 2u)",
+      "a || b && c",
+      "a || (b && c)",
+      "(a || b) && c"
+    ],
+    "allEqualToNagaGrouping": true,
+    "alternativeBitwiseDifferences": 32768,
+    "alternativeLogicalDifferences": 16384,
+    "burstSeconds": 0.030780332977883518
+  },
+  "jobs": [
+    {
+      "core": "z80@0.3/classic",
+      "world": "mask",
+      "lanes": 32768,
+      "sha256": "977c9fe88fec40d4c9367ce762634da7e539141248b9fadedb79ee852daad5be",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/classic",
+      "world": "ring",
+      "lanes": 32768,
+      "sha256": "b32c6a3f5069b85c7429aed4a6516870d2e513936ec53a5d732f0a58428cc053",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/classic",
+      "world": "segments",
+      "lanes": 32768,
+      "sha256": "09a0aa147592f5c2c963b71525b10a06bbdab61fe4c5c4eef984bb9bcd162deb",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap",
+        "padding"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/classic",
+      "world": "ablation",
+      "lanes": 32768,
+      "sha256": "885f2339875f726827a0dc52c4132306bc4c5dbedbae02d6f5f113a8cbbd9e84",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/classic",
+      "world": "expr-lethal",
+      "lanes": 32768,
+      "sha256": "4dfe6270a9a5727cfdaf5a05ca56137781406d3bbb1d5a230a1626846aa3b1bb",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/classic",
+      "world": "fetch-budget",
+      "lanes": 32768,
+      "sha256": "759ade19ec887c7ac4e691e22cc91e1400f4d14efca6e7cdef1b12555b98f4f5",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/classic",
+      "world": "per-lane",
+      "lanes": 32768,
+      "sha256": "282fbeda4370ebf44b347b3ea42cc860ed92ef820c0975a7f638bf15a7872d5d",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/classic",
+      "world": "raw-hooks",
+      "lanes": 32768,
+      "sha256": "b8462cdf2ad5f46e5ed47f1e09bc5340d83305ed812a0bc9be6570138d03f7fd",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/zilog-nmos",
+      "world": "mask",
+      "lanes": 32768,
+      "sha256": "28dbb705ed785c94cea193c3ce918b32b9ae9ffcf5d7341f7e75f02ff7dddb52",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/zilog-nmos",
+      "world": "ring",
+      "lanes": 32768,
+      "sha256": "81047f2e19de0b8ca13efb23d575b185c565224664b5e9eda692047a3f13afb3",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/zilog-nmos",
+      "world": "segments",
+      "lanes": 32768,
+      "sha256": "7abee58c69e8dc3178cc8674f480c8b6a36c68bbb6eb5ccf902703ef1bc0668d",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap",
+        "padding"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/zilog-nmos",
+      "world": "ablation",
+      "lanes": 32768,
+      "sha256": "2a3a1a37ed1b50ce70c825f2ddd8f63bbe7bb800ce46229a68d0a642f99dad93",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/zilog-nmos",
+      "world": "expr-lethal",
+      "lanes": 32768,
+      "sha256": "faf2dba84f0d6bf287a729762805339b278f977cfa93924de9dc74b031486bc3",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/zilog-nmos",
+      "world": "fetch-budget",
+      "lanes": 32768,
+      "sha256": "2acbf8d7f012c096b8a843f41570afc6c52ca4b3a62feace8ccc282724e1c5d8",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/zilog-nmos",
+      "world": "per-lane",
+      "lanes": 32768,
+      "sha256": "077a8e7a5be74ea49e8524db32ebbde6105997a368febe068c97261937ca3bdd",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.3/zilog-nmos",
+      "world": "raw-hooks",
+      "lanes": 32768,
+      "sha256": "928deb3aa1f71f57f679aae77efd6f39836b420fe6287baf4656ded864185941",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.2/classic",
+      "world": "mask",
+      "lanes": 32768,
+      "sha256": "33e7a3604771c417bbc57058dfd196500334200faf7f373823e04bba359096d4",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.2/classic",
+      "world": "ring",
+      "lanes": 32768,
+      "sha256": "44a64c95a1d0206d1ad49849c3a2c0d508ec161fb0b5ed2f197a1c75fd9b5fbe",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.2/classic",
+      "world": "segments",
+      "lanes": 32768,
+      "sha256": "a3114d72df525eb46758c1e4a4f879fb5a5e67d76ed62d1504b3b25c1b6ee56a",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap",
+        "padding"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.2/classic",
+      "world": "ablation",
+      "lanes": 32768,
+      "sha256": "52322b043340af278a9ab40841fbba27609bc876a477dcae3779b101d07f8284",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.2/classic",
+      "world": "expr-lethal",
+      "lanes": 32768,
+      "sha256": "7b3749a6c534453ef4988c0cd4b809c8b19aace77c96082363d11327873b31dd",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.2/classic",
+      "world": "fetch-budget",
+      "lanes": 32768,
+      "sha256": "c08d0f057a563d8247082882f7adfb742f1d655edfbd9d41f345f0322d78d8fb",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.2/classic",
+      "world": "per-lane",
+      "lanes": 32768,
+      "sha256": "abf089861d45f52fc4e7715bfffa09c07d56fb4182ea84a18ac793c9d7b01eb1",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "z80@0.2/classic",
+      "world": "raw-hooks",
+      "lanes": 32768,
+      "sha256": "e5a352aec01aa060e5dd1952dce5986c09ad66297968363157497594a5b348c8",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "m6502@0.3/nmos",
+      "world": "mask",
+      "lanes": 32768,
+      "sha256": "baf0e2a1bf667da7ab85db79d9847c7b868f729220a113d6c1118327d1c889f8",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state"
+      ],
+      "equal": true
+    },
+    {
+      "core": "m6502@0.3/nmos",
+      "world": "ring",
+      "lanes": 32768,
+      "sha256": "7ac666f9111cc5206088dadf94dd9e266110e86e80c498a1f773b067b38270fd",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "m6502@0.3/nmos",
+      "world": "segments",
+      "lanes": 32768,
+      "sha256": "b1dfa373b87495b71eec00b7e43543d6f06a15d0bee773ab7bebdee34978bcbd",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap",
+        "padding"
+      ],
+      "equal": true
+    },
+    {
+      "core": "m6502@0.3/nmos",
+      "world": "ablation",
+      "lanes": 32768,
+      "sha256": "a83820e5e745c174027bd38f70b57000ca5664f965b2725dcc8ee65efbd810ed",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "m6502@0.3/nmos",
+      "world": "expr-lethal",
+      "lanes": 32768,
+      "sha256": "579e16cdd727d2eb3bc2e06c470e41b2ec7ae827178115df71f52153fa10b4d6",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "m6502@0.3/nmos",
+      "world": "fetch-budget",
+      "lanes": 32768,
+      "sha256": "2600c585a88d5ee2965f11186d5512aef0c6830d30bbc583939346b48cd13fcd",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "m6502@0.3/nmos",
+      "world": "per-lane",
+      "lanes": 32768,
+      "sha256": "e57a57e9279359c57e6f36fbbe0731f11c1c2a32ee972b7ef82b1e3c8f5ac7b1",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "m6502@0.3/nmos",
+      "world": "raw-hooks",
+      "lanes": 32768,
+      "sha256": "c5b3a4d879336693fee67283d8ecb81e13b0f49f3023191f6490a5bf459d4086",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "i8086@0.3/nmos",
+      "world": "mask",
+      "lanes": 32768,
+      "sha256": "8f05bc8af04b6616b309e52d33dc3cb3b962998661964bc87dcc16a9359cc919",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state"
+      ],
+      "equal": true
+    },
+    {
+      "core": "i8086@0.3/nmos",
+      "world": "ring",
+      "lanes": 32768,
+      "sha256": "c9e7a319e09bab3d572190fff357cd089d8cdb3b81f5d0c44fa5dfa27de8518d",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "i8086@0.3/nmos",
+      "world": "segments",
+      "lanes": 32768,
+      "sha256": "b88fa134ce26201d928a5c5ce1cb7eb31b8d5857c5a6e37ac0bdbbf31b4e1c26",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap",
+        "padding"
+      ],
+      "equal": true
+    },
+    {
+      "core": "i8086@0.3/nmos",
+      "world": "ablation",
+      "lanes": 32768,
+      "sha256": "eff1cd4b909e604b12e5fa1c5582829c31e29736ab4bf32eee938de2fa39f5d5",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "i8086@0.3/nmos",
+      "world": "expr-lethal",
+      "lanes": 32768,
+      "sha256": "d54584cf6f6e57479647cf6a9be55427295b44e558df3f64d9bc63f02aa718fb",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "i8086@0.3/nmos",
+      "world": "fetch-budget",
+      "lanes": 32768,
+      "sha256": "b073cb88836a1ce98c9d4f13340c9b5193adde4314db0f715250b7ea5af09b1e",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "i8086@0.3/nmos",
+      "world": "per-lane",
+      "lanes": 32768,
+      "sha256": "dcc210d52619b63fd49c3379908f68faa0b43dd7ad53a048a98c635f624bd14a",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "i8086@0.3/nmos",
+      "world": "raw-hooks",
+      "lanes": 32768,
+      "sha256": "d745738811833b584ad203df46dd92b4cc4d4d9f1ce34ac80de682dbf59df842",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "bff@bff.py/cubff",
+      "world": "mask",
+      "lanes": 32768,
+      "sha256": "5824392529f08130341362d96ed234681f85dc76bcbc0b040c7c4a02dfe01807",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state"
+      ],
+      "equal": true
+    },
+    {
+      "core": "bff@bff.py/cubff",
+      "world": "ring",
+      "lanes": 32768,
+      "sha256": "aa18ac7e37db5c1d8fad08e2fbbb70d450c5f29ff133ed90def367f20e32c913",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "bff@bff.py/cubff",
+      "world": "segments",
+      "lanes": 32768,
+      "sha256": "cdedad50ecb0ae336e73c9108b4c4773271cb61696747d3a9e55fffb25d08ae0",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap",
+        "padding"
+      ],
+      "equal": true
+    },
+    {
+      "core": "bff@bff.py/cubff",
+      "world": "ablation",
+      "lanes": 32768,
+      "sha256": "4045982d14afb407cbb913dce911a82e5bcbe3a3f0a9775ab0dd5c4fe60666e7",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "bff@bff.py/cubff",
+      "world": "expr-lethal",
+      "lanes": 32768,
+      "sha256": "e8f96950d9e1317f099a34defe13658244bbcd5aaa313a43d698eed21df7d652",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "bff@bff.py/cubff",
+      "world": "fetch-budget",
+      "lanes": 32768,
+      "sha256": "40cf898e733e466449363a4d8a901d37057d29c75c9ca30505104d295a9e0a18",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "bff@bff.py/cubff",
+      "world": "per-lane",
+      "lanes": 32768,
+      "sha256": "cd118ffe271eb125cdbd779628839291c71750e5db02085189e2427898926a81",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    },
+    {
+      "core": "bff@bff.py/cubff",
+      "world": "raw-hooks",
+      "lanes": 32768,
+      "sha256": "dcc3f7f97a96c85a952db10304dcea08e56cf588e4a983b81dfc25e76655a88d",
+      "recordFields": [
+        "steps",
+        "haltReason",
+        "trapCause",
+        "state",
+        "writeCounts",
+        "fetchMap",
+        "startMap"
+      ],
+      "equal": true
+    }
+  ],
+  "totals": {
+    "z80@0.3/classic": 262144,
+    "z80@0.3/zilog-nmos": 262144,
+    "z80@0.2/classic": 262144,
+    "m6502@0.3/nmos": 262144,
+    "i8086@0.3/nmos": 262144,
+    "bff@bff.py/cubff": 262144
+  },
+  "lanes": 1572864,
+  "maxBurstSeconds": 0.1766803750069812,
+  "equal": true,
+  "coreTextHashChanges": [
+    {
+      "mask": 0,
+      "hooks": {
+        "fetch": false,
+        "instructionStart": false,
+        "trap": false,
+        "io": false
+      },
+      "old": "09aba7d44b68c04d816b442d19dc704cd3d80d13449ea5e08e5748a10071d410",
+      "new": "45801cfa64cab6b06dfebddde80cdbdce4633f8e0ebc3f00870f5eb051956d2d"
+    },
+    {
+      "mask": 1,
+      "hooks": {
+        "fetch": true,
+        "instructionStart": false,
+        "trap": false,
+        "io": false
+      },
+      "old": "d62eec03974ac8d8accf6553371f28b2cc5a7f9fa3edd73d8fc2f212cd9bf01d",
+      "new": "e15ce1ec08633a7b8c7059f1cd96386c89591bb4b5b29ea570a80ff360730c70"
+    },
+    {
+      "mask": 2,
+      "hooks": {
+        "fetch": false,
+        "instructionStart": true,
+        "trap": false,
+        "io": false
+      },
+      "old": "b3b4dca3603a01f214878984a934c2f122fd61a011306a28e51ee8367b8819ac",
+      "new": "96a5128834bff1a8e5b0802d642129979dc448883a593ebb08821de7a7d2e415"
+    },
+    {
+      "mask": 3,
+      "hooks": {
+        "fetch": true,
+        "instructionStart": true,
+        "trap": false,
+        "io": false
+      },
+      "old": "cc05989457d50c769c204f6c6213bc5f9da27c5c4637d40556618ba5cdf477af",
+      "new": "3abeb5aa4834cd49bb7b7a3ae85058b79ec33ef1cd25fbe4d2582e612b0c82cc"
+    },
+    {
+      "mask": 4,
+      "hooks": {
+        "fetch": false,
+        "instructionStart": false,
+        "trap": true,
+        "io": false
+      },
+      "old": "0cd2b6f21e8ceebe36ab1f47c327edb78719ea416d534a31dd6cc1761d396039",
+      "new": "ea32eedbbf64df3097f3649440ceffe8118799a6eb1e774e42e006e88131055e"
+    },
+    {
+      "mask": 5,
+      "hooks": {
+        "fetch": true,
+        "instructionStart": false,
+        "trap": true,
+        "io": false
+      },
+      "old": "be90ac615d20e0e3c8a291e437b58f994e875bfb2213d5cce1dcb797c0fc5535",
+      "new": "63b4905030174d094a2d2cb15f8f6e4463ecf35c0f76a9068df92705d2a57a30"
+    },
+    {
+      "mask": 6,
+      "hooks": {
+        "fetch": false,
+        "instructionStart": true,
+        "trap": true,
+        "io": false
+      },
+      "old": "ec00ea171696c7f036323004f1408b54c6bbd6baf1f2d84a3c5e1479bcf793b8",
+      "new": "e7792c2951ea1fb29ee67119a605b463666250fe29b07e59f0a23a771c2d328d"
+    },
+    {
+      "mask": 7,
+      "hooks": {
+        "fetch": true,
+        "instructionStart": true,
+        "trap": true,
+        "io": false
+      },
+      "old": "afccdfdb6a7d76bff870d7882ef03591015220603af282da12f219dfaa552196",
+      "new": "8375eea46a0267e4c109faf98ef60131067f42254c8fc15ad54da20126f260c5"
+    },
+    {
+      "mask": 8,
+      "hooks": {
+        "fetch": false,
+        "instructionStart": false,
+        "trap": false,
+        "io": true
+      },
+      "old": "60b6705b96b0b35d766ee7aeadedf46cf5250807b21e65a2948473fbe4347abb",
+      "new": "ac3a4c3538efb445bfa1d39d23cb819a9c2b984125177b6ccf21d8810c2e1062"
+    },
+    {
+      "mask": 9,
+      "hooks": {
+        "fetch": true,
+        "instructionStart": false,
+        "trap": false,
+        "io": true
+      },
+      "old": "2f4429054cfe15748521d124d1f62044119240c8e6ce4be767bf7771b5ae063b",
+      "new": "ad02b88e8cfd1d6bce3ebf0d05bf429cd13d6aeaabd9748e40847f46f7530410"
+    },
+    {
+      "mask": 10,
+      "hooks": {
+        "fetch": false,
+        "instructionStart": true,
+        "trap": false,
+        "io": true
+      },
+      "old": "5058caa8afabc66cf435a73fd6d034ee9236133d5544183883787b624c312c29",
+      "new": "b19add2550094484364077efca9b3bda947a7aaf82ec4b0e3ab9c0c5d4eb6b22"
+    },
+    {
+      "mask": 11,
+      "hooks": {
+        "fetch": true,
+        "instructionStart": true,
+        "trap": false,
+        "io": true
+      },
+      "old": "c9a30e7a63b2b4dc451ba0d258f4bd629681ff659f481e78623a7e3c851b59e3",
+      "new": "fd9d86e8f0a814e5f5eea2aad92489f2143669027e7e8bde9f743808f72a9572"
+    },
+    {
+      "mask": 12,
+      "hooks": {
+        "fetch": false,
+        "instructionStart": false,
+        "trap": true,
+        "io": true
+      },
+      "old": "363e72d3a202ebaf1982ad45d9c9f04020ee22c18a4eb1207d5699f461c2547e",
+      "new": "ad2fa9f10cdacfc9a674bda57c8185a7dbf2565212ad3345200cf35639b19e5a"
+    },
+    {
+      "mask": 13,
+      "hooks": {
+        "fetch": true,
+        "instructionStart": false,
+        "trap": true,
+        "io": true
+      },
+      "old": "5e3166bfcbac9eb23f344e3c06180edb87ffea4cd13edf9112fa031e7ed5c6ca",
+      "new": "d1bb4dabb8d0929474d1749651fece4b342d261f355937c4301c588d5d5455e1"
+    },
+    {
+      "mask": 14,
+      "hooks": {
+        "fetch": false,
+        "instructionStart": true,
+        "trap": true,
+        "io": true
+      },
+      "old": "2e5f5ba805912c217294ca74dfe967cb0e2ccc9e5bcada2602490b3b34f2d73e",
+      "new": "8fc58fe29f5bc1001c5a23ea667286d64a8ba198cbbf3bb3f1905b09bb12d62d"
+    },
+    {
+      "mask": 15,
+      "hooks": {
+        "fetch": true,
+        "instructionStart": true,
+        "trap": true,
+        "io": true
+      },
+      "old": "e14d7b6907659e4bff8adb10e1e8a362854a822078d2d41e41ae1c51938c2363",
+      "new": "18f8237b9711b22b6b2dcd33ff757e14609b028e4da61549eb7ee2f1488bbe2f"
+    }
+  ],
+  "nagaNative": "29.0.1.1",
+  "tests": {
+    "npmTest": {
+      "passed": true,
+      "unit": 31,
+      "engine": 7,
+      "export": 7,
+      "worldCases": 173,
+      "gpuJobs": 306,
+      "machines": 245,
+      "compat02": {
+        "worlds": 6,
+        "lanes": 600000,
+        "chunkDigests": 60,
+        "byteReferences": [
+          "git v0.2.0 (8557d3b)",
+          "npm @neovand/zilion@0.2.0"
+        ],
+        "legacyConfigurationsPerReference": 66,
+        "hookCombinations": 16
+      }
+    },
+    "conformance": {
+      "passed": true,
+      "configurations": 3,
+      "vectorsPerConfiguration": 17,
+      "parallelLanesPerConfiguration": 8192
+    },
+    "harnessOffline": {
+      "passed": true,
+      "unitTests": 21,
+      "hostProbeCases": 15,
+      "hostProbeMemoryModels": 2,
+      "busLogProbeCases": 8,
+      "busLogMemoryModels": 2,
+      "plantedRuleCases": 4
+    },
+    "hardware8086": {
+      "passed": true,
+      "subset": "first 512 vectors of each opcode/reference file",
+      "lanes": 172032,
+      "referenceFiles": 336,
+      "rawPassed": 171502,
+      "expectedRuleCases": 530,
+      "unexpected": 0,
+      "dispatches": 168,
+      "lanesPerDispatch": 1024,
+      "ledgerSha256": "192686322386ca6dd96513c4be1ee393f02b9d236c83be7f1fc49b1624a38b28",
+      "seconds": {
+        "gpu": 3.19,
+        "ledger": 2.14,
+        "parse+other": 10.33,
+        "total": 15.66
+      },
+      "expectedRules": "test/vectors/8086/expected-0.3.1.json"
+    }
+  },
+  "preliminaryRun": {
+    "counted": false,
+    "terminated": true,
+    "reason": "random BFF IP could exceed tape length and create a very long backward bracket scan; corrected test inputs before completed run"
+  }
+}
