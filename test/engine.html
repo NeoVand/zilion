@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Zilion — engine tests</title>
+		<style>
+			body { background: #0c0c10; color: #e8e4e0; font: 14px/1.6 ui-monospace, Menlo, monospace; padding: 32px; }
+			.pass { color: #58d68d; }
+			.fail { color: #ff6b81; }
+			h1 { font-size: 18px; }
+		</style>
+	</head>
+	<body>
+		<h1>Zilion engine (L2) and 0.2 facade</h1>
+		<pre id="out">Running… (build first: `npm run build`; serve the repository root over http)</pre>
+		<script type="module">
+			import('./engine.js').catch((e) => {
+				document.getElementById('out').innerHTML = `<span class="fail">${e.stack ?? e}</span>`;
+				window.__zilionEngineTests = { done: true, passed: 0, failed: 1, results: [{ name: 'load', ok: false, note: String(e.stack ?? e) }] };
+			});
+		</script>
+	</body>
+</html>

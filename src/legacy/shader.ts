@@ -1,4 +1,4 @@
-import { Z80_CORE_WGSL } from "./z80-core.wgsl.js";
+import { Z80_CORE_WGSL } from "../cores/z80/core.wgsl.js";
 
 // Registers written back per program (16-bit values), in this fixed order.
 export const REG_FIELDS = [

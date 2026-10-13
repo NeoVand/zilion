@@ -1,0 +1,133 @@
+"""Command-line entry for tools/zt.py."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from . import artifacts
+from .gpu import HarnessError
+
+REPO = artifacts.REPO
+
+
+def _common(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--wgsl-dir", type=Path, default=artifacts.DEFAULT_WGSL_DIR, help="emitted WGSL (default build/wgsl)")
+    p.add_argument("--no-emit", action="store_true", help="reuse the emitted WGSL instead of running tools/build-wgsl.mjs")
+
+
+def _semantics(p: argparse.ArgumentParser, what: str) -> None:
+    p.add_argument("--compat", choices=["0.3", "0.2"],
+                   help=f"Z80 semantics of the core {what}: 0.3 (the default) or 0.2 (the frozen 0.2.0 core)")
+    p.add_argument("--variant", choices=["classic", "zilog-nmos"],
+                   help=f"Z80 variant of the core {what} (default classic; zilog-nmos needs compat 0.3)")
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(prog="zt.py", description=__doc__)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    c = sub.add_parser("conformance", help="run test/conformance.js headlessly")
+    _common(c)
+    c.add_argument("--out", type=Path, default=REPO / "build" / "test", help="results directory")
+    _semantics(c, "to run (default: every emitted configuration)")
+
+    v = sub.add_parser("vectors", help="run per-instruction vectors and write the divergence ledger")
+    _common(v)
+    v.add_argument("isa", choices=["z80", "6502", "8086"])
+    v.add_argument("dirs", type=Path, nargs="+", help="vector directories (SingleStepTests layout, .json or .json.gz)")
+    v.add_argument("--files", nargs="*", help="only these opcode keys (fnmatch patterns, e.g. 'ed b?' 'cb 4?')")
+    v.add_argument("--test", nargs="*", help="only these test names (e.g. 'ed 70 0123')")
+    v.add_argument("--limit-per-file", type=int, default=0, help="first N tests of each file (0 = all)")
+    v.add_argument("--memory", choices=["sparse", "full"], default="sparse", help="memory model of the test host")
+    v.add_argument("--mem-cap", type=int, default=None, help="memory-table slots per lane")
+    v.add_argument("--port-cap", type=int, default=8, help="port-table slots per lane (reads and writes each)")
+    v.add_argument("--lanes", type=int, help="lanes per dispatch (default 65536 sparse, 1024 full)")
+    v.add_argument("--repeat", type=int, default=1, help="run every dispatch N times and require identical bytes")
+    v.add_argument("--workers", type=int, help="parser processes (default min(8, cpus-1); 1 = in-process)")
+    v.add_argument("--expected", type=Path, help="expected-divergence rules (default: the test/vectors/<isa>/expected-*.json whose core_sha256 is the core's)")
+    v.add_argument("--json", type=Path, help="write the ledger JSON here (canonical; deterministic)")
+    v.add_argument("--run-json", type=Path, help="write run information (adapter, timing) here")
+    v.add_argument("--md", type=Path, help="write the Markdown report here")
+    v.add_argument("--analysis", type=Path, help="Markdown included verbatim in the report (hand-written analysis)")
+    v.add_argument("--show", type=int, default=20, help="unexpected classes to print")
+    v.add_argument("--dump-wgsl", type=Path, help="write the composed test shader (host + glue + core) here")
+    v.add_argument("--core", type=Path, help="use this core WGSL instead of the emitted one (experiments; recorded by SHA-256)")
+    _semantics(v, "to test (recorded in the run's provenance, --run-json, and the report)")
+
+    t = sub.add_parser("selftest", help="harness self-tests on the GPU")
+    _common(t)
+    t.add_argument("--vectors", type=Path, help="Z80 vector directory for the mutant, invariance and determinism tests")
+    t.add_argument("--vectors-6502", type=Path, help="6502 vector directory for the 6502 mutant, invariance and determinism tests")
+    t.add_argument("--vectors-8086", type=Path, help="8088 vector root (containing v2) for Intel mutants")
+    t.add_argument("--limit-per-file", type=int, default=50, help="tests per file for invariance and determinism")
+
+    d = sub.add_parser("decimal6502", help="the 6502's decimal mode against Clark's published NMOS algorithm, exhaustively")
+    _common(d)
+    d.add_argument("vectors", type=Path, help="SingleStepTests 6502/v1 directory (step 1 checks the transcription against it)")
+    d.add_argument("--md", type=Path, help="write the report here (test/baselines/6502-decimal-clark.md)")
+    d.add_argument("--json", type=Path, help="write the results as JSON here")
+
+    a = ap.parse_args(argv)
+    try:
+        if a.cmd == "decimal6502":
+            from . import decimal6502
+            from .vectors.ledger import canonical_json
+
+            art = artifacts.load(a.wgsl_dir, do_emit=not a.no_emit)
+            ok, doc = decimal6502.run(art, a.vectors)
+            if a.md:
+                a.md.parent.mkdir(parents=True, exist_ok=True)
+                a.md.write_text(decimal6502.markdown(doc), encoding="utf-8")
+            if a.json:
+                a.json.parent.mkdir(parents=True, exist_ok=True)
+                a.json.write_text(canonical_json(doc), encoding="utf-8")
+            return 0 if ok else 1
+        if a.cmd == "selftest":
+            from . import selftest
+
+            art = artifacts.load(a.wgsl_dir, do_emit=not a.no_emit)
+            return selftest.run(art, a.vectors, a.limit_per_file, vectors_6502=a.vectors_6502, vectors_8086=a.vectors_8086)
+        if a.cmd == "conformance":
+            from . import conformance
+
+            art = artifacts.load(a.wgsl_dir, do_emit=not a.no_emit)
+            return conformance.run(art, a.out, variant=a.variant, compat=a.compat)
+        if a.cmd == "vectors":
+            return _vectors(a)
+    except HarnessError as e:
+        print(f"zt: harness error: {e}")
+        return 2
+    return 0
+
+
+def _vectors(a) -> int:
+    from .vectors import report, session
+    from .vectors.ledger import canonical_json
+
+    art = artifacts.load(a.wgsl_dir, do_emit=not a.no_emit).select(a.isa, variant=a.variant, compat=a.compat)
+    if a.core:
+        art = artifacts.with_core(art, a.isa, a.core.read_text(encoding="utf-8"), str(a.core))
+    ledger, info = session.run(
+        art, a.isa, a.dirs, patterns=a.files, limit_per_file=a.limit_per_file, only_tests=a.test, mode=a.memory,
+        mem_cap=a.mem_cap if a.mem_cap is not None else (768 if a.isa == "8086" else 32), port_cap=a.port_cap, lanes=a.lanes if a.lanes is not None else (1024 if a.isa == "8086" else None), repeat=a.repeat, rules_path=a.expected,
+        workers=a.workers,
+    )
+    if a.dump_wgsl:
+        a.dump_wgsl.parent.mkdir(parents=True, exist_ok=True)
+        a.dump_wgsl.write_text(info["wgsl"], encoding="utf-8")
+    doc = ledger.to_json(info["meta"])
+    text = canonical_json(doc)
+    digest = report.sha256(text)
+    if a.json:
+        a.json.parent.mkdir(parents=True, exist_ok=True)
+        a.json.write_text(text, encoding="utf-8")
+    if a.run_json:
+        a.run_json.parent.mkdir(parents=True, exist_ok=True)
+        a.run_json.write_text(canonical_json(info["run"] | {"ledger_sha256": digest}), encoding="utf-8")
+    if a.md:
+        a.md.parent.mkdir(parents=True, exist_ok=True)
+        analysis = a.analysis.read_text(encoding="utf-8") if a.analysis else None
+        a.md.write_text(report.markdown(doc, info["run"], digest, analysis), encoding="utf-8")
+    print(report.console(doc, info["run"], digest, a.show))
+    return 1 if doc["summary"]["totals"].get("unexpected", 0) else 0

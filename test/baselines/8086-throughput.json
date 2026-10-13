@@ -1,0 +1,63 @@
+{
+ "adapter": "Apple M4 (Metal, IntegratedGPU)",
+ "lanes": 262144,
+ "reps": 5,
+ "rows": [
+  {
+   "name": "z80 b128",
+   "isa": "z80",
+   "budget": 128,
+   "note": "HALT halts (as-chip)",
+   "wgsl": "m0.wgsl",
+   "manifest": "m0.manifest.json",
+   "seconds_median": 0.028963708027731627,
+   "seconds_min": 0.028940999996848404,
+   "lanes_per_s": 9050774.843780613,
+   "steps_per_s": 1091406976.2660744,
+   "mean_steps": 120.58713150024414,
+   "halted_share": 0.06725311279296875
+  },
+  {
+   "name": "6502 b128",
+   "isa": "6502",
+   "budget": 128,
+   "note": "JAM halts (as-chip); P = 0x20",
+   "wgsl": "m1.wgsl",
+   "manifest": "m1.manifest.json",
+   "seconds_median": 0.015319917001761496,
+   "seconds_min": 0.01503658399451524,
+   "lanes_per_s": 17111319.857010875,
+   "steps_per_s": 860396567.3237274,
+   "mean_steps": 50.28230285644531,
+   "halted_share": 0.7359085083007812
+  },
+  {
+   "name": "6502 b128 jam-ignored",
+   "isa": "6502",
+   "budget": 128,
+   "note": "JAM a 1-byte no-op: every lane runs the whole budget",
+   "wgsl": "m2.wgsl",
+   "manifest": "m2.manifest.json",
+   "seconds_median": 0.02097512496402487,
+   "seconds_min": 0.020125208015087992,
+   "lanes_per_s": 12497851.643297087,
+   "steps_per_s": 1599725010.3420272,
+   "mean_steps": 128.0,
+   "halted_share": 0.0
+  },
+  {
+   "name": "8086 b128 none",
+   "isa": "8086",
+   "budget": 128,
+   "note": "architectural fetch; skeleton, queued mode pending",
+   "wgsl": "m3.wgsl",
+   "manifest": "m3.manifest.json",
+   "seconds_median": 0.08947833301499486,
+   "seconds_min": 0.08789987495401874,
+   "lanes_per_s": 2929692.487186475,
+   "steps_per_s": 333665715.4195835,
+   "mean_steps": 113.89103698730469,
+   "halted_share": 0.14392852783203125
+  }
+ ]
+}

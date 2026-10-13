@@ -1,10 +1,15 @@
 // Known-answer conformance vectors for the Zilion Z80 core. Each runs a short
 // program and asserts on the final registers/memory, hand-verified against the
-// Z80 instruction set. Runs in a browser after `npm run build` (see index.html).
+// Z80 instruction set. Runs in a browser after `npm run build` (see index.html),
+// and headlessly through `python -I tools/zt.py conformance` (docs/TESTING.md),
+// which runs these same VECTORS and check functions on wgpu-py.
 // The broader differential test against a real-Z80 reference lives upstream in
 // the Algocell project.
 
 import { Zilion } from "../dist/index.js";
+
+/** Bytes of memory per program for every conformance run. */
+export const MEM_BYTES = 256;
 
 const hi = (n) => (n >> 8) & 0xff;
 const lo = (n) => n & 0xff;
@@ -177,8 +182,19 @@ export const VECTORS = [
   },
 ];
 
+/**
+ * The parallel batch: `count` copies of one program, all of which must end
+ * with A = 3. `check` receives the array of final registers.
+ */
+export const PARALLEL = {
+  count: 8192,
+  program: [0x3e, 0x00, 0x3c, 0x3c, 0x3c, 0x76],
+  steps: 16,
+  check: (regs) => regs.every((x) => x.af >> 8 === 3),
+};
+
 export async function runConformance() {
-  const z80 = await Zilion.create({ memBytes: 256 });
+  const z80 = await Zilion.create({ memBytes: MEM_BYTES });
   /** One extra executor per distinct fetchHook, sharing the device. */
   const hooked = new Map();
   const results = [];
@@ -188,7 +204,7 @@ export async function runConformance() {
       exec = hooked.get(v.fetchHook);
       if (!exec) {
         exec = await Zilion.create({
-          memBytes: 256,
+          memBytes: MEM_BYTES,
           device: z80.device,
           fetchHook: v.fetchHook,
         });
@@ -200,14 +216,12 @@ export async function runConformance() {
     results.push({ name: v.name, ok: detail === null, detail: detail ?? "ok" });
   }
   for (const h of hooked.values()) h.destroy();
-  const N = 8192;
-  const progs = Array.from({ length: N }, () => [
-    0x3e, 0x00, 0x3c, 0x3c, 0x3c, 0x76,
-  ]);
+  const N = PARALLEL.count;
+  const progs = Array.from({ length: N }, () => PARALLEL.program);
   const t0 = performance.now();
-  const r = await z80.run(progs, { steps: 16 });
+  const r = await z80.run(progs, { steps: PARALLEL.steps });
   const ms = performance.now() - t0;
-  const ok = r.registers.every((x) => x.af >> 8 === 3);
+  const ok = PARALLEL.check(r.registers);
   z80.destroy();
   const passed = results.filter((x) => x.ok).length;
   return {
