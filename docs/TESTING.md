@@ -5,12 +5,15 @@ runs that WGSL through [wgpu-py](https://github.com/pygfx/wgpu-py) and does ever
 
 | Suite | Command | What it checks | GPU |
 |---|---|---|---|
+| Package and world | `npm test` | TypeScript unit/engine/export checks, frozen byte identity, all core world tests and 600,000 recorded compat 0.2 programs | yes |
+| Offline harness | `npm run test:harness:offline` | parser/rule unit tests, synthetic host probes and rule controls; no external vectors | yes |
 | Conformance | `npm run test:conformance` | the 17 known-answer programs and the 8,192-program batch of `test/conformance.js`, on the 0.2 kernel and on the same kernel with each 0.3 core | yes |
 | Vectors | `npm run test:vectors` (`:nmos`, `:0.2`) | every instruction against per-instruction golden vectors (SingleStepTests/z80, plus analytic vectors and R/WZ probes), for the default core (compat 0.3, classic), the `zilog-nmos` variant, or the frozen 0.2 core | yes |
+| Intel vectors | `npm run test:vectors:8086` | 3,137,000 hardware 8088 cases; architectural state, FLAGS, memory, ports and ordered writes; queue/cycle timing excluded | yes |
 | 6502 vectors | `npm run test:vectors:6502` | every 6502 opcode against SingleStepTests/65x02 `6502/v1` (2,560,000 tests) | yes |
-| Harness self-test | `npm run test:harness` | the harness itself: unit tests, planted divergences, mutated Z80 and 6502 cores, the 6502 decimal-mode check against Clark's algorithm, memory-model invariance, determinism | yes |
+| Harness self-test | `npm run test:harness` | the harness itself: unit tests, planted divergences, mutated Z80, 6502 and Intel cores, the 6502 decimal-mode check against Clark's algorithm, memory-model invariance, determinism | yes |
 | BFF equivalence | `npm run test:bff` | the BFF core against Algocell's `experiments/micro/bff.py` (its GPU kernel and its CPU reference), bit for bit; see [BFF equivalence](#bff-equivalence) | yes |
-| Throughput | `node test/bench/bench-cores.mjs` | Z80 and 6502 on a soup-like workload (random 32-byte pairs, 128 and 512 steps); a measurement, not a gate | yes |
+| Throughput | `node test/bench/bench-cores.mjs` | Z80, 6502 and coherent-fetch Intel on a soup-like workload (random 32-byte pairs, 128 and 512 steps); a measurement, not a gate | yes |
 
 The browser page `test/index.html` still runs `test/conformance.js` through `Zilion.run`. It is a demo, not a gate.
 
@@ -18,15 +21,28 @@ The browser page `test/index.html` still runs `test/conformance.js` through `Zil
 
 - **Node 22 or later** (tested with v24.21.0) and the package's dev dependencies (`npm ci`). Only `typescript` is
   used; there is no bundler.
-- **Python 3.11 or later** (tested with 3.12.12) with `wgpu` (tested 0.32.0) and `numpy` (tested 2.5.3). Nothing
-  else is needed.
-- **A WebGPU adapter.** Metal on macOS; Vulkan on Linux, where CI uses Mesa's lavapipe (see
+- **Python 3.11 or later** (tested with 3.12.12) with `wgpu` (tested 0.32.0) and `numpy` (tested 2.5.3). BFF reference tests also need `pytest`.
+- **A WebGPU adapter.** Metal on macOS; Vulkan on Linux, where the documented CI recipe uses Mesa's lavapipe (see
   [Linux CI](#linux-ci-documented-not-set-up)).
 
 The npm scripts call `${ZILION_PYTHON:-python3}`. Point `ZILION_PYTHON` at the interpreter that has wgpu-py, for
-example Algocell's `experiments/.venv/bin/python`. Every harness command runs Python with `-I` (isolated mode):
+example `.venv/bin/python` after installing the dependencies below. Every harness command runs Python with `-I` (isolated mode):
 neither the current directory nor `PYTHONPATH` is on the import path. The scripts add their own directory
 explicitly.
+
+```sh
+npm ci
+npm run build
+python3 -m venv .venv
+.venv/bin/python -m pip install 'wgpu==0.32.0' 'numpy==2.5.3' pytest
+export ZILION_PYTHON=.venv/bin/python
+npm test
+npm run test:conformance
+npm run test:harness:offline
+npm run typecheck
+```
+
+These gates need no vector download. Full vector/harness runs use the separately fetched datasets below.
 
 | Variable | Meaning |
 |---|---|
@@ -34,6 +50,8 @@ explicitly.
 | `ZILION_NODE` | Node used by the harness to emit WGSL (default: `node` on `PATH`) |
 | `ZILION_Z80_VECTORS` | SingleStepTests/z80 directory for `test:vectors` and `test:harness` (default `../zilion-vectors/z80`) |
 | `ZILION_6502_VECTORS` | SingleStepTests/65x02 `6502/v1` directory for `test:vectors:6502` and `test:harness` (default `../zilion-vectors/6502`) |
+| `ZILION_8086_VECTORS` | SingleStepTests/8088 root containing `v2` and `v2_undefined` (default `../zilion-vectors/8088`) |
+| `ZILION_GPU_DUTY=0.5` | Add equal pauses after dispatches in the world and conformance hosts |
 | `ZILION_ALLOW_CPU_ADAPTER=1` | permit a CPU adapter (lavapipe, llvmpipe, SwiftShader, WARP); refused otherwise |
 | `ZILION_ADAPTER=<text>` | only consider adapters whose device name or backend contains `<text>` (e.g. `vulkan`, `llvmpipe`) |
 | `ZILION_SKIP_TSC=1` | `tools/build-wgsl.mjs` reuses the existing `dist/` instead of running `tsc` |
@@ -68,10 +86,10 @@ src/*.ts ──tsc──▶ dist/ ──tools/build-wgsl.mjs──▶ build/wgsl
   requested with the WebGPU **default limits**, so whatever passes here fits on lavapipe too. Bind-group layouts are
   explicit, and WGSL compiler errors are raised with the compiler's message (exit code 2).
 
-**Why wgpu-py and not Node + Dawn.** Design §6.1 named Node + Dawn (`webgpu` on npm) as the primary engine. That is
-a new native dependency. wgpu-py is already what Algocell's runs use, locally and on Modal. Codegen stays in
-TypeScript, as design §2.2 asks. A Dawn engine can be added later by replacing the dispatch layer: the WGSL, the
-data layout and the ledger do not depend on the host language.
+**Host scope.** Code generation stays in TypeScript; the headless host executes the emitted WGSL through
+wgpu-py. It validates the shader and manifest independently of the JavaScript engine. Engine buffer handling is
+covered by mock-device tests and the browser page `test/engine.html`; a Node WebGPU backend can supply a
+`GPUDevice` to the public API.
 
 ## Conformance
 
@@ -95,7 +113,7 @@ handling in TypeScript. Only a WebGPU host runs that code: the browser page now,
 ```sh
 python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic test/vectors/z80/analytic/probes \
     --json build/test/z80.json --md build/test/z80.md
-python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic --variant zilog-nmos
+python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic test/vectors/z80/analytic/probes --variant zilog-nmos
 python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic --compat 0.2   # the 0.2.0 baseline
 python -I tools/zt.py vectors z80 ../zilion-vectors/z80 --files 'ed b?' 'cb 4?'     # some opcode files
 python -I tools/zt.py vectors z80 ../zilion-vectors/z80 --files 'ed 70' --test 'ed 70 0012'   # one test
@@ -134,11 +152,17 @@ Exit codes: **0**, every divergence is explained by an expected rule; **1**, at 
   SHA-256 of the written file:
 
   ```sh
-  python -I tools/fetch-vectors.py SingleStepTests/z80 <40-hex commit> v1/ ../zilion-vectors/z80
+  python3 -I tools/fetch-vectors.py SingleStepTests/z80 \
+    ebe1875d48f374bcfd4b505d8eb8ee751568b5f7 v1/ ../zilion-vectors/z80
+  python3 -I tools/fetch-vectors.py SingleStepTests/65x02 \
+    2f6980a2d95757486c7bee24355c360e40e2a224 6502/v1/ ../zilion-vectors/6502
+  python3 -I tools/fetch_8088.py --download --out ../zilion-vectors/8088
   ```
 
-  Its URL quoting, blob hashing and file-name checks are unit-tested offline. It has not been run against the
-  network yet: downloading needs the maintainer's approval.
+  URL quoting, blob hashing and file-name checks are unit-tested offline. The Intel fetcher pins
+  `aea84484abc79d09639d855b7b0ab32bc9e4dbeb`, preserves upstream gzip bytes and inventories the compressed
+  set before downloading (804,548,868 bytes; refuses sets over 3 GB). See [attribution](../THIRD_PARTY.md)
+  for upstream licences. Fetching is explicit; test commands never download automatically.
 
 ### The test host
 
@@ -318,13 +342,13 @@ An adapter is a class with:
 - `instruction_bytes(test)` and `compact_state(state)`, for reports.
 
 Register it in `ADAPTERS` (`tools/ztest/vectors/session.py`) and the `vectors` command's `isa` choices, and write
-`test/vectors/<isa>/expected-<version>.json`. For the planned targets:
+`test/vectors/<isa>/expected-<version>.json`. For another target:
 
 - **65C02 (SingleStepTests/65x02 `wdc65c02` and others).** As the 6502 adapter, with the CMOS opcode set; `cb` and
   `db` (WAI, STP) are empty files.
-- **8086/8088 (hardware-generated).** Registers are nested under `regs`, so override `state_values`. Addresses are
-  20-bit (`addr_bits = 20`), so only `sparse` memory applies. The prefetch queue fields are not architectural state
-  and are not compared.
+The implemented Intel adapter demonstrates nested register states, 20-bit sparse memory, merging sparse
+final registers, and ordered writes/ports decoded from bus transactions. Its queue fields are not compared;
+see [Intel vectors](#intel-8088-architectural-vectors).
 
 `tools/ztest/selftest.py`'s probe core is a complete minimal adapter, about 30 lines.
 
@@ -350,7 +374,13 @@ Both must hold. The self-test runs the check and, as a control, a core that take
 
 ## Baselines
 
-`test/baselines/<isa>-v<version>.md` and `.json` record a core's divergences. The Z80 baselines were made with:
+`test/baselines/` contains reports, canonical ledgers and handwritten analyses. The public JSON ledgers use
+relative vector directories after publication cleanup: directory metadata changed, while
+core hashes, every comparison and GPU output digests stayed fixed. The CLI records directory spellings in the
+canonical ledger; use these exact relative paths to reproduce its hash. Source commit ids in the published
+reports identify the corresponding sanitized commits; validation timing and toolchain provenance are retained.
+
+The Z80 baselines can be reproduced with:
 
 ```sh
 # 0.2.0 (the frozen core; ledger SHA-256 ba15462725903d54…, reproduced byte for byte while the package version stays
@@ -362,14 +392,15 @@ python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analyti
 python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic test/vectors/z80/analytic/probes \
     --json test/baselines/z80-v0.3.0-dev.json --run-json build/test/z80-v0.3.0-dev.run.json \
     --md test/baselines/z80-v0.3.0-dev.md --analysis test/baselines/z80-v0.3.0-dev.analysis.md
-# 0.3.0-dev, variant zilog-nmos (report only: its ledger is all EI-P)
+# 0.3.0-dev, variant zilog-nmos (EI-P differences are internal only)
 python -I tools/zt.py vectors z80 ../zilion-vectors/z80 test/vectors/z80/analytic test/vectors/z80/analytic/probes \
-    --variant zilog-nmos --run-json build/test/z80-v0.3.0-dev-zilog-nmos.run.json \
+    --variant zilog-nmos --json test/baselines/z80-v0.3.0-dev-zilog-nmos.json \
+    --run-json build/test/z80-v0.3.0-dev-zilog-nmos.run.json \
     --md test/baselines/z80-v0.3.0-dev-zilog-nmos.md --analysis test/baselines/z80-v0.3.0-dev-zilog-nmos.analysis.md
 ```
 
 The 6502 baseline for 0.3.0-dev (2,560,000 tests, zero divergences, zero rules; ledger SHA-256
-`5ca3f2b4b3726d5bad30f686c840d623f7c9d88db2a5ede759ace5b59d576f84`, reproduced by four runs) was made with:
+`5ca3f2b4b3726d5bad30f686c840d623f7c9d88db2a5ede759ace5b59d576f84`, reproduced after relative-directory metadata cleanup) was made with:
 
 ```sh
 python -I tools/zt.py vectors 6502 ../zilion-vectors/6502 \
@@ -388,7 +419,8 @@ A future CI gate should fail on any unexpected divergence (exit 1) and on any ru
 
 - `python -I -m unittest discover -s test/harness` runs the GPU-free unit tests: parser validation of malformed
   data, rule patterns, the rules files, WGSL symbol detection, the reference file set.
-- `python -I tools/zt.py selftest --vectors <z80 dir> --vectors-6502 <6502 dir>` checks the harness itself (part 2
+- `python -I tools/zt.py selftest` runs the synthetic GPU host probes and rule controls with no external data.
+- `python -I tools/zt.py selftest --vectors <z80 dir> --vectors-6502 <6502 dir> --vectors-8086 <8088 root>` checks the harness itself (part 2
   on the compat 0.2 core, whose rules carry the I/O and REP predicates; parts 3 to 5 on the default core unless a
   mutant names another):
   1. **host-probe.** A probe core drives every host path with 15 planted cases (listed, unlisted and final-only
@@ -420,6 +452,8 @@ A future CI gate should fail on any unexpected divergence (exit 1) and on any ru
   4. **memory-model invariance.** `sparse` and `full` give identical ledgers on real vectors (Z80 and 6502).
   5. **determinism.** Two sessions give the same canonical ledger, and repeated dispatches give identical bytes.
   6. **decimal mode** (with `--vectors-6502`): the Clark check above, and its control.
+  7. **Intel mutants** (with `--vectors-8086`): eight planted faults in REP completion/count, parity, MUL flags,
+     segmented addresses, push order, IRET reserved flags and zero-count shift writeback.
 
 ## Determinism
 
@@ -470,7 +504,7 @@ jobs:
         uses: actions/cache@v4
         with: { path: vectors, key: sst-z80-<pinned commit> }
       - name: Fetch vectors on a cache miss (pinned commit, git blob hashes verified)
-        run: test -f vectors/z80/MANIFEST.json || python3 -I tools/fetch-vectors.py SingleStepTests/z80 <pinned commit> v1/ vectors/z80
+        run: test -f vectors/z80/MANIFEST.json || python3 -I tools/fetch-vectors.py SingleStepTests/z80 ebe1875d48f374bcfd4b505d8eb8ee751568b5f7 v1/ vectors/z80
       - run: npm run test:conformance
       - run: npm run test:harness
       - run: python3 -I tools/zt.py vectors z80 "$ZILION_Z80_VECTORS" test/vectors/z80/analytic --limit-per-file 100
@@ -547,7 +581,33 @@ plain Python, about 0.2 to 0.3 µs per step on an idle M4 core, so it takes hour
 
 `python -I tools/fetch_8088.py` inventories the pinned compressed set; add `--download` to fetch and
 Git-blob-verify its data. `npm run test:vectors:8086` runs v2 and v2_undefined with the 20-bit sparse host.
-Use `ZILION_GPU_DUTY=0.5` on the working Mac for equal pauses after each dispatch. The ledger compares
-unmasked flags, registers, final memory, ordered writes, ports and completed REP state. It explicitly
-excludes cycle timing and queue state: the core is still a skeleton, not ready for the registered study.
-The optional `selftest --vectors-8086 <root>` adds Intel mutants. See [I8086.md](I8086.md).
+The experimental core declares coherent fetch with no prefetch queue, plus a deterministic zero-EA policy for
+undefined register far transfers. The ledger compares unmasked flags, registers, final memory, ordered writes,
+ports and completed REP state. It excludes cycle timing and queue state. The optional
+`selftest --vectors-8086 <root>` adds eight Intel mutants. See [I8086](I8086.md).
+
+```sh
+python -I tools/zt.py vectors 8086 ../zilion-vectors/8088/v2 ../zilion-vectors/8088/v2_undefined \
+  --mem-cap 768 --lanes 1024 --workers 1 \
+  --json build/test/8086-architectural.json --run-json build/test/8086-architectural.run.json \
+  --md build/test/8086-architectural.md --analysis test/baselines/8086-architectural.analysis.md
+```
+
+All 336 files and 3,137,000 tests run: 3,126,917 match raw; 10,083 differ only within the restricted hidden-latch
+rule; zero unexpected divergences. The documented group (2,657,000) and aliases (350,000) match raw in full;
+119,917 of 130,000 undefined-form tests match raw. The rule covers CS/IP and unlisted reads for FE/FF register
+far CALL/JMP only, never flags, memory values or writes. See the [report](../test/baselines/8086-architectural.md).
+
+## Canonical ledger hashes
+
+These hashes refer to the public ledgers with relative vector directories. Compare a reproduced JSON file
+with its committed companion using `cmp`, or run `shasum -a 256` on the file. Each result must match the
+hash listed here.
+
+| Configuration | Canonical JSON SHA-256 |
+|---|---|
+| Z80 compat 0.2 | `ba15462725903d54d28d6f07677e2a972d605d4ea9bc7bedd277d96f7546e877` |
+| Z80 compat 0.3 classic | `e2c76b5c9371987add06b2d5ef5b9d7ce9aab436369275f94ab490386e0c9f1f` |
+| Z80 compat 0.3 zilog-nmos | `e1317ee63fcece21fb9485b65471f2ea80e9ca8e874b3c598ac0fbe4bb84a096` |
+| NMOS 6502 | `5ca3f2b4b3726d5bad30f686c840d623f7c9d88db2a5ede759ace5b59d576f84` |
+| 8086 coherent fetch | `044768811de71540f4f4049df78a0d3e2d0b421fb5c4e0582d5ffb89cc0ae188` |

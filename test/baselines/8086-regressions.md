@@ -5,7 +5,7 @@ All four full canonical ledgers reproduce exactly after adding the Intel adapter
 | ISA configuration | SHA-256 |
 |---|---|
 | z80 | `e2c76b5c9371987add06b2d5ef5b9d7ce9aab436369275f94ab490386e0c9f1f` |
-| nmos | `06c049e76ffd0f7d0b4ea27816a8b3720d581cb2ef1741c062e00b54edd1c3d4` |
+| nmos | `e1317ee63fcece21fb9485b65471f2ea80e9ca8e874b3c598ac0fbe4bb84a096` |
 | 02 | `ba15462725903d54d28d6f07677e2a972d605d4ea9bc7bedd277d96f7546e877` |
 | 6502 | `5ca3f2b4b3726d5bad30f686c840d623f7c9d88db2a5ede759ace5b59d576f84` |
 

@@ -4,7 +4,7 @@
 	"publishConfig": {
 		"access": "public"
 	},
-	"description": "A zillion Z80s in parallel on your GPU \u2014 a WebGPU-accelerated, differentially-tested Z80 CPU emulator for batch execution, artificial life, and genetic programming.",
+	"description": "A multi-ISA WebGPU batch emulator for Z80, NMOS 6502 and coherent-fetch 8086, with a shared world contract for parallel execution, artificial life and genetic programming.",
 	"type": "module",
 	"main": "./dist/index.js",
 	"module": "./dist/index.js",
@@ -31,7 +31,9 @@
 		"dist",
 		"!dist/cores/bff",
 		"README.md",
-		"LICENSE"
+		"LICENSE",
+		"CITATION.cff",
+		"THIRD_PARTY.md"
 	],
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
@@ -53,11 +55,17 @@
 		"test:vectors:nmos": "${ZILION_PYTHON:-python3} -I tools/zt.py vectors z80 ${ZILION_Z80_VECTORS:-../zilion-vectors/z80} test/vectors/z80/analytic test/vectors/z80/analytic/probes --variant zilog-nmos",
 		"test:vectors:0.2": "${ZILION_PYTHON:-python3} -I tools/zt.py vectors z80 ${ZILION_Z80_VECTORS:-../zilion-vectors/z80} test/vectors/z80/analytic --compat 0.2",
 		"test:vectors:6502": "${ZILION_PYTHON:-python3} -I tools/zt.py vectors 6502 ${ZILION_6502_VECTORS:-../zilion-vectors/6502}",
-		"test:vectors:8086": "${ZILION_PYTHON:-python3} -I tools/zt.py vectors 8086 ${ZILION_8086_VECTORS:-../zilion-vectors/8088}/v2 ${ZILION_8086_VECTORS:-../zilion-vectors/8088}/v2_undefined --mem-cap 768 --lanes 1024 --workers 1"
+		"test:vectors:8086": "${ZILION_PYTHON:-python3} -I tools/zt.py vectors 8086 ${ZILION_8086_VECTORS:-../zilion-vectors/8088}/v2 ${ZILION_8086_VECTORS:-../zilion-vectors/8088}/v2_undefined --mem-cap 768 --lanes 1024 --workers 1",
+		"test:harness:offline": "${ZILION_PYTHON:-python3} -I -m unittest discover -s test/harness && ${ZILION_PYTHON:-python3} -I tools/zt.py selftest"
 	},
 	"keywords": [
 		"z80",
-		"zilog",
+		"6502",
+		"nmos-6502",
+		"8086",
+		"8088",
+		"bff",
+		"multi-isa",
 		"cpu",
 		"emulator",
 		"webgpu",
@@ -65,14 +73,13 @@
 		"gpgpu",
 		"wgsl",
 		"parallel",
+		"batch",
 		"artificial-life",
 		"alife",
 		"genetic-programming",
-		"assembly",
-		"8-bit",
-		"retro"
+		"assembly"
 	],
-	"author": "NeoVand",
+	"author": "Mostafa 'Neo' Mohsenvand",
 	"license": "MIT",
 	"repository": {
 		"type": "git",

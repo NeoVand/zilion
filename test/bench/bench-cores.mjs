@@ -45,8 +45,9 @@ for (const b of budgets) {
     spec: { isa: m6502, world: world(b, { init: { set: { a: 0, x: 0, y: 0, p: 0x20 } }, halting: { traps: { illegal: "ignore" } } }) } });
 }
 
-for (const b of budgets) configs.push({ name: `8086 b${b} none`, isa: "8086", budget: b,
-  note: "architectural fetch; skeleton, queued mode pending", spec: { core: { isa: Z.i8086, params: { prefetch: "none" } }, world: world(b) } });
+for (const b of budgets) configs.push({ name: `8086 b${b} coherent`, isa: "8086", budget: b,
+  note: "coherent fetch; no prefetch queue; deterministic zero-EA hidden-latch policy",
+  spec: { core: { isa: Z.i8086, params: { prefetch: "coherent", hidden_latch: "zero_ea" } }, world: world(b) } });
 const selectedIsas = opt("--isas", "z80,6502,8086").split(",");
 const selectedConfigs = configs.filter(c => selectedIsas.includes(c.isa));
 const dir = mkdtempSync(join(tmpdir(), "zilion-bench-"));

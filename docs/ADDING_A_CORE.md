@@ -2,7 +2,7 @@
 
 A core is WGSL text plus an `IsaCore` descriptor (`src/contract/isa.ts`). The world (`buildMachine`) and the
 engine use nothing else, so a core that satisfies this checklist runs in every world: rings of any size,
-padded pairs, budgets, dials, ablation, fetch and start maps, the Python host. Read `docs/ARCHITECTURE.md`
+padded pairs, budgets, dials, ablation, fetch and start maps, the Python host. Read [Architecture](ARCHITECTURE.md)
 first. BFF (`src/cores/bff/`) is a short, complete example of the shape (ring-native, with core parameters,
 including a table); the 6502 (`src/cores/m6502/`) is a full core validated per instruction. The sections below list
 what each took.
@@ -123,7 +123,7 @@ Still open for the 6502:
   the right length), BRK clears D, the `JMP ($xxFF)` fix, the new opcodes. SingleStepTests has the vectors.
 - **Core parameters** (decision 4): decimal mode on/off (the 2A03 has none) and the unstable constants are natural
   `params`; today they are fixed in the `nmos` variant.
-- **Cycle budgets** (M4) need a per-opcode cycle table including page-crossing penalties; the vectors' `cycles`
+- **Cycle budgets** need a per-opcode cycle table including page-crossing penalties; the vectors' `cycles`
   lists give it.
 
 ## BFF: what the full core needed
@@ -153,3 +153,19 @@ per-encounter record onto the lane record are in docs/ARCHITECTURE.md, "The BFF 
    (`test/world/bff_equiv.py`, `npm run test:bff`; baseline `test/baselines/bff-equivalence.md`), which compares
    Zilion, bff.py's GPU kernel and its CPU reference pair by pair, runs negative controls (mutated Zilion
    machines must disagree) and bff.py's own kernel tests with every `BFF.execute` mirrored on Zilion.
+
+## Intel: segmented addressing and a declared hardware abstraction
+
+The experimental `i8086` core adds no ISA-specific behavior to the world. Its descriptor declares 20-bit
+physical addresses; the core applies 16-bit offset and 20-bit physical wrapping before the world maps each byte.
+REP's decoded operation, segments and restart boundaries are state fields so resuming a lane remains coherent
+after its code has changed. World probes test both address seams on odd rings, byte write order, aliased IVT
+reads before pushes, type-1 interrupt boundaries and partial REP counts.
+
+Its parameters explicitly name `prefetch: 'coherent'` and `hidden_latch: 'zero_ea'`. A new core must document
+such abstractions and test them, including rejected unsupported selections; passing architectural vectors
+does not validate hidden hardware state or a prefetch queue. See [I8086](I8086.md) and its
+[3,137,000-test ledger](../test/baselines/8086-architectural.md).
+
+Keep externally sourced vector data outside the repository. Commit the pinned fetch recipe, your expected
+rules, locally derived probes and validation ledgers, with [attribution](../THIRD_PARTY.md).

@@ -7,3 +7,27 @@ __pycache__/
 
 # Worktrees may share dependencies through a symlink.
 node_modules
+
+# Downloaded upstream vectors must stay outside the source tree. Our analytic
+# fixtures, expected rules and validation ledgers under test/ remain tracked.
+/zilion-vectors/
+/vectors/
+/data/
+test/vectors/**/v1/
+test/vectors/**/v2/
+test/vectors/**/v2_undefined/
+*.json.gz
+MANIFEST.json
+PIN.json
+*.part
+*.partial
+
+# Local Python environments, caches and credentials.
+.venv/
+venv/
+*.py[cod]
+.pytest_cache/
+.env
+.env.*
+coverage/
+*.tsbuildinfo

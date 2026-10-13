@@ -2,7 +2,7 @@
 
 This is **architectural-fetch validation**, not validation of the 8088 prefetch
 queue. The paper's declared machine is **8086/8088 instruction semantics,
-validated against hardware 8088 vectors, with coherent fetch** (2026-10-12).
+validated against hardware 8088 vectors, with coherent fetch**.
 Status is experimental; `prefetch: 'coherent'` is named and `8088` is rejected.
 The ledger and its core SHA-256 are unchanged by this contract selection.
 
@@ -30,8 +30,8 @@ FFFF, type-1 interrupts and their original-chip nesting after INT/divide,
 segment-load trap postponement, REP's last-prefix interrupt restart erratum,
 ignored-trap IP preservation, excluded hidden-EA register forms, comparison of
 REP completion, and default sparse-host binding size. The final fresh review
-found no further concrete defects and confirmed the prefetch requirement is
-still incomplete. World tests cover the changes that vectors cannot see, including
+found no further concrete defects in the architectural abstraction; hardware
+prefetch-queue behavior remains outside its scope. World tests cover the changes that vectors cannot see, including
 REP DIV remaining unsigned while REP IDIV negates the quotient (vectors exercise
 only the latter), and PUSHF masking impossible reserved bits in raw initialization.
 

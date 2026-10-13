@@ -1,157 +1,38 @@
 # Changelog
 
-## 0.3.0-dev — unreleased (branch `m1/architecture`)
+## 0.3.0-dev — unreleased
 
-Architecture milestone M1 (work items 4, 5, 7 and 8 of the design). **No behaviour change for the 0.2 API**:
-`Z80_CORE_WGSL` and `buildComputeShader` emit the 0.2.0 text byte for byte (`npm run check:bytes`, against the
-v0.2.0 tag and the published package), and the Z80's semantics are unchanged in every configuration (no MEMPTR;
-a wasted DD/FD prefix still adds 2 to R). Not published.
+### M1: shared contract, world and batch engine
 
-**Added**
+- Introduce `IsaCore`, host contract v2 and a shared world specification: mask/ring/segmented memory, explicit stack and budget, fixed/random/per-lane initialization, halting and trap policies, dials, ablation and optional write/fetch/start measurements.
+- Add `buildMachine`, `createEngine`, device-limit chunking, resident batches, typed results and WGSL compiler diagnostics. Library mode and the machine exporter support hosts that own their buffers.
+- Add `zilion.manifest/2` with buffer/record layouts, trap causes, core parameters (including tables), SHA-256 provenance and resumable records with a 64-bit step base.
+- Require explicit Z80 compat selection through 0.3.x. Freeze compat 0.2, the legacy API and shader text byte for byte. Check 600,000 recorded programs across six worlds.
+- In compat 0.3, correct wasted-prefix R increments, full WZ/MEMPTR, IM, block-repeat flags, ports and frozen host halts. Add the `zilog-nmos` Q-latch variant.
+- Validate Z80 classic and zilog-nmos on 1,604,470 instruction tests each with zero unexpected divergences. The frozen 0.2 baseline covers 1,604,384 tests with its 14 explicit historical rules.
 
-- `IsaCore`: the plug-in contract for instruction-set cores (state record, symbols, hooks, decode pages,
-  conventions, variants, `compat`). The Z80 is one core behind it (`z80`, also at `@neovand/zilion/z80`).
-- Host contract v2 (opt-in, `z80CoreText(hooks)`): `on_fetch`, `on_instruction_start` (continue, halt, skip),
-  `zil_trap` (the HALT instruction can be re-policied), `io_in`/`io_out` (with the `OUT (C),r` cases), and
-  `on_reset` from the world. Every anchor Algocell patches stays byte-stable in all hook combinations.
-- `buildMachine({ isa, world })` → WGSL + JSON manifest. The world spec: mask, ring (any P, odd included) and
-  segments-on-a-padded-ring memory; the 16-bit seam semantics and helpers (`ringPos`, `highestAlias`,
-  `seamOffset`); init conventions (world reset from the descriptor, stack top, entry, constants, counter-based
-  random fields, per-lane state); budgets in steps or fetched bytes, uniform or per lane; native halt, lethal
-  first unit, dials from a stateless hash, per-cause trap policies; ablation by expression or uniform bitset;
-  outputs (steps, halt reason, state record, writes per segment and padding, fetch map, instruction-start map);
-  kernel and library modes; raw hooks as an escape hatch.
-- The engine: `createEngine`, `Machine.run` (any batch size), resident `Batch`es, typed `MachineResult`s,
-  `ZilionShaderError` with the offending source lines, `legacyMachine` (a manifest for the 0.2 kernel).
-- Skeleton 6502 (NMOS) and BFF cores that validate the contract (not exported; not for results). BFF is now a full
-  core (see "The BFF core" below).
-- Provenance: `ZILION_VERSION`, `HOST_CONTRACT`, SHA-256 of the WGSL, core text, world and options in every
-  manifest and shader header.
-- Docs: `docs/ARCHITECTURE.md`, `docs/ADDING_A_CORE.md`; the README options table now lists `fetchHook`.
+### M2: full NMOS 6502 and BFF cores
 
-**Contract decisions of 2026-10-10 (branch `m1/contract`; docs/ARCHITECTURE.md, the decisions)**
+- Implement all 256 NMOS 6502 opcodes, including decimal mode, undocumented forms, explicit unstable-opcode constants, page/zero-page wrapping, ordered stack accesses and read-modify-write bus writes. Export `m6502` from the root and `/m6502` subpath as experimental.
+- Validate 2,560,000 SingleStepTests 6502 cases with zero divergences and zero expected rules. Independently check Clark's NMOS arithmetic algorithm against 310,000 cases and the core against all 1,310,720 inputs across five opcode forms in binary/decimal modes.
+- Complete the ring-native BFF core, including brackets, alphabet tables, literal pushes and unmatched/bounds policies. It is available in source and the exporter, and remains excluded from npm exports and package files.
+- Record 1,048,576 pairs in each of 20 BFF configurations: all 20,971,520 GPU comparisons and 16,056,320 sampled CPU comparisons match Algocell's `bff.py`; all six negative controls are caught and 4,718,592 dial draws match.
 
-- *Breaking (0.3-dev API):* a world must state its budget (`budget: { unit, value }`, both fields) and, on an ISA
-  with a stack, `init.stack` (or load the state per lane); the build fails and names the missing field. Presets
-  `compat02World` (0.2's `Zilion.run` world) and `algocellPairWorld` state both. `scripts/export-machines.mjs` also
-  requires the ISA to be named.
-- `init.stack: { firstPushAt: t | 'lastByte' }`: the first byte pushed lands at t on every ISA (descriptor
-  `conventions.firstPushAt`). `topAliases` keeps its per-ISA meaning; giving both is an error.
-- Follow-up: `init.set` or `init.random` covering every stack field (Z80 `sp`, 6502 `s`) counts as giving the stack;
-  a stackless ISA (BFF) accepts `init.stack`, validates it and does not apply it, so one world spec serves every
-  ISA; `manifest.init.stack` records how the stack was set (convention, set, random) or why it was not
-  (`notApplicable: 'no stack' | 'per-lane state'`). The defaults that remain are listed in docs/ARCHITECTURE.md.
-- The lane record carries `trapCause` (word 2; 0 when the lane did not halt on a trap), from the descriptor's
-  `symbols.trapCause`; codes in `manifest.trapCauses`. The skeletons gain a `trap` state field.
-- Core parameters: a descriptor may declare `params` (u32, bool, enum; `table` came with the BFF core); a machine selects them with
-  `core: { isa, params }`; the builder validates them, emits `ZIL_PARAM_*` constants ahead of the core text and
-  records them in `manifest.core.params`.
-- Resumable runs: a 64-bit `stepBase` in the params reaches every dial draw (`zil_draw`, CPU mirror `zilDraw`), and
-  a `resume` flag continues lanes from their record and memory (state, steps, write counts, maps, padding).
-  Engine: `run(memory, { resume, stepBase })`, `Batch.encode({ resume, stepBase })`, `Batch.uploadRecords`;
-  `MachineResult.trapCause`/`trapCauseOf`. Library: `zil_begin_at`, `zil_resume`, `zil_set_step_base`.
-- Manifest schema `zilion.manifest/2`: the record's `trapCause` (later fields move by one word) and `padding`;
-  params `stepBase` and `resume` (the ablation table moved from byte 16 to 32); `trapCauses`, `resumable`,
-  `core.params`.
-- Unchanged: the 0.2 kernel and the Z80 core text, byte for byte (`npm run check:bytes`), and the anchors.
+### M3: coherent-fetch 8086/8088 instruction semantics
 
-**Z80 fixes (work item 3; branch `m1/z80-fixes`; docs/ARCHITECTURE.md, "The Z80 core")**
+- Add experimental `i8086` exports, segmented 20-bit addressing, ordered byte writes, REP continuation state, software/divide/type-1 interrupts, original-chip quirks and hardware-validated aliases.
+- Declare `prefetch: 'coherent'`: consumed instruction bytes read current memory, with no prefetch queue or cycle timing. Reject queued `8088` mode. Declare `hidden_latch: 'zero_ea'` for deterministic undefined register far transfers; register LEA/LES/LDS trap.
+- Validate 3,137,000 hardware vectors in 336 files: 2,657,000 documented and 350,000 alias cases match raw; 130,000 undefined-form cases include 10,083 differences explained by one restricted hidden-latch rule. Zero unexpected divergences; every FLAGS bit and ordered write is compared.
+- Add world probes for seams, IVT/stack aliasing, coherent self-modification, REP resume, interrupt boundaries and the seeded bootstrap regression panel. Pin cyclic bootstrap matches of 13/16 at P=32 and 6/16 at P=64 without discarding failures.
+- Record Apple M4 throughput on 262,144 random 32-byte pairs, budget 128: 1,091.4 million executed steps/s for Z80, 860.4 for native-JAM 6502, 1,599.7 with JAM ignored, and 333.7 for coherent-fetch Intel. These are warm dispatch measurements, excluding bulk transfers.
 
-- *Behaviour changes (the Z80 of `buildMachine`; `compat: '0.2'` restores 0.2.0 exactly):* the current Z80 is
-  `compat: '0.3'` (`coreVersion` 0.3.0), which a machine names explicitly (see below). A wasted DD/FD prefix adds 1 to R (0.2: 2). MEMPTR (WZ) is modelled in
-  full and `BIT n,(HL)` takes F3/F5 from it. IM is modelled. A repeating block instruction takes X/Y from its own
-  address (INxR/OTxR also adjust H and P/V) and sets WZ = PC + 1. `OUT (C),r` and `OUT (C),0` exist without the io
-  hooks. A lane halted by the host is frozen (0.2 kept adding 1 to R per further step). The state record gains
-  `wz` and `im` (appended; compat `'0.2'` keeps its 25 fields).
-- *Unchanged:* the 0.2 API (`Zilion`, `buildComputeShader`, `Z80_CORE_WGSL`) and the compat `'0.2'` text in every
-  hook combination, byte for byte (`npm run check:bytes`, now with the SHA-256 of all 16 hooked 0.2 texts); the
-  anchors, in all three semantics.
-- *Added:* variant `zilog-nmos` (the Q latch: SCF/CCF X/Y = ((Q ⊕ F) | A); state field `q`); `z80_reset()` and
-  `z80_run(budget)` in the core text; halt-reason constants (`Z80_HALT_INSN` …, equal to the contract's);
-  `z80CoreText(hooks, { compat, variant })` and the `Z80Semantics` type; the optional descriptor method
-  `stateFor({ variant, compat })` (the state record per selection), used by the builder.
-- *Fixed:* the 0.2 kernel's manifest (`legacyMachine`) hashes the core it embeds (`Z80_CORE_WGSL`) and reports
-  `coreVersion` 0.2.0.
-- *Breaking (0.3-dev API), follow-up decisions:* a Z80 machine must name its compat (`'0.3'` or `'0.2'`) in its core
-  selection; there is no default through 0.3.x (descriptor `compatRequired`). Worlds carry no core semantics: the
-  world presets stay worlds, and the machine presets `compat02Machine` and `algocellPairMachine` return
-  `{ core: { isa: z80, compat: '0.2' }, world }`. Manifests report the semantics that ran: `core.coreVersion` is 0.2.0
-  under compat `'0.2'` (descriptor `coreVersionFor`).
-- `scripts/export-machines.mjs` takes an array of `{ name, core: { isa, compat?, variant?, params? }, world, … }`
-  (the earlier object-by-name form and the `isa` shorthand still work), finds every core of the build by id
-  (z80, m6502, bff; `--list-cores`), and names the machine in every error (a Z80 without `core.compat` among them).
-  Tested end to end by `npm run test:export`. A host halt in
-  `zilog-nmos` leaves Q as it was (the halting step executes no instruction); a skipped unit clears it.
-- *Validation:* SingleStepTests/z80 (1,604,000 tests) plus 384 wasted-prefix vectors and 86 R/WZ probes: 0
-  unexpected with only the rules Q, Q-XY (not modelled by `classic`) and EI-P (no interrupts); `zilog-nmos`: 0 unexpected with EI-P only; `--compat 0.2` reproduces the
-  0.2.0 ledger byte for byte. 86 hand-derived R and WZ probes (`tools/z80-probe-vectors.py`). Baselines
-  `test/baselines/z80-v0.3.0-dev.*` and `z80-v0.3.0-dev-zilog-nmos.*`.
-- *Tests and harness:* `tools/zt.py vectors|conformance --compat --variant` (recorded in the run record); conformance
-  on all three semantics; self-test mutants for each fix (the 0.2 behaviour of each must be caught) and for the Q
-  latch; `npm run test:compat` (design §5.5: 600,000 random programs against outputs recorded from 0.2.0);
-  `test/world/cases_z80.mjs`.
+### Publication preparation and compatibility fixes
 
-**The NMOS 6502 core (branch `m2/6502`; docs/ARCHITECTURE.md, The 6502 core)**
-
-- `src/cores/m6502/`: all 256 opcodes (151 documented, 85 stable undocumented, 8 unstable, 12 JAM), core 0.3.0,
-  status `experimental`, variant `nmos`, compat `'0.3'`. NMOS decimal mode, JMP ($xxFF), zero-page and pointer
-  wraps in page 0, B on PHP/BRK, BRK's vector at 0xFFFE read after its pushes, JSR's high operand byte fetched after
-  its pushes, read-modify-write instructions writing the old value then the new one (two writes in `writeCounts`),
-  the unstable opcodes with the vectors' constants (ANE and LXA magic 0xEE; SHA/SHX/SHY/TAS `& (H + 1)`), JAM through
-  trap `illegal`. World reset P = 0x20 (was 0x24 in the skeleton). `m6502.table()`: mnemonic, length and family.
-- Validated against SingleStepTests/65x02 `6502/v1`: 2,560,000 tests, zero divergences, zero expected-divergence
-  rules (`test/baselines/6502-v0.3.0-dev.md`). 18 planted 6502 bugs in the harness self-test, all caught.
-- Harness: the 6502 adapter (`tools/zt.py vectors 6502`), an optional bus-write log compared against the vectors'
-  `cycles` (the `bus` field), `npm run test:vectors:6502`, `ZILION_6502_VECTORS`. With the bus-write log off the Z80
-  test-host WGSL is unchanged byte for byte, and so are the three Z80 ledgers (0.3, zilog-nmos, compat 0.2); a
-  regenerated Z80 Markdown report gains one line listing the convention mappings applied (HALT-PC).
-- Decimal mode exhaustively: Bruce Clark's published NMOS algorithm (6502.org, "Decimal Mode", Appendix A),
-  transcribed step by step, agrees with all 310,000 ADC/SBC/RRA/ISC vector tests, and the core agrees with it on all
-  1,310,720 inputs of ADC #, SBC # (E9, EB), RRA zp and ISC zp in both modes (`tools/zt.py decimal6502`, a gate of
-  `npm run test:harness`; `test/baselines/6502-decimal-clark.md`).
-- Exported: `m6502`, `m6502CoreText`, `m6502FirstPushAt`, `M6502_*` from the root and `@neovand/zilion/m6502`; the
-  package ships `dist/cores/m6502` (status experimental).
-- `test/world/cases_m6502.mjs`: the 6502 on rings of 32, 33 and 64 bytes, with a self-copier under the soup's init.
-- `test/bench/bench-cores.mjs`: Z80 and 6502 throughput on random 32-byte pairs.
-
-**The BFF core (milestone M2; branch `m2/bff`; docs/ARCHITECTURE.md, "The BFF core")**
-
-- *Added:* the full BFF core (`status: 'stable'`, `coreVersion` 1.0.0; still not exported from the package): bracket
-  matching by op id (scans inside [0, P), never fetched, one step), the literal push (op 11), trap `bounds` (ignore
-  = bff.py's `ip_wrap`) and trap `unmatched` (ignore = `nohalt`, a dial = `halt_p`). Params `alphabet` (a 256-entry
-  table, default `BFF_ASCII`; `BFF_ASCII_LITERAL`, `bffAsciiMap`), `literal`, `lit_rep`, with cross-parameter rules
-  that refuse silent no-ops. Replaces the skeleton (its `unimplemented` trap is gone; variant `cubff`, compat
-  `'bff.py'`).
-- *Added (contract):* the `table` core-parameter type (`{ type: 'table', length, max, default }`), emitted as a
-  `const array<u32, N>`, recorded whole in `manifest.core.params` and the options hash; the input type
-  `CoreParamInput` (tables as arrays or typed arrays). Core parameters are now u32, bool, enum and table.
-- *Validation:* bit-identical to Algocell's `experiments/micro/bff.py`, its GPU kernel and its CPU reference, on
-  1,048,576 pairs in each of the paper's configurations and more (`test/world/bff_equiv.py`, `npm run test:bff`;
-  baseline `test/baselines/bff-equivalence.md`), with non-vacuity gates, negative controls, bff.py's own kernel tests
-  mirrored and the dial hash read back from the GPU; world tests for brackets, policies, the dial, the literal push,
-  tables, ablation, the 64 + 64 pair, padding and resumed runs (k = 1, 2, 7).
-
-**Fixed (0.2 API, same results)**
-
-- `Zilion.run` no longer fails above 4,194,240 programs (the dispatch limit) or 128 MiB of lane memory: batches
-  are chunked against the device limits.
-- `Zilion.run` reads each chunk back with a single map (0.2 mapped twice). Its lifecycle is unchanged: each run
-  owns its buffers and releases them before it resolves, runs may overlap, and `destroy()` does not affect a run
-  already called.
-- `Zilion.create` rejects with the compiler's message (and the offending line) when `fetchHook` does not compile,
-  instead of failing later.
-
-**Tests**
-
-- `npm run test:world` (GPU via wgpu-py): world semantics with hand-computed expectations, metamorphic and
-  invariance checks, the skeleton cores. `npm run test:algocell`: 33 conditions against Algocell's exported 0.2.0
-  executors. `npm run test:unit`. `npm run test:engine` (mock device: read snapshots, lifecycle, limits).
-  `test/engine.html` (browser WebGPU).
-
-**Internal**
-
-- Sources moved: `src/cores/z80/` (core and descriptor), `src/contract/`, `src/world/`, `src/engine/`,
-  `src/legacy/` (`Zilion`, `buildComputeShader`). Root exports are unchanged plus the new API.
+- Update the public README, architecture/testing/core guides, multi-ISA package metadata and lockfile identity. Add software citation metadata and attribution for separately fetched datasets and references; the paper is in preparation.
+- Remove local path prefixes from unpublished history and use relative vector paths in public ledgers. Only metadata hashes change; core hashes, comparisons and GPU digests are preserved. Update recorded ledger hashes and reproduce them with the documented commands.
+- Add a download-free harness script, ignore downloaded data/local environments and update the throughput runner to the named coherent-fetch selection.
+- Preserve legacy outcomes while chunking large `Zilion.run` batches, serializing instance runs, reducing readback maps and reporting shader errors during creation.
+- This development branch does not create a version tag or publish an npm release.
 
 ## 0.2.0 — 2026-10-07
 

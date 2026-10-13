@@ -5,7 +5,7 @@ median of five warm dispatches. The timing includes restoring pristine memory,
 excludes bulk uploads/readbacks (a 16-byte queue fence is included), and counts
 steps actually executed (an Intel REP iteration is one step). Every
 short GPU configuration was followed by an equal pause. Apple M4, Metal.
-Measured source: `e6aefbf`; architectural vector-core SHA-256
+Measured source: `0586025`; architectural vector-core SHA-256
 `979f0ae19c6ea6d69d5cf7949ce27dcbfbeb5f7824d4fe64b6643c7048597b12`.
 
 | Core | ms/dispatch | million executed steps/s | mean steps | halted share |

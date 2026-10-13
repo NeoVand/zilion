@@ -13,7 +13,7 @@ Usage: python -I tools/fetch-vectors.py <owner/repo> <commit> <path-prefix> <des
   blob SHA-1 and the SHA-256 of the written .gz. Files already present with a matching manifest entry are skipped.
 
 The destination is untrusted data: keep it outside the repository and run tools on it with python -I.
-Downloading needs network access and the maintainer's approval; the harness itself never downloads.
+Downloading needs network access; the harness itself never downloads.
 """
 
 from __future__ import annotations

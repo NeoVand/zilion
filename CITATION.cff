@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "Please cite this software if you use Zilion. The accompanying paper is in preparation; no paper DOI or publication is available yet."
+type: software
+title: "Zilion: a multi-ISA WebGPU batch emulator"
+authors:
+  - family-names: Mohsenvand
+    given-names: "Mostafa 'Neo'"
+    affiliation: MIT Media Lab
+version: 0.3.0-dev
+license: MIT
+repository-code: "https://github.com/NeoVand/zilion"
+url: "https://github.com/NeoVand/zilion"
+keywords:
+  - WebGPU
+  - emulation
+  - artificial life
+  - Z80
+  - NMOS 6502
+  - 8086
+  - BFF

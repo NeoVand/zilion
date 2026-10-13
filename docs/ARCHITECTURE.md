@@ -4,23 +4,24 @@ Zilion computes, for very many (machine, world) pairs at once, what a world does
 addresses the machine visited. A **machine** is a byte-code interpreter with a program counter and some
 registers (an ISA core). A **world** places programs in a ring of memory, sets the initial state, runs a
 budget of steps, and keeps a record. The point of the architecture is that **the world is the same code for
-every machine**: comparisons across ISAs (Z80, 6502, BFF, …) are only clean if the world does not change
+every machine**: comparisons across ISAs (Z80, 6502, coherent-fetch 8086, BFF) are only clean if the world does not change
 when the machine does.
 
-This document describes what is implemented on the `m1/architecture` branch, with the contract decisions of
-2026-10-10 implemented on `m1/contract` (see the end) and the full BFF core on `m2/bff`. The design it follows is
-Algocell's `experiments/planning/ZILION_DESIGN_2026-10-10.md`; the differences are listed at the end.
+This document describes the implemented 0.3.0-dev contract, shared world and engine, including the full NMOS
+6502 and BFF cores and the experimental coherent-fetch Intel core. The implementation decisions and remaining
+work are recorded at the end. See [Testing](TESTING.md), [Adding a core](ADDING_A_CORE.md) and the
+[Intel machine definition](I8086.md) for validation and extension details.
 
 ## Layers
 
 ```
  L4  research code (Algocell)       definitions, thresholds, analyses               not in Zilion
- L3  @neovand/zilion-soup           pairing, mutation, soups, genealogy             later (M3)
+ L3  @neovand/zilion-soup           pairing, mutation, soups, genealogy             future work
  ──────────────────────────────────────────────────────────────────────────────────────────────────
  L2  engine      src/engine/        createEngine · Machine · Batch · chunking · typed results
  L1  world       src/world/         buildMachine · memory models · init · budgets · halting · outputs
      manifest    src/manifest.ts    the JSON contract for hosts in any language
- L0  cores       src/cores/<isa>/   z80, bff (stable) · m6502 (experimental)
+ L0  cores       src/cores/<isa>/   z80, bff (stable) · m6502, i8086 (experimental)
      contract    src/contract/      IsaCore descriptor · host contract v2 · ring address math
  ──────────────────────────────────────────────────────────────────────────────────────────────────
      0.2 API     src/legacy/        Zilion · buildComputeShader (byte-identical 0.2 kernel)
@@ -30,11 +31,9 @@ Algocell's `experiments/planning/ZILION_DESIGN_2026-10-10.md`; the differences a
 hooks of the host contract; the world (L1) talks to a core only through its descriptor. `test/unit.mjs`
 checks that no file in `src/world/` names a register, opcode or core function of any ISA.
 
-**Packaging.** One package for now (`@neovand/zilion`, with the subpath `@neovand/zilion/z80`). The design
-proposes a monorepo with a second package for the soup layer; that package does not exist yet (M3), and
-moving every path now would churn the build and publish setup and collide with parallel work in other
-branches. The directories above map one to one onto the future `packages/zilion/src/`, so the split is a move,
-not a rewrite.
+**Packaging.** One package (`@neovand/zilion`) exports Z80, NMOS 6502 and Intel through the root and the
+`/z80`, `/m6502` and `/i8086` subpaths. BFF is built in this checkout and selectable by the exporter but is
+currently excluded from npm exports and package files. A separate soup package is future work.
 
 ## L0: the IsaCore contract
 
@@ -675,8 +674,8 @@ manifest (the world as given, `core`, `init`, `budget`, `record`, the options ha
    each core's decode-hook name and parameters (`on_decode(page, key)` for the 6502 and BFF). Port hooks are
    `io_in`/`io_out`. Library functions are `zil_begin`, `zil_run`, `zil_load_memory`, `zil_store_memory`,
    `zil_store_record`, `zil_load_state`.
-5. **Trap causes** gained `halt-insn` (so a world can make HALT a no-op), `bounds` (BFF) and `unimplemented`
-   (skeletons); the design's `illegal` policy is the `illegal` trap cause.
+5. **Trap causes** are declared by each core: Z80 `halt-insn`, NMOS 6502 `illegal`, BFF `bounds`/`unmatched`,
+   and Intel `halt-insn`/`bounds`/`div-zero`/`syscall`/`unimplemented`.
 6. **Not yet implemented:** `storage` and `sparse` memory models and packed memory; `lethal.decode`; `storage`
    ablation tables; `cycles` budgets; many worlds per dispatch and a params ring for several encodes per submit;
    the CPU twin; `disassemble()` and vector adapters on the descriptor (the adapters live in the test harness,
@@ -691,10 +690,10 @@ manifest (the world as given, `core`, `init`, `budget`, `record`, the options ha
 
 `src/cores/i8086/` (CLI ISA `8086`) is **8086/8088 instruction semantics, validated against hardware 8088 vectors, with coherent fetch**.
 Status `experimental`, core version `0.3.0`, compat `0.3`, variant `nmos`, as for the validated 6502.
-The 2026-10-12 user decision pins `prefetch: 'coherent'` (default); each opcode, prefix and operand byte
+The declared paper abstraction pins `prefetch: 'coherent'` (default); each opcode, prefix and operand byte
 reads current memory without a queue. `8088` queue selection is rejected. `hidden_latch: 'zero_ea'`
 pins deterministic undefined register far transfers; register LEA/LES/LDS trap. The paper/census pins
 firstPushAt:lastByte (SP=1 on P=32/64, first low/high write P−1,0), segments zero and FLAGS=F002 (DF=TF=0).
 REP costs one execution step per iteration and retains its decoded operation across iterations/resumes.
 These are deliberate abstractions, not bus-timing or missing-hardware-latch validation. See [I8086.md](I8086.md) for addressing, initialization, the hardware
-ledger scope, the queue decision and the remaining work before a registered experiment.
+ledger scope, queue evidence, deterministic undefined forms and remaining hardware limitations.
