@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 — 2026-10-13
+
+- Rewrite the README for researchers in the origins of life, evolution, astrobiology and artificial life: what Zilion is for, what it can do and a seven-step tutorial whose snippets were run in Chrome on this release. Add `examples/soup.html`, a complete primordial soup in about 250 lines, and an Algocell soup animation.
+
+- Make generated i8086 WGSL valid under the strict WGSL expression grammar used by browser/Tint compilers: parenthesize one `&&` range inside an `||` chain and one `&` mask inside an `|` expression. Naga's actual parse is preserved; no core or world semantics change. Machines exported by 0.3.0 for naga hosts behave identically.
+- Add the stdlib-only `scripts/check-wgsl-strict.mjs` to `npm test`. It parses 815 generated texts across every supported core/variant/compat, all core hook combinations, kernel/library mode, rings, segments, ablation, lethal/trap dials, initialization and all output combinations. It checks the full WGSL operator-mixing grammar, including bitwise/arithmetic/relational mixing and non-associating shifts/comparisons. Exactly two offending expressions were found, both in i8086; Z80, NMOS 6502, BFF and world text need no edits.
+- Only i8086 core hashes change (all 16 hook configurations). The hook-free `i8086.wgsl({ hooks: {} })` SHA-256 changes from `09aba7d44b68c04d816b442d19dc704cd3d80d13449ea5e08e5748a10071d410` to `45801cfa64cab6b06dfebddde80cdbdce4633f8e0ebc3f00870f5eb051956d2d`; the instruction harness's prelude + I/O-hook core changes from `979f0ae19c6ea6d69d5cf7949ce27dcbfbeb5f7824d4fe64b6643c7048597b12` to `cb6e8360ad2dee38a29544c542b7240d325451f1573222f0dcbce3a59847105e`. Every hook-specific old/new hash is recorded in [the identity results](test/baselines/wgsl-strict-identity.json). Other core hashes, all frozen compat-0.2 hook hashes and legacy shader bytes stay unchanged; the 8086 rules are copied unchanged under the new hash.
+- Prove unchanged semantics against `7f223de`: compile old/new shaders with wgpu-py/naga and compare memory and every record word (state, steps, halt/trap causes and measurements) over 1,572,864 paired lanes, 262,144 for each of six core/variant/compat configurations, in eight worlds each. Exhaustive FLAGS and Boolean probes confirm naga's precedence. `npm test`, conformance, offline harness checks and all 600,000 recorded compat-0.2 programs pass. A stratified 172,032-vector 8086 subset covers all 336 reference files with zero unexpected differences. Completed identity dispatches use pauses and take at most 0.177 s; see [validation and reproduction](test/baselines/wgsl-strict-identity.md).
+
 ## 0.3.0 — 2026-10-12
 
 ### M1: shared contract, world and batch engine

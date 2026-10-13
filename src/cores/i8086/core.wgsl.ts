@@ -295,7 +295,7 @@ fn i8086_execute() {
   if (op == 168u || op == 169u) { var b = i8086_fetch(); if (w != 0u) { b |= i8086_fetch() << 8u; } let unused = i8086_alu(4u, i8086_get(0u, w), b, w); return; }
   // Shared ModRM execution phase.
   if (hasmod) {
-    if (op == 140u || op == 141u || op == 142u || op == 143u || op >= 196u && op <= 199u) { w = 1u; }
+    if (op == 140u || op == 141u || op == 142u || op == 143u || (op >= 196u && op <= 199u)) { w = 1u; }
     if (op >= 216u && op <= 223u) { if (mode != 3u) { let unused = i8086_rw(seg, off); } return; }
     var testImmediate = 0u;
     if ((op == 246u || op == 247u) && reg <= 1u) {
@@ -374,7 +374,7 @@ fn i8086_execute() {
     case 156u: { i8086_push((i8086_flags & 0xfd5u) | 0xf002u); }
     case 157u: { i8086_flags = (i8086_pop() & 0xfd5u) | 0xf002u; }
     case 158u: { i8086_flags = (i8086_flags & ~213u) | ((i8086_r[0] >> 8u) & 213u); }
-    case 159u: { i8086_r[0] = (i8086_r[0] & 255u) | ((i8086_flags & 213u | 2u) << 8u); }
+    case 159u: { i8086_r[0] = (i8086_r[0] & 255u) | (((i8086_flags & 213u) | 2u) << 8u); }
     case 192u, 193u, 194u, 195u, 200u, 201u, 202u, 203u: {
       var extra = 0u; if ((op & 1u) == 0u) { extra = i8086_fetchw(); }
       let destination = i8086_pop(); if (op >= 200u) { i8086_s[1] = i8086_pop(); }
