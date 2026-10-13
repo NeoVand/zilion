@@ -7,10 +7,11 @@
 <p align="center"><b>Watch replication begin.</b><br />
 A laboratory for the origin of evolution, built from real processors and run on your GPU.</p>
 
-<p align="center"><img src="assets/soup.webp" width="420" alt="A soup of 20,000 random Z80 programs in which a self-copying program spreads as a wave and is later replaced" /></p>
-<p align="center"><sub>Twenty thousand random Z80 programs on a grid, each drawn as its bytes at its place (rendered by
-<a href="https://github.com/NeoVand/algocell">Algocell</a>). The first self-copier, the two-byte word <code>01 c5</code>
-repeated, spreads as a blue wave. Later a descendant whose execution returns into its own code (green) takes over.</sub></p>
+<p align="center"><img src="assets/soup.webp" width="100%" alt="Four moments in one soup of 20,000 random Z80 programs: random code with a self-copier spreading as a wave, its takeover, the open phase, and a confined descendant that takes over" /></p>
+<p align="center"><sub>One soup of 20,000 random Z80 programs on a 160 × 125 grid, rendered by
+<a href="https://github.com/NeoVand/algocell">Algocell</a> at four moments. The first self-copier, the word <code>01 c5</code>
+repeated, spreads as a wave; then comes an open phase of damaged copies; finally a descendant whose execution returns
+into its own code takes over.</sub></p>
 
 <p align="center">
   <a href="#see-it-in-a-minute">Try it</a> ·
